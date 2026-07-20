@@ -1,35 +1,101 @@
 # UA Player
 
-**UA Player** — окремий медіаплеєр для користувачів сервісу LampaUa / KinoHub.
+Open-source Android video player for Lampa and LampaUA, based on [Just Player](https://github.com/moneytoo/Player).
 
-Плеєр встановлюється як самостійний Android-застосунок і може використовуватися разом із LampaUa App. Він не замінює вбудований плеєр Lampa та не є обов'язковим для роботи сервісу.
+- Android application ID: `com.lampaua.player`
+- Current version: `1.5.9` (`versionCode 17`)
+- Android 6.0+ and Android TV
+- Media3/ExoPlayer playback engine
 
-## Завантажити
+## Features
 
-Актуальний APK доступний у розділі Releases:
+- HLS, DASH, RTMP, RTSP and regular HTTP media streams;
+- video quality, audio track and subtitle selection;
+- episode playlists with titles, thumbnails and remote-control navigation;
+- automatic playback of the next episode;
+- skip markers on the timeline and the **Пропустити** action;
+- Ukrainian interface and a dark blue/yellow TV layout;
+- playback position/result reporting back to Lampa;
+- AV1/dav1d and FFmpeg extension decoders;
+- 4K-oriented buffering, decoder fallback and dropped-frame fallback;
+- quiet update discovery through the LampaUA service endpoint.
 
-[UA-Player-1.5.9.apk](https://github.com/Hlushok/lampaua-player/releases/download/v1.5.9/UA-Player-1.5.9.apk)
+## LAMPA integration
 
-## Основні можливості
+UA Player supports the public extended external-player contract introduced in LAMPA 1.12.6:
 
-- темний інтерфейс у кольорах LampaUa;
-- списки серій із назвами та зображеннями;
-- автоматичний перехід до наступної серії;
-- вибір якості, аудіодоріжок і субтитрів;
-- українська мова інтерфейсу та налаштувань;
-- кнопка **«Пропустити»** для відомих вступів і титрів;
-- сині позначки сегментів пропуску на шкалі часу;
-- керування пультом Android TV;
-- підтримка HLS, DASH та мережевих відеопотоків;
-- повернення позиції перегляду в LampaUa App.
-- сумісність з офіційними розширеними плейлистами LAMPA 1.12.6 (`video_list.*`);
-- єдиний кешований серверний пошук вступів і титрів без прямих запитів пристрою до зовнішніх баз;
-- кнопка **«Пропустити»** розташована праворуч унизу над шкалою часу.
+- `video_list`
+- `video_list.name`
+- `video_list.filename`
+- `video_list.thumbnail`
+- `video_list.segments`
+- `video_list.season`
+- `video_list.episode`
+- `video_list.imdb_id`
+- `video_list.subtitles`
 
-Плеєр працює на Android-телефонах, планшетах, телевізорах і ТВ-приставках. Плавність 4K залежить від кодека потоку та апаратного декодера конкретного пристрою.
+It also remains compatible with the LampaUA JSON bridge:
 
-## Важливо
+- `lampaua.playlist_json`
+- `lampaua.playlist_index`
+- `lampaua.auto_next`
+- `lampaua.playback_results`
 
-Якщо UA Player не встановлений, LampaUa App продовжує працювати зі вбудованим або іншим вибраним плеєром як раніше.
+The JSON playlist can contain direct `url` values or short-lived `resolver_url` values, headers, quality variants, subtitles, identifiers and skip segments. Ready segments supplied by Lampa or a balancer take priority.
 
-Вихідний код, локальні скрипти збірки та ключі підпису не публікуються в цьому репозиторії.
+## Example playlist
+
+```json
+{
+  "current_index": 0,
+  "auto_next": true,
+  "items": [
+    {
+      "title": "Серія 1",
+      "url": "https://example.test/s01e01.m3u8",
+      "thumbnail": "https://example.test/s01e01.jpg",
+      "imdb_id": "tt1234567",
+      "season": 1,
+      "episode": 1,
+      "headers": { "Referer": "https://example.test/" },
+      "subtitles": [
+        {
+          "url": "https://example.test/s01e01-uk.vtt",
+          "label": "Українська",
+          "language": "uk"
+        }
+      ]
+    }
+  ]
+}
+```
+
+## Build
+
+Requirements:
+
+- JDK 17
+- Android SDK 36
+- Android SDK build-tools
+
+Build a universal APK:
+
+```bash
+./gradlew :app:assembleLatestUniversalDebug
+```
+
+Build the unsigned release APK:
+
+```bash
+./gradlew :app:assembleLatestUniversalRelease
+```
+
+Release signing keys are not stored in this repository.
+
+## Project boundaries
+
+This repository contains only the UA Player Android application. Lampac modules, server-side skip-source aggregation, production configuration and signing keys are maintained separately and are not required to inspect or build the player.
+
+## Credits and license
+
+UA Player is derived from [moneytoo/Player](https://github.com/moneytoo/Player). The project retains the upstream [Unlicense](LICENSE). Third-party AndroidX Media/decoder components keep their respective licenses.

@@ -1,0 +1,109 @@
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <PreferenceCategory app:title="@string/pref_general_header">
+
+        <ListPreference
+            app:defaultValue="auto"
+            app:entries="@array/file_access_entries"
+            app:entryValues="@array/file_access_values"
+            app:key="fileAccess"
+            app:title="@string/pref_file_access"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="languageAudio"
+            android:defaultValue="device"
+            app:title="@string/pref_language_audio"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="menuOpacity"
+            app:defaultValue="88"
+            app:entries="@array/menu_opacity_entries"
+            app:entryValues="@array/menu_opacity_values"
+            app:title="@string/pref_menu_opacity"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            app:key="frameRateMatching"
+            app:defaultValue="false"
+            app:summaryOn="@string/pref_framerate_matching_on"
+            app:summaryOff="@string/pref_framerate_matching_off"
+            app:title="@string/pref_framerate_matching" />
+
+        <SwitchPreferenceCompat
+            app:key="autoPiP"
+            app:defaultValue="false"
+            app:summaryOn="@string/pref_auto_pip_on"
+            app:summaryOff="@string/pref_auto_pip_off"
+            app:title="@string/pref_auto_pip" />
+
+        <SwitchPreferenceCompat
+            app:key="skipSilence"
+            app:defaultValue="false"
+            app:summaryOn="@string/pref_skip_silence_on"
+            app:summaryOff="@string/pref_skip_silence_off"
+            app:title="@string/pref_skip_silence" />
+
+        <SwitchPreferenceCompat
+            app:key="repeatToggle"
+            app:defaultValue="false"
+            app:summary="@string/pref_repeat_toggle_summary"
+            app:title="@string/pref_repeat_toggle" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/pref_subtitle_header">
+
+        <SwitchPreferenceCompat
+            app:key="subtitleStyleEmbedded"
+            app:defaultValue="true"
+            android:summaryOn="@string/pref_subtitle_style_embedded_on"
+            android:summaryOff="@string/pref_subtitle_style_embedded_off"
+            app:title="@string/pref_subtitle_style_embedded" />
+
+        <SwitchPreferenceCompat
+            app:key="subtitleStyleBold"
+            app:defaultValue="false"
+            android:summaryOn="@string/pref_subtitle_style_bold_on"
+            android:summaryOff="@string/pref_subtitle_style_bold_off"
+            app:title="@string/pref_subtitle_style_bold" />
+
+        <Preference
+            app:title="@string/pref_captioning_preferences">
+            <intent android:action="android.settings.CAPTIONING_SETTINGS" />
+        </Preference>
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/pref_dangerous_header">
+
+        <Preference
+            app:selectable="false"
+            app:summary="@string/pref_dangerous_warning" />
+
+        <ListPreference
+            app:defaultValue="1"
+            app:entries="@array/decoder_priority_entries"
+            app:entryValues="@array/decoder_priority_values"
+            app:key="decoderPriority"
+            app:title="@string/pref_decoder_priority"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            app:key="tunneling"
+            app:defaultValue="false"
+            app:summary="@string/pref_tunneling_summary"
+            app:title="@string/pref_tunneling" />
+
+        <SwitchPreferenceCompat
+            app:key="mapDV7ToHevc"
+            app:defaultValue="false"
+            app:summaryOn="@string/pref_map_dv7_on"
+            app:summaryOff="@string/pref_map_dv7_off"
+            app:title="@string/pref_map_dv7" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>
