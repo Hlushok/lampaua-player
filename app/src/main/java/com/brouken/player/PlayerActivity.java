@@ -9,6 +9,7 @@ import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.AppOpsManager;
+import android.app.Dialog;
 import android.app.PendingIntent;
 import android.app.PictureInPictureParams;
 import android.app.RemoteAction;
@@ -23,6 +24,8 @@ import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.Icon;
 import android.hardware.display.DisplayManager;
 import android.media.AudioManager;
@@ -31,6 +34,8 @@ import android.media.audiofx.LoudnessEnhancer;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Parcelable;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
@@ -40,6 +45,7 @@ import android.util.DisplayMetrics;
 import android.util.Rational;
 import android.util.TypedValue;
 import android.view.InputDevice;
+import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.SurfaceView;
@@ -50,9 +56,13 @@ import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.accessibility.CaptioningManager;
 import android.widget.FrameLayout;
+import android.widget.BaseAdapter;
+import android.widget.Button;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -76,11 +86,13 @@ import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlaybackException;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.RenderersFactory;
 import androidx.media3.exoplayer.SeekParameters;
+import androidx.media3.exoplayer.analytics.AnalyticsListener;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
 import androidx.media3.extractor.DefaultExtractorsFactory;
@@ -97,13 +109,20 @@ import androidx.media3.ui.TimeBar;
 
 import com.brouken.player.dtpv.DoubleTapPlayerView;
 import com.brouken.player.dtpv.youtube.YouTubeOverlay;
+import com.bumptech.glide.Glide;
 import com.getkeepsafe.taptargetview.TapTarget;
 import com.getkeepsafe.taptargetview.TapTargetView;
 import com.google.android.material.snackbar.Snackbar;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.io.File;
 import java.lang.reflect.Field;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -157,9 +176,12 @@ public class PlayerActivity extends Activity {
     private CoordinatorLayout coordinatorLayout;
     private TextView titleView;
     private ImageButton buttonOpen;
+    private ImageButton buttonPlaylist;
+    private ImageButton buttonQuality;
     private ImageButton buttonPiP;
     private ImageButton buttonAspectRatio;
     private ImageButton buttonRotation;
+    private ImageButton buttonAppSettings;
     private ImageButton exoSettings;
     private ImageButton exoPlayPause;
     private ProgressBar loadingProgressBar;
@@ -197,12 +219,59 @@ public class PlayerActivity extends Activity {
     static final String API_SUBS_NAME = "subs.name";
     static final String API_TITLE = "title";
     static final String API_END_BY = "end_by";
+    static final String API_HEADERS = "headers";
     boolean apiAccess;
     boolean apiAccessPartial;
     String apiTitle;
     List<MediaItem.SubtitleConfiguration> apiSubs = new ArrayList<>();
     boolean intentReturnResult;
     boolean playbackFinished;
+    final HashMap<String, String> apiHeaders = new HashMap<>();
+    private LampaPlaylist lampaPlaylist;
+    private boolean switchingPlaylistItem;
+    private boolean playlistCurrentRecorded;
+    private boolean lampaIptv;
+    private boolean alternateStreamTypeTried;
+    private boolean decoderQualityFallbackTried;
+    private int selectedVideoQualityMode = VideoQualityChoice.MODE_AUTO;
+    private TrackGroup selectedVideoTrackGroup;
+    private int selectedVideoTrackIndex = -1;
+    private int av1DroppedFrames;
+    private String forcedStreamMimeType;
+    private final Handler lampaUiHandler = new Handler(Looper.getMainLooper());
+    private final SimpleDateFormat lampaClockFormatter = new SimpleDateFormat("HH:mm", Locale.getDefault());
+    private LinearLayout lampaTopPanel;
+    private ImageView lampaTopThumbnail;
+    private TextView lampaEpisodeBadge;
+    private TextView lampaTopTitle;
+    private TextView lampaTopDetails;
+    private TextView lampaClock;
+    private TextView lampaFinishTime;
+    private LinearLayout lampaSkipPanel;
+    private TextView lampaSkipButton;
+    private ProgressBar lampaSkipProgress;
+    private LampaPlaylist.Segment activeLampaSegment;
+    private boolean activeLampaSegmentPreview;
+    private LampaPlaylist.Segment focusedLampaSegment;
+    private View exoPrevious;
+    private View exoNext;
+    private final Runnable lampaUiTicker = new Runnable() {
+        @Override public void run() {
+            updateLampaRuntimeUi();
+            lampaUiHandler.postDelayed(this, 1000);
+        }
+    };
+    private final AnalyticsListener lampaPerformanceListener = new AnalyticsListener() {
+        @Override
+        public void onDroppedVideoFrames(EventTime eventTime, int droppedFrames, long elapsedMs) {
+            if (player == null || decoderQualityFallbackTried || droppedFrames <= 0) return;
+            Format format = player.getVideoFormat();
+            if (format == null || format.height < 2000
+                    || !MimeTypes.VIDEO_AV1.equals(format.sampleMimeType)) return;
+            av1DroppedFrames += droppedFrames;
+            if (av1DroppedFrames >= 24) fallbackFromSlowAv1(format.height);
+        }
+    };
 
     DisplayManager displayManager;
     DisplayManager.DisplayListener displayListener;
@@ -251,7 +320,7 @@ public class PlayerActivity extends Activity {
         final String action = launchIntent.getAction();
         final String type = launchIntent.getType();
 
-        if ("com.brouken.player.action.SHORTCUT_VIDEOS".equals(action)) {
+        if ("com.lampaua.player.action.SHORTCUT_VIDEOS".equals(action)) {
             openFile(Utils.getMoviesFolderUri());
         } else if (Intent.ACTION_SEND.equals(action) && "text/plain".equals(type)) {
             String text = launchIntent.getStringExtra(Intent.EXTRA_TEXT);
@@ -271,37 +340,20 @@ public class PlayerActivity extends Activity {
                 Bundle bundle = launchIntent.getExtras();
                 if (bundle != null) {
                     apiAccess = bundle.containsKey(API_POSITION) || bundle.containsKey(API_RETURN_RESULT)
-                            || bundle.containsKey(API_SUBS) || bundle.containsKey(API_SUBS_ENABLE);
+                            || bundle.containsKey(API_SUBS) || bundle.containsKey(API_SUBS_ENABLE)
+                            || bundle.containsKey(API_HEADERS);
                     if (apiAccess) {
                         mPrefs.setPersistent(false);
                     } else if (bundle.containsKey(API_TITLE)) {
                         apiAccessPartial = true;
                     }
                     apiTitle = bundle.getString(API_TITLE);
+                    readApiHeaders(bundle);
                 }
 
                 mPrefs.updateMedia(this, uri, type);
 
-                if (bundle != null) {
-                    Uri defaultSub = null;
-                    Parcelable[] subsEnable = bundle.getParcelableArray(API_SUBS_ENABLE);
-                    if (subsEnable != null && subsEnable.length > 0) {
-                        defaultSub = (Uri) subsEnable[0];
-                    }
-
-                    Parcelable[] subs = bundle.getParcelableArray(API_SUBS);
-                    String[] subsName = bundle.getStringArray(API_SUBS_NAME);
-                    if (subs != null && subs.length > 0) {
-                        for (int i = 0; i < subs.length; i++) {
-                            Uri sub = (Uri) subs[i];
-                            String name = null;
-                            if (subsName != null && subsName.length > i) {
-                                name = subsName[i];
-                            }
-                            apiSubs.add(SubtitleUtils.buildSubtitle(this, sub, name, sub.equals(defaultSub)));
-                        }
-                    }
-                }
+                readApiSubtitles(bundle);
 
                 if (apiSubs.isEmpty()) {
                     searchSubtitles();
@@ -317,6 +369,8 @@ public class PlayerActivity extends Activity {
             }
             focusPlay = true;
         }
+
+        readLampaPlaylist(launchIntent);
 
         coordinatorLayout = findViewById(R.id.coordinatorLayout);
         mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
@@ -391,6 +445,23 @@ public class PlayerActivity extends Activity {
             return true;
         });
 
+        buttonPlaylist = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
+        buttonPlaylist.setImageResource(R.drawable.ic_playlist_play_24dp);
+        buttonPlaylist.setId(View.generateViewId());
+        buttonPlaylist.setContentDescription(getString(R.string.button_playlist));
+        buttonPlaylist.setVisibility(lampaPlaylist != null && lampaPlaylist.size() > 1 ? View.VISIBLE : View.GONE);
+        buttonPlaylist.setOnClickListener(view -> showLampaPlaylist());
+
+        buttonQuality = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
+        buttonQuality.setImageResource(R.drawable.ic_high_quality_24dp);
+        buttonQuality.setContentDescription(getString(R.string.button_quality));
+        buttonQuality.setOnClickListener(view -> showQualityDialog());
+
+        buttonAppSettings = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
+        buttonAppSettings.setImageResource(R.drawable.ic_settings_24dp);
+        buttonAppSettings.setContentDescription(getString(R.string.button_app_settings));
+        buttonAppSettings.setOnClickListener(view -> openAppSettings());
+
         if (Utils.isPiPSupported(this)) {
             // TODO: Android 12 improvements:
             // https://developer.android.com/about/versions/12/features/pip-improvements
@@ -455,6 +526,17 @@ public class PlayerActivity extends Activity {
         titleView.setEllipsize(TextUtils.TruncateAt.END);
         titleView.setTextDirection(View.TEXT_DIRECTION_LOCALE);
         centerView.addView(titleView);
+        setupLampaOverlay(centerView);
+
+        exoPrevious = playerView.findViewById(R.id.lampaua_prev);
+        exoNext = playerView.findViewById(R.id.lampaua_next);
+        if (exoPrevious != null) {
+            exoPrevious.setOnClickListener(view -> playRelativeEpisode(-1));
+        }
+        if (exoNext != null) {
+            exoNext.setOnClickListener(view -> playRelativeEpisode(1));
+        }
+        updateEpisodeControls();
 
         titleView.setOnLongClickListener(view -> {
             // Prevent FileUriExposedException
@@ -553,6 +635,9 @@ public class PlayerActivity extends Activity {
         });
         timeBar.setAdMarkerColor(Color.argb(0x00, 0xFF, 0xFF, 0xFF));
         timeBar.setPlayedAdMarkerColor(Color.argb(0x98, 0xFF, 0xFF, 0xFF));
+        timeBar.setPlayedColor(Color.rgb(211, 165, 24));
+        timeBar.setScrubberColor(Color.rgb(231, 190, 47));
+        timeBar.setBufferedColor(Color.rgb(42, 78, 121));
 
         try {
             CustomDefaultTrackNameProvider customDefaultTrackNameProvider = new CustomDefaultTrackNameProvider(getResources());
@@ -594,14 +679,14 @@ public class PlayerActivity extends Activity {
 
         exoSettings = exoBasicControls.findViewById(R.id.exo_settings);
         exoBasicControls.removeView(exoSettings);
+        exoSettings.setImageResource(R.drawable.ic_tune_24dp);
+        exoSettings.setContentDescription(getString(R.string.button_playback_options));
         final ImageButton exoRepeat = exoBasicControls.findViewById(R.id.exo_repeat_toggle);
         exoBasicControls.removeView(exoRepeat);
         //exoBasicControls.setVisibility(View.GONE);
 
         exoSettings.setOnLongClickListener(view -> {
-            //askForScope(false, false);
-            Intent intent = new Intent(this, SettingsActivity.class);
-            startActivityForResult(intent, REQUEST_SETTINGS);
+            openAppSettings();
             return true;
         });
 
@@ -617,6 +702,8 @@ public class PlayerActivity extends Activity {
         final LinearLayout controls = horizontalScrollView.findViewById(R.id.controls);
 
         controls.addView(buttonOpen);
+        controls.addView(buttonPlaylist);
+        controls.addView(buttonQuality);
         controls.addView(exoSubtitle);
         controls.addView(buttonAspectRatio);
         if (Utils.isPiPSupported(this) && buttonPiP != null) {
@@ -629,6 +716,7 @@ public class PlayerActivity extends Activity {
             controls.addView(buttonRotation);
         }
         controls.addView(exoSettings);
+        controls.addView(buttonAppSettings);
 
         exoBasicControls.addView(horizontalScrollView);
 
@@ -641,6 +729,9 @@ public class PlayerActivity extends Activity {
             public void onVisibilityChanged(int visibility) {
                 controllerVisible = visibility == View.VISIBLE;
                 controllerVisibleFully = playerView.isControllerFullyVisible();
+                if (lampaTopPanel != null) {
+                    lampaTopPanel.setVisibility(controllerVisible ? View.VISIBLE : View.GONE);
+                }
 
                 if (PlayerActivity.restoreControllerTimeout) {
                     restoreControllerTimeout = false;
@@ -655,7 +746,12 @@ public class PlayerActivity extends Activity {
                 Utils.toggleSystemUi(PlayerActivity.this, playerView, visibility == View.VISIBLE);
                 if (visibility == View.VISIBLE) {
                     // Because when using dpad controls, focus resets to first item in bottom controls bar
-                    findViewById(R.id.exo_play_pause).requestFocus();
+                    if (activeLampaSegment != null && !activeLampaSegmentPreview
+                            && lampaSkipButton != null && lampaSkipButton.isShown()) {
+                        lampaSkipButton.requestFocus();
+                    } else {
+                        findViewById(R.id.exo_play_pause).requestFocus();
+                    }
                 }
 
                 if (controllerVisible && playerView.isControllerFullyVisible()) {
@@ -715,6 +811,7 @@ public class PlayerActivity extends Activity {
                 Utils.scanMediaStorage(this);
             }
         }
+        UAPlayerUpdater.check(this);
     }
 
     @Override
@@ -730,12 +827,15 @@ public class PlayerActivity extends Activity {
         }
         initializePlayer();
         updateButtonRotation();
+        lampaUiHandler.removeCallbacks(lampaUiTicker);
+        lampaUiHandler.post(lampaUiTicker);
     }
 
     @Override
     public void onResume() {
         super.onResume();
         restorePlayStateAllowed = true;
+        updateLampaMenuOpacity();
         if (isTvBox && Build.VERSION.SDK_INT >= 31) {
             updateSubtitleStyle(this);
         }
@@ -755,6 +855,7 @@ public class PlayerActivity extends Activity {
             playerView.removeCallbacks(barsHider);
         }
         playerView.setCustomErrorMessage(null);
+        lampaUiHandler.removeCallbacks(lampaUiTicker);
         releasePlayer(false);
     }
 
@@ -785,6 +886,18 @@ public class PlayerActivity extends Activity {
                     }
                 }
             }
+            if (lampaPlaylist != null && !lampaPlaylist.isEmpty()) {
+                recordCurrentPlaylistItem(playbackFinished);
+                LampaPlaylist.Item current = lampaPlaylist.getCurrent();
+                intent.putExtra(LampaPlaylist.EXTRA_PLAYLIST_INDEX, lampaPlaylist.getCurrentIndex());
+                if (current != null && current.url != null) {
+                    intent.putExtra(LampaPlaylist.EXTRA_CURRENT_URL, current.url);
+                    // Official LAMPA identifies the active playlist entry by
+                    // the result Intent data URI.
+                    intent.setData(Uri.parse(current.url));
+                }
+                intent.putExtra(LampaPlaylist.EXTRA_PLAYBACK_RESULTS, lampaPlaylist.getPlaybackResultsJson());
+            }
             setResult(Activity.RESULT_OK, intent);
         }
 
@@ -804,8 +917,32 @@ public class PlayerActivity extends Activity {
                 if (SubtitleUtils.isSubtitle(uri, type)) {
                     handleSubtitles(uri);
                 } else {
+                    lampaPlaylist = null;
+                    if (buttonPlaylist != null) buttonPlaylist.setVisibility(View.GONE);
+                    resetApiAccess();
+                    final Bundle bundle = intent.getExtras();
+                    if (bundle != null) {
+                        apiAccess = bundle.containsKey(API_POSITION) || bundle.containsKey(API_RETURN_RESULT)
+                                || bundle.containsKey(API_SUBS) || bundle.containsKey(API_SUBS_ENABLE)
+                                || bundle.containsKey(API_HEADERS);
+                        if (apiAccess) {
+                            mPrefs.setPersistent(false);
+                        } else if (bundle.containsKey(API_TITLE)) {
+                            apiAccessPartial = true;
+                        }
+                        apiTitle = bundle.getString(API_TITLE);
+                        intentReturnResult = bundle.getBoolean(API_RETURN_RESULT);
+                        readApiHeaders(bundle);
+                        readApiSubtitles(bundle);
+                    }
                     mPrefs.updateMedia(this, uri, type);
-                    searchSubtitles();
+                    if (bundle != null && bundle.containsKey(API_POSITION)) {
+                        mPrefs.updatePosition((long) bundle.getInt(API_POSITION));
+                    }
+                    if (apiSubs.isEmpty()) {
+                        searchSubtitles();
+                    }
+                    readLampaPlaylist(intent);
                 }
                 focusPlay = true;
                 initializePlayer();
@@ -826,6 +963,17 @@ public class PlayerActivity extends Activity {
     @SuppressLint("GestureBackNavigation")
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (activeLampaSegment != null && !activeLampaSegmentPreview
+                && lampaSkipButton != null && lampaSkipButton.isShown()
+                && (keyCode == KeyEvent.KEYCODE_BUTTON_START
+                || keyCode == KeyEvent.KEYCODE_BUTTON_A
+                || keyCode == KeyEvent.KEYCODE_BUTTON_SELECT
+                || keyCode == KeyEvent.KEYCODE_ENTER
+                || keyCode == KeyEvent.KEYCODE_DPAD_CENTER
+                || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER)) {
+            skipActiveLampaSegment();
+            return true;
+        }
         switch (keyCode) {
             case KeyEvent.KEYCODE_MEDIA_PLAY:
             case KeyEvent.KEYCODE_MEDIA_PAUSE:
@@ -952,6 +1100,19 @@ public class PlayerActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        final int lampaKeyCode = event.getKeyCode();
+        if (event.getAction() == KeyEvent.ACTION_DOWN
+                && activeLampaSegment != null && !activeLampaSegmentPreview
+                && lampaSkipButton != null && lampaSkipButton.isShown()
+                && (lampaKeyCode == KeyEvent.KEYCODE_BUTTON_START
+                || lampaKeyCode == KeyEvent.KEYCODE_BUTTON_A
+                || lampaKeyCode == KeyEvent.KEYCODE_BUTTON_SELECT
+                || lampaKeyCode == KeyEvent.KEYCODE_ENTER
+                || lampaKeyCode == KeyEvent.KEYCODE_DPAD_CENTER
+                || lampaKeyCode == KeyEvent.KEYCODE_NUMPAD_ENTER)) {
+            skipActiveLampaSegment();
+            return true;
+        }
         if (isScaling) {
             final int keyCode = event.getKeyCode();
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
@@ -1068,7 +1229,1330 @@ public class PlayerActivity extends Activity {
         apiAccessPartial = false;
         apiTitle = null;
         apiSubs.clear();
+        apiHeaders.clear();
+        intentReturnResult = false;
         mPrefs.setPersistent(true);
+    }
+
+    /**
+     * Reads the Lampa/LampaUA external-player header contract. The value is an
+     * alternating String array: name, value, name, value. Invalid entries are
+     * ignored instead of failing playback.
+     */
+    void readApiHeaders(Bundle bundle) {
+        apiHeaders.clear();
+        String[] headers = bundle.getStringArray(API_HEADERS);
+        if (headers == null) {
+            ArrayList<String> headerList = bundle.getStringArrayList(API_HEADERS);
+            if (headerList != null) {
+                headers = headerList.toArray(new String[0]);
+            }
+        }
+        if (headers == null) {
+            return;
+        }
+        for (int i = 0; i + 1 < headers.length; i += 2) {
+            String name = headers[i];
+            String value = headers[i + 1];
+            if (name == null || value == null) {
+                continue;
+            }
+            name = name.trim();
+            value = value.trim();
+            if (name.isEmpty() || value.isEmpty() || "content-length".equalsIgnoreCase(name)) {
+                continue;
+            }
+            apiHeaders.put(name, value);
+        }
+    }
+
+    void readApiSubtitles(Bundle bundle) {
+        apiSubs.clear();
+        if (bundle == null) {
+            return;
+        }
+        Uri defaultSub = null;
+        Parcelable[] subsEnable = bundle.getParcelableArray(API_SUBS_ENABLE);
+        if (subsEnable != null && subsEnable.length > 0 && subsEnable[0] instanceof Uri) {
+            defaultSub = (Uri) subsEnable[0];
+        }
+
+        Parcelable[] subs = bundle.getParcelableArray(API_SUBS);
+        String[] subsName = bundle.getStringArray(API_SUBS_NAME);
+        if (subs == null) {
+            return;
+        }
+        for (int i = 0; i < subs.length; i++) {
+            if (!(subs[i] instanceof Uri)) {
+                continue;
+            }
+            Uri sub = (Uri) subs[i];
+            String name = subsName != null && subsName.length > i ? subsName[i] : null;
+            apiSubs.add(SubtitleUtils.buildSubtitle(this, sub, name, sub.equals(defaultSub)));
+        }
+    }
+
+    private void readLampaPlaylist(Intent intent) {
+        if (intent == null) return;
+        lampaIptv = intent.getBooleanExtra("lampaua.is_iptv", false);
+        String raw = intent.getStringExtra(LampaPlaylist.EXTRA_PLAYLIST_JSON);
+        if (raw == null) raw = intent.getStringExtra("playlist_json");
+        if (raw == null || raw.trim().isEmpty()) {
+            raw = buildOfficialLampaPlaylist(intent);
+        }
+        if (raw == null || raw.trim().isEmpty()) {
+            String imdbId = intent.getStringExtra("lampaua.imdb_id");
+            if (imdbId == null) imdbId = intent.getStringExtra("imdb_id");
+            int tmdbId = intent.getIntExtra("lampaua.tmdb_id",
+                    intent.getIntExtra("tmdb_id", -1));
+            if (((imdbId != null && imdbId.startsWith("tt")) || tmdbId > 0)
+                    && intent.getData() != null) {
+                JSONObject item = new JSONObject();
+                JSONObject root = new JSONObject();
+                JSONArray items = new JSONArray();
+                try {
+                    item.put("url", intent.getData().toString());
+                    item.put("title", intent.getStringExtra("title"));
+                    if (imdbId != null && imdbId.startsWith("tt")) item.put("imdb_id", imdbId);
+                    if (tmdbId > 0) item.put("tmdb_id", tmdbId);
+                    String mediaType = intent.getStringExtra("lampaua.media_type");
+                    if (mediaType == null) mediaType = intent.getStringExtra("media_type");
+                    if (mediaType != null) item.put("media_type", mediaType);
+                    int season = intent.getIntExtra("lampaua.season",
+                            intent.getIntExtra("season", -1));
+                    int episode = intent.getIntExtra("lampaua.episode",
+                            intent.getIntExtra("episode", -1));
+                    if (season > 0) item.put("season", season);
+                    if (episode > 0) item.put("episode", episode);
+                    if (intent.hasExtra(API_POSITION)) {
+                        item.put("position_ms", Math.max(0,
+                                intent.getIntExtra(API_POSITION, 0)));
+                    }
+                    items.put(item);
+                    root.put("current_index", 0);
+                    root.put("auto_next", false);
+                    root.put("items", items);
+                    raw = root.toString();
+                } catch (JSONException ignored) { }
+            }
+        }
+        if (raw == null || raw.trim().isEmpty()) return;
+
+        try {
+            int index = intent.getIntExtra(LampaPlaylist.EXTRA_PLAYLIST_INDEX,
+                    intent.getIntExtra("playlist_index", 0));
+            boolean autoNext = intent.getBooleanExtra(LampaPlaylist.EXTRA_AUTO_NEXT,
+                    intent.getBooleanExtra("auto_next", true));
+            lampaPlaylist = LampaPlaylist.fromJson(this, raw, index, autoNext);
+            alternateStreamTypeTried = false;
+            decoderQualityFallbackTried = false;
+            forcedStreamMimeType = null;
+            if (!lampaPlaylist.isEmpty()) {
+                LampaPlaylist.Item current = lampaPlaylist.getCurrent();
+                if (current != null && !current.isResolved() && intent.getData() != null) {
+                    current.url = intent.getData().toString();
+                }
+                if (current != null && current.isResolved()) {
+                    applyPlaylistItem(current, true);
+                }
+                apiAccess = true;
+                mPrefs.setPersistent(false);
+            }
+            if (buttonPlaylist != null) {
+                buttonPlaylist.setVisibility(lampaPlaylist.size() > 1 ? View.VISIBLE : View.GONE);
+            }
+        } catch (Exception e) {
+            lampaPlaylist = null;
+            Toast.makeText(this, R.string.playlist_invalid, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * Converts the public Just+ contract introduced by LAMPA 1.12.6 into the
+     * richer internal playlist format. The private lampaua.playlist_json extra
+     * is still preferred, so existing LampaUA installations remain compatible.
+     */
+    private String buildOfficialLampaPlaylist(Intent intent) {
+        Parcelable[] parcelables = intent.getParcelableArrayExtra("video_list");
+        String[] stringUrls = intent.getStringArrayExtra("video_list");
+        int count = parcelables != null ? parcelables.length
+                : (stringUrls != null ? stringUrls.length : 0);
+        if (count <= 0) return null;
+
+        ArrayList<String> names = intent.getStringArrayListExtra("video_list.name");
+        ArrayList<String> filenames = intent.getStringArrayListExtra("video_list.filename");
+        ArrayList<String> thumbnails = intent.getStringArrayListExtra("video_list.thumbnail");
+        ArrayList<String> segments = intent.getStringArrayListExtra("video_list.segments");
+        ArrayList<String> seasons = intent.getStringArrayListExtra("video_list.season");
+        ArrayList<String> episodes = intent.getStringArrayListExtra("video_list.episode");
+        ArrayList<String> imdbIds = intent.getStringArrayListExtra("video_list.imdb_id");
+        ArrayList<Bundle> subtitleBundles = intent.getParcelableArrayListExtra("video_list.subtitles");
+        JSONArray items = new JSONArray();
+        String currentUrl = intent.getData() == null ? null : intent.getData().toString();
+        int currentIndex = 0;
+
+        try {
+            for (int i = 0; i < count; i++) {
+                String url = null;
+                if (parcelables != null && parcelables[i] instanceof Uri) {
+                    url = parcelables[i].toString();
+                } else if (stringUrls != null) {
+                    url = stringUrls[i];
+                }
+                if (url == null || url.trim().isEmpty()) continue;
+                JSONObject item = new JSONObject();
+                item.put("url", url);
+                putIndexedText(item, "title", names, i);
+                if (!item.has("title")) putIndexedText(item, "title", filenames, i);
+                putIndexedText(item, "thumbnail", thumbnails, i);
+                putIndexedText(item, "imdb_id", imdbIds, i);
+                putIndexedPositiveInt(item, "season", seasons, i);
+                putIndexedPositiveInt(item, "episode", episodes, i);
+
+                String segmentJson = indexedText(segments, i);
+                if (segmentJson != null && segmentJson.trim().startsWith("{")) {
+                    item.put("segments", new JSONObject(segmentJson));
+                }
+                Bundle subBundle = subtitleBundles != null && i < subtitleBundles.size()
+                        ? subtitleBundles.get(i) : null;
+                JSONArray subtitles = officialSubtitles(subBundle);
+                if (subtitles.length() > 0) item.put("subtitles", subtitles);
+                if (url.equals(currentUrl)) currentIndex = items.length();
+                items.put(item);
+            }
+            if (items.length() == 0) return null;
+            JSONObject root = new JSONObject();
+            root.put("items", items);
+            root.put("current_index", currentIndex);
+            root.put("auto_next", true);
+            return root.toString();
+        } catch (JSONException ignored) {
+            return null;
+        }
+    }
+
+    private static JSONArray officialSubtitles(Bundle bundle) throws JSONException {
+        JSONArray result = new JSONArray();
+        if (bundle == null) return result;
+        Parcelable[] uris = bundle.getParcelableArray("uris");
+        String[] names = bundle.getStringArray("names");
+        if (uris == null) return result;
+        for (int i = 0; i < uris.length; i++) {
+            if (!(uris[i] instanceof Uri)) continue;
+            JSONObject subtitle = new JSONObject();
+            subtitle.put("url", uris[i].toString());
+            if (names != null && i < names.length && names[i] != null) {
+                subtitle.put("label", names[i]);
+            }
+            result.put(subtitle);
+        }
+        return result;
+    }
+
+    private static void putIndexedText(JSONObject target, String key,
+                                       ArrayList<String> values, int index) throws JSONException {
+        String value = indexedText(values, index);
+        if (value != null) target.put(key, value);
+    }
+
+    private static String indexedText(ArrayList<String> values, int index) {
+        if (values == null || index < 0 || index >= values.size()) return null;
+        String value = values.get(index);
+        return value == null || value.trim().isEmpty() ? null : value;
+    }
+
+    private static void putIndexedPositiveInt(JSONObject target, String key,
+                                              ArrayList<String> values, int index) throws JSONException {
+        String value = indexedText(values, index);
+        if (value == null) return;
+        try {
+            int parsed = Integer.parseInt(value);
+            if (parsed > 0) target.put(key, parsed);
+        } catch (NumberFormatException ignored) { }
+    }
+
+    private void applyPlaylistItem(LampaPlaylist.Item item, boolean preserveMissingExtras) {
+        if (item == null || !item.isResolved()) return;
+        if (timeBar != null) timeBar.setSkipSegments(0, null, null);
+        apiAccess = true;
+        apiAccessPartial = false;
+        mPrefs.setPersistent(false);
+        if (item.title != null || !preserveMissingExtras) apiTitle = item.title;
+        if (!item.headers.isEmpty() || !preserveMissingExtras) {
+            apiHeaders.clear();
+            apiHeaders.putAll(item.headers);
+        }
+        if (!item.subtitles.isEmpty() || !preserveMissingExtras) {
+            apiSubs.clear();
+            for (int i = 0; i < item.subtitles.size(); i++) {
+                LampaPlaylist.Subtitle subtitle = item.subtitles.get(i);
+                Uri uri = Uri.parse(subtitle.url);
+                String label = subtitle.label == null ? subtitle.language : subtitle.label;
+                apiSubs.add(SubtitleUtils.buildSubtitle(this, uri, label, i == 0));
+            }
+        }
+        mPrefs.updateMedia(this, Uri.parse(item.url), "video/*");
+        mPrefs.updatePosition(item.positionMs);
+        updateLampaTopPanel();
+        updateEpisodeControls();
+    }
+
+    private GradientDrawable lampaBackground(int color, int strokeColor, float radiusDp) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(Utils.dpToPx((int) radiusDp));
+        if (strokeColor != Color.TRANSPARENT) {
+            drawable.setStroke(Utils.dpToPx(1), strokeColor);
+        }
+        return drawable;
+    }
+
+    private int lampaMenuAlpha() {
+        String value = android.preference.PreferenceManager
+                .getDefaultSharedPreferences(this)
+                .getString("menuOpacity", "88");
+        int percent = 88;
+        try {
+            percent = Integer.parseInt(value);
+        } catch (NumberFormatException ignored) { }
+        percent = Math.max(70, Math.min(100, percent));
+        return Math.round(255f * percent / 100f);
+    }
+
+    private int lampaMenuColor(int red, int green, int blue) {
+        return Color.argb(lampaMenuAlpha(), red, green, blue);
+    }
+
+    private void updateLampaMenuOpacity() {
+        final int gold = Color.rgb(211, 165, 24);
+        if (lampaTopPanel != null) {
+            lampaTopPanel.setBackground(lampaBackground(lampaMenuColor(4, 18, 40), gold, 10));
+        }
+        if (lampaSkipPanel != null) {
+            lampaSkipPanel.setBackground(lampaBackground(lampaMenuColor(4, 18, 40), gold, 8));
+        }
+    }
+
+    private void setupLampaOverlay(FrameLayout controllerBackground) {
+        final int navy = Color.rgb(5, 17, 36);
+        final int gold = Color.rgb(211, 165, 24);
+        final int muted = Color.rgb(174, 185, 202);
+
+        lampaTopPanel = new LinearLayout(this);
+        lampaTopPanel.setOrientation(LinearLayout.HORIZONTAL);
+        lampaTopPanel.setGravity(Gravity.CENTER_VERTICAL);
+        lampaTopPanel.setPadding(Utils.dpToPx(10), Utils.dpToPx(8), Utils.dpToPx(12), Utils.dpToPx(8));
+        lampaTopPanel.setBackground(lampaBackground(lampaMenuColor(4, 18, 40), gold, 10));
+
+        FrameLayout preview = new FrameLayout(this);
+        preview.setPadding(Utils.dpToPx(2), Utils.dpToPx(2), Utils.dpToPx(2), Utils.dpToPx(2));
+        preview.setBackground(lampaBackground(Color.rgb(10, 39, 76),
+                Color.rgb(62, 91, 126), 7));
+        lampaTopThumbnail = new ImageView(this);
+        lampaTopThumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        lampaTopThumbnail.setBackgroundColor(Color.rgb(10, 32, 64));
+        preview.addView(lampaTopThumbnail, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        lampaEpisodeBadge = new TextView(this);
+        lampaEpisodeBadge.setTextColor(Color.WHITE);
+        lampaEpisodeBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        lampaEpisodeBadge.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        lampaEpisodeBadge.setGravity(Gravity.CENTER);
+        lampaEpisodeBadge.setBackground(lampaBackground(Color.argb(235, 7, 25, 52), gold, 5));
+        preview.addView(lampaEpisodeBadge, new FrameLayout.LayoutParams(
+                Utils.dpToPx(32), Utils.dpToPx(29), Gravity.START | Gravity.TOP));
+        lampaTopPanel.addView(preview, new LinearLayout.LayoutParams(Utils.dpToPx(136), Utils.dpToPx(76)));
+
+        View titleAccent = new View(this);
+        titleAccent.setBackgroundColor(gold);
+        LinearLayout.LayoutParams accentParams = new LinearLayout.LayoutParams(
+                Utils.dpToPx(2), Utils.dpToPx(48));
+        accentParams.setMarginStart(Utils.dpToPx(12));
+        accentParams.setMarginEnd(Utils.dpToPx(12));
+        lampaTopPanel.addView(titleAccent, accentParams);
+
+        LinearLayout textBlock = new LinearLayout(this);
+        textBlock.setOrientation(LinearLayout.VERTICAL);
+        textBlock.setGravity(Gravity.CENTER_VERTICAL);
+        lampaTopTitle = new TextView(this);
+        lampaTopTitle.setTextColor(Color.WHITE);
+        lampaTopTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 21);
+        lampaTopTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        lampaTopTitle.setMaxLines(1);
+        lampaTopTitle.setEllipsize(TextUtils.TruncateAt.END);
+        lampaTopDetails = new TextView(this);
+        lampaTopDetails.setTextColor(muted);
+        lampaTopDetails.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        lampaTopDetails.setMaxLines(2);
+        textBlock.addView(lampaTopTitle);
+        textBlock.addView(lampaTopDetails);
+        LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        lampaTopPanel.addView(textBlock, textParams);
+
+        LinearLayout timeBlock = new LinearLayout(this);
+        timeBlock.setOrientation(LinearLayout.VERTICAL);
+        timeBlock.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        timeBlock.setPadding(Utils.dpToPx(12), Utils.dpToPx(6),
+                Utils.dpToPx(12), Utils.dpToPx(6));
+        timeBlock.setBackground(lampaBackground(Color.argb(105, 10, 39, 76),
+                Color.rgb(35, 58, 84), 7));
+        lampaClock = new TextView(this);
+        lampaClock.setTextColor(Color.WHITE);
+        lampaClock.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
+        lampaClock.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        lampaClock.setGravity(Gravity.END);
+        lampaFinishTime = new TextView(this);
+        lampaFinishTime.setTextColor(gold);
+        lampaFinishTime.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        lampaFinishTime.setGravity(Gravity.END);
+        timeBlock.addView(lampaClock);
+        timeBlock.addView(lampaFinishTime);
+        lampaTopPanel.addView(timeBlock, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Utils.dpToPx(94), Gravity.TOP);
+        topParams.setMargins(Utils.dpToPx(16), Utils.dpToPx(8),
+                Utils.dpToPx(16), 0);
+        controllerBackground.addView(lampaTopPanel, topParams);
+
+        lampaSkipPanel = new LinearLayout(this);
+        lampaSkipPanel.setOrientation(LinearLayout.VERTICAL);
+        lampaSkipPanel.setPadding(Utils.dpToPx(4), Utils.dpToPx(4), Utils.dpToPx(4), Utils.dpToPx(4));
+        lampaSkipPanel.setBackground(lampaBackground(lampaMenuColor(4, 18, 40), gold, 8));
+        lampaSkipPanel.setVisibility(View.GONE);
+        lampaSkipButton = new TextView(this);
+        lampaSkipButton.setTextColor(Color.WHITE);
+        lampaSkipButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        lampaSkipButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        lampaSkipButton.setGravity(Gravity.CENTER);
+        lampaSkipButton.setPadding(Utils.dpToPx(20), Utils.dpToPx(10), Utils.dpToPx(20), Utils.dpToPx(8));
+        lampaSkipButton.setFocusable(true);
+        lampaSkipButton.setClickable(true);
+        lampaSkipButton.setOnClickListener(view -> skipActiveLampaSegment());
+        lampaSkipProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        lampaSkipProgress.setMax(1000);
+        lampaSkipProgress.setProgressTintList(android.content.res.ColorStateList.valueOf(gold));
+        lampaSkipProgress.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(23, 48, 78)));
+        lampaSkipPanel.addView(lampaSkipButton, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        lampaSkipPanel.addView(lampaSkipProgress, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Utils.dpToPx(4)));
+        FrameLayout.LayoutParams skipParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.END | Gravity.BOTTOM);
+        skipParams.setMarginEnd(Utils.dpToPx(24));
+        // Keep the action close to the timeline, but above the bottom controls.
+        skipParams.bottomMargin = Utils.dpToPx(86);
+        playerView.addView(lampaSkipPanel, skipParams);
+        updateLampaTopPanel();
+    }
+
+    private void openAppSettings() {
+        Intent intent = new Intent(this, SettingsActivity.class);
+        startActivityForResult(intent, REQUEST_SETTINGS);
+    }
+
+    private void updateLampaTopPanel() {
+        if (lampaTopPanel == null) return;
+        LampaPlaylist.Item item = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
+        int index = lampaPlaylist == null ? 0 : lampaPlaylist.getCurrentIndex();
+        String title = item != null ? item.displayTitle(index) : apiTitle;
+        lampaTopTitle.setText(title == null || title.trim().isEmpty() ? "UA Player" : title);
+        boolean isEpisode = item != null && (item.episode > 0 || item.season > 0
+                || (lampaPlaylist != null && lampaPlaylist.size() > 1
+                && !"movie".equalsIgnoreCase(item.mediaType)));
+        lampaEpisodeBadge.setVisibility(isEpisode ? View.VISIBLE : View.GONE);
+        if (isEpisode) {
+            lampaEpisodeBadge.setText(String.valueOf(item.episode > 0
+                    ? item.episode : index + 1));
+        }
+        if (item != null && item.thumbnail != null && !item.thumbnail.trim().isEmpty()) {
+            Glide.with(this).load(item.thumbnail).centerCrop().into(lampaTopThumbnail);
+        } else {
+            lampaTopThumbnail.setImageDrawable(null);
+        }
+        updateLampaTrackDetails();
+    }
+
+    private void updateLampaTrackDetails() {
+        if (lampaTopDetails == null) return;
+        Format video = player == null ? null : player.getVideoFormat();
+        Format audio = player == null ? null : player.getAudioFormat();
+        if (player != null) {
+            for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+                for (int i = 0; i < group.length; i++) {
+                    if (!group.isTrackSelected(i)) continue;
+                    // Adaptive HLS groups can report several tracks as selected.
+                    // getVideoFormat()/getAudioFormat() above are the formats that
+                    // are actually being rendered right now; only fall back to the
+                    // group metadata before the first sample reaches the decoder.
+                    if (video == null && group.getType() == C.TRACK_TYPE_VIDEO) {
+                        video = group.getTrackFormat(i);
+                    }
+                    if (audio == null && group.getType() == C.TRACK_TYPE_AUDIO) {
+                        audio = group.getTrackFormat(i);
+                    }
+                }
+            }
+        }
+        ArrayList<String> parts = new ArrayList<>();
+        Uri media = mPrefs == null ? null : mPrefs.mediaUri;
+        String path = media == null ? "" : String.valueOf(media.getLastPathSegment()).toLowerCase(Locale.US);
+        String mediaUrl = media == null ? "" : media.toString().toLowerCase(Locale.US);
+        if (lampaIptv) parts.add("LIVE");
+        else if (path.contains(".m3u8")) parts.add("HLS");
+        else if (path.contains(".mpd") || mediaUrl.contains("/ytdl/manifest?")) parts.add("DASH");
+        else if (path.contains(".ts")) parts.add("TS");
+        else if (path.contains(".mkv")) parts.add("MKV");
+        else parts.add("VIDEO");
+        if (video != null) {
+            if (video.width > 0 && video.height > 0) {
+                int longSide = Math.max(video.width, video.height);
+                int shortSide = Math.min(video.width, video.height);
+                parts.add(longSide + " × " + shortSide);
+            }
+            String codec = shortCodec(video.sampleMimeType);
+            if (codec != null) parts.add(codec);
+            if (video.frameRate > 0) parts.add(Math.round(video.frameRate) + " fps");
+            if (video.bitrate > 0) {
+                parts.add(getString(R.string.quality_bitrate, video.bitrate / 1_000_000f));
+            }
+        }
+        if (audio != null) {
+            String codec = shortCodec(audio.sampleMimeType);
+            if (codec != null) parts.add("[" + codec + "]");
+        }
+        lampaTopDetails.setText(TextUtils.join(" · ", parts));
+    }
+
+    private String shortCodec(String mimeType) {
+        if (mimeType == null) return null;
+        if (mimeType.contains("avc")) return "H.264";
+        if (mimeType.contains("hevc")) return "H.265";
+        if (mimeType.contains("av01")) return "AV1";
+        if (mimeType.contains("vp9")) return "VP9";
+        if (mimeType.contains("eac3")) return "E-AC3";
+        if (mimeType.contains("ac3")) return "AC3";
+        if (mimeType.contains("aac") || mimeType.contains("mp4a")) return "AAC";
+        return mimeType.substring(mimeType.lastIndexOf('/') + 1).toUpperCase(Locale.US);
+    }
+
+    private void updateLampaRuntimeUi() {
+        // HLS may switch rendition without rebuilding the Tracks object.
+        // Refresh the badge so it follows the format currently rendered.
+        updateLampaTrackDetails();
+        if (lampaClock != null) {
+            lampaClock.setText(lampaClockFormatter.format(new Date()));
+            String finish = "";
+            if (player != null && player.getDuration() != C.TIME_UNSET && player.getDuration() > 0) {
+                long remaining = Math.max(0, player.getDuration() - player.getCurrentPosition());
+                float speed = player.getPlaybackParameters().speed;
+                if (speed > 0) remaining = (long) (remaining / speed);
+                finish = getString(R.string.playback_finishes_at,
+                        lampaClockFormatter.format(new Date(System.currentTimeMillis() + remaining)));
+            }
+            lampaFinishTime.setText(finish);
+        }
+        updateLampaSkipUi();
+    }
+
+    private void updateLampaSkipUi() {
+        if (lampaSkipPanel == null || player == null || lampaPlaylist == null) return;
+        LampaPlaylist.Item item = lampaPlaylist.getCurrent();
+        long position = Math.max(0, player.getCurrentPosition());
+        activeLampaSegment = null;
+        activeLampaSegmentPreview = false;
+        if (item != null) {
+            for (LampaPlaylist.Segment segment : item.segments) {
+                if (segment.contains(position)) {
+                    activeLampaSegment = segment;
+                    break;
+                }
+            }
+            if (activeLampaSegment == null) {
+                for (LampaPlaylist.Segment segment : item.segments) {
+                    long startsIn = segment.startMs - position;
+                    if (startsIn > 0 && startsIn <= 5000
+                            && (activeLampaSegment == null
+                            || segment.startMs < activeLampaSegment.startMs)) {
+                        activeLampaSegment = segment;
+                        activeLampaSegmentPreview = true;
+                    }
+                }
+            }
+        }
+        if (activeLampaSegment == null) {
+            focusedLampaSegment = null;
+            lampaSkipPanel.setVisibility(View.GONE);
+            return;
+        }
+        long duration = player.getDuration();
+        boolean credits = duration != C.TIME_UNSET && activeLampaSegment.endMs >= duration - 15000
+                && lampaPlaylist.hasNext();
+        if (activeLampaSegmentPreview) {
+            long seconds = Math.max(1, (activeLampaSegment.startMs - position + 999) / 1000);
+            lampaSkipButton.setText(getString(R.string.skip_available_in, seconds));
+            lampaSkipButton.setEnabled(false);
+            lampaSkipButton.setClickable(false);
+            lampaSkipButton.setAlpha(0.72f);
+            lampaSkipProgress.setProgress((int) Math.min(1000,
+                    Math.max(0, (activeLampaSegment.startMs - position) * 1000 / 5000)));
+        } else {
+            lampaSkipButton.setText(segmentButtonText(activeLampaSegment, credits));
+            lampaSkipButton.setEnabled(true);
+            lampaSkipButton.setClickable(true);
+            lampaSkipButton.setAlpha(1f);
+            long width = Math.max(1, activeLampaSegment.endMs - activeLampaSegment.startMs);
+            lampaSkipProgress.setProgress((int) Math.min(1000,
+                    Math.max(0, (activeLampaSegment.endMs - position) * 1000 / width)));
+        }
+        lampaSkipPanel.setVisibility(View.VISIBLE);
+        if (!activeLampaSegmentPreview && focusedLampaSegment != activeLampaSegment) {
+            focusedLampaSegment = activeLampaSegment;
+            playerView.showController();
+            lampaSkipButton.post(() -> lampaSkipButton.requestFocus());
+        }
+    }
+
+    private void updateLampaSegmentMarkers() {
+        if (timeBar == null || player == null || lampaPlaylist == null) {
+            if (timeBar != null) timeBar.setSkipSegments(0, null, null);
+            return;
+        }
+        long duration = player.getDuration();
+        LampaPlaylist.Item item = lampaPlaylist.getCurrent();
+        if (duration == C.TIME_UNSET || duration <= 0 || item == null || item.segments.isEmpty()) {
+            timeBar.setSkipSegments(0, null, null);
+            return;
+        }
+
+        ArrayList<LampaPlaylist.Segment> valid = new ArrayList<>();
+        for (LampaPlaylist.Segment segment : item.segments) {
+            if (segment != null && segment.endMs > segment.startMs
+                    && segment.startMs < duration && segment.endMs > 0) {
+                valid.add(segment);
+            }
+        }
+        valid.sort((left, right) -> Long.compare(left.startMs, right.startMs));
+        long[] starts = new long[valid.size()];
+        long[] ends = new long[valid.size()];
+        for (int index = 0; index < valid.size(); index++) {
+            starts[index] = Math.max(0, valid.get(index).startMs);
+            ends[index] = Math.min(duration, valid.get(index).endMs);
+        }
+        timeBar.setSkipSegments(duration, starts, ends);
+    }
+
+    private String segmentButtonText(LampaPlaylist.Segment segment, boolean creditsWithNext) {
+        if (creditsWithNext) return getString(R.string.next_episode);
+        return getString(R.string.skip_action);
+    }
+
+    private void skipActiveLampaSegment() {
+        if (player == null || activeLampaSegment == null || activeLampaSegmentPreview) return;
+        long duration = player.getDuration();
+        boolean credits = duration != C.TIME_UNSET && activeLampaSegment.endMs >= duration - 15000
+                && lampaPlaylist != null && lampaPlaylist.hasNext();
+        if (credits) {
+            playRelativeEpisode(1);
+        } else {
+            player.seekTo(activeLampaSegment.endMs);
+        }
+        focusedLampaSegment = null;
+        lampaSkipPanel.setVisibility(View.GONE);
+    }
+
+    private void playRelativeEpisode(int offset) {
+        if (lampaPlaylist == null) return;
+        int target = lampaPlaylist.getCurrentIndex() + offset;
+        if (target >= 0 && target < lampaPlaylist.size()) {
+            playPlaylistIndex(target, offset > 0);
+        }
+    }
+
+    private void updateEpisodeControls() {
+        if (exoPrevious == null || exoNext == null || lampaPlaylist == null) return;
+        int index = lampaPlaylist.getCurrentIndex();
+        exoPrevious.setVisibility(index > 0 ? View.VISIBLE : View.INVISIBLE);
+        exoNext.setVisibility(index + 1 < lampaPlaylist.size() ? View.VISIBLE : View.INVISIBLE);
+        exoPrevious.setEnabled(index > 0);
+        exoNext.setEnabled(index + 1 < lampaPlaylist.size());
+        exoPrevious.setAlpha(index > 0 ? 1f : 0f);
+        exoNext.setAlpha(index + 1 < lampaPlaylist.size() ? 1f : 0f);
+        if (buttonPlaylist != null) {
+            buttonPlaylist.setVisibility(lampaPlaylist.size() > 1 ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void showLampaPlaylist() {
+        if (lampaPlaylist == null || lampaPlaylist.size() < 2) return;
+
+        final Dialog dialog = new Dialog(this, android.R.style.Theme_Translucent_NoTitleBar);
+        final FrameLayout overlay = new FrameLayout(this);
+        overlay.setBackgroundColor(Color.argb(36, 0, 0, 0));
+
+        final LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(Utils.dpToPx(8), 0, Utils.dpToPx(8), Utils.dpToPx(8));
+        panel.setBackground(lampaBackground(lampaMenuColor(4, 18, 40),
+                Color.rgb(240, 183, 38), 10));
+
+        final TextView heading = new TextView(this);
+        heading.setText(R.string.playlist_title);
+        heading.setTextColor(Color.WHITE);
+        heading.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
+        heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.setPadding(Utils.dpToPx(18), 0, Utils.dpToPx(18), 0);
+        panel.addView(heading, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Utils.dpToPx(58)));
+
+        View headingDivider = new View(this);
+        headingDivider.setBackgroundColor(Color.rgb(35, 58, 84));
+        panel.addView(headingDivider, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Utils.dpToPx(1)));
+
+        final ListView list = new ListView(this);
+        list.setDivider(new ColorDrawable(Color.TRANSPARENT));
+        list.setDividerHeight(Utils.dpToPx(4));
+        list.setSelector(lampaBackground(Color.argb(56, 10, 39, 76),
+                Color.rgb(240, 183, 38), 7));
+        list.setDrawSelectorOnTop(true);
+        list.setItemsCanFocus(false);
+        list.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
+        list.setPadding(Utils.dpToPx(8), 0, Utils.dpToPx(8), Utils.dpToPx(8));
+        list.setClipToPadding(false);
+        list.setAdapter(new EpisodeAdapter());
+        list.setOnItemClickListener((parent, view, which, id) -> {
+            dialog.dismiss();
+            if (which != lampaPlaylist.getCurrentIndex()) {
+                playPlaylistIndex(which, false);
+            }
+        });
+        installTvListNavigation(list);
+        panel.addView(list, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        int panelWidth = Math.max(Utils.dpToPx(330), Math.min(
+                (int) (screenWidth * (isTvBox ? 0.46f : 0.52f)), Utils.dpToPx(620)));
+        int screenHeight = getResources().getDisplayMetrics().heightPixels;
+        int topInset = isTvBox ? Utils.dpToPx(8) : Utils.dpToPx(28);
+        FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
+                panelWidth, Math.max(Utils.dpToPx(280), screenHeight - topInset),
+                Gravity.END | Gravity.BOTTOM);
+        overlay.addView(panel, panelParams);
+        overlay.setOnClickListener(view -> dialog.dismiss());
+        panel.setOnClickListener(view -> { });
+
+        dialog.setContentView(overlay);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            window.setDimAmount(0f);
+        }
+        dialog.setOnShowListener(ignored -> {
+            Window shownWindow = dialog.getWindow();
+            if (shownWindow != null) {
+                shownWindow.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            }
+            list.setSelection(lampaPlaylist.getCurrentIndex());
+            list.setItemChecked(lampaPlaylist.getCurrentIndex(), true);
+            list.requestFocus();
+        });
+        dialog.show();
+    }
+
+    private void showQualityDialog() {
+        if (player == null) {
+            Toast.makeText(this, R.string.quality_unavailable, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        final ArrayList<VideoQualityChoice> choices = new ArrayList<>();
+        choices.add(VideoQualityChoice.auto(getString(R.string.quality_auto)));
+        choices.add(VideoQualityChoice.maximum(getString(R.string.quality_maximum)));
+
+        final HashMap<Integer, VideoQualityChoice> renditions = new HashMap<>();
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_VIDEO) continue;
+            for (int index = 0; index < group.length; index++) {
+                if (!group.isTrackSupported(index)) continue;
+                Format format = group.getTrackFormat(index);
+                int longSide = Math.max(format.width, format.height);
+                int shortSide = Math.min(format.width, format.height);
+                if (longSide <= 0) continue;
+                VideoQualityChoice previous = renditions.get(longSide);
+                if (previous == null || format.bitrate > previous.bitrate) {
+                    String codec = shortCodec(format.sampleMimeType);
+                    String dimensions = shortSide > 0
+                            ? longSide + " × " + shortSide : String.valueOf(longSide);
+                    String details = codec == null ? dimensions : dimensions + "  •  " + codec;
+                    String bitrate = format.bitrate > 0
+                            ? getString(R.string.quality_bitrate, format.bitrate / 1_000_000f) : "";
+                    renditions.put(longSide, VideoQualityChoice.track(
+                            longSide + "p", details, bitrate,
+                            group.getMediaTrackGroup(), index, format.bitrate));
+                }
+            }
+        }
+        ArrayList<Integer> longSides = new ArrayList<>(renditions.keySet());
+        longSides.sort(Collections.reverseOrder());
+        for (Integer longSide : longSides) choices.add(renditions.get(longSide));
+
+        LampaPlaylist.Item item = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
+        if (item != null && !item.quality.isEmpty()) {
+            ArrayList<String> labels = new ArrayList<>(item.quality.keySet());
+            labels.sort((left, right) -> Integer.compare(qualityNumber(right), qualityNumber(left)));
+            for (String label : labels) {
+                String url = item.quality.get(label);
+                if (url != null && !url.trim().isEmpty()) {
+                    choices.add(VideoQualityChoice.source(label, getString(R.string.quality_source), url));
+                }
+            }
+        }
+
+        if (choices.size() <= 2) {
+            Toast.makeText(this, R.string.quality_unavailable, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        final Dialog dialog = new Dialog(this, android.R.style.Theme_Translucent_NoTitleBar);
+        final FrameLayout overlay = new FrameLayout(this);
+        overlay.setBackgroundColor(Color.argb(44, 0, 0, 0));
+
+        final int gold = Color.rgb(240, 183, 38);
+        final LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(Utils.dpToPx(18), Utils.dpToPx(8), Utils.dpToPx(18), Utils.dpToPx(14));
+        panel.setBackground(lampaBackground(lampaMenuColor(4, 18, 40), gold, 10));
+
+        final TextView heading = new TextView(this);
+        heading.setText(R.string.quality_title);
+        heading.setTextColor(Color.WHITE);
+        heading.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
+        heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.setPadding(Utils.dpToPx(12), 0, Utils.dpToPx(12), 0);
+        panel.addView(heading, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Utils.dpToPx(66)));
+
+        final View divider = new View(this);
+        divider.setBackgroundColor(Color.rgb(35, 58, 84));
+        panel.addView(divider, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Utils.dpToPx(1)));
+
+        final ListView list = new ListView(this);
+        list.setDivider(new ColorDrawable(Color.TRANSPARENT));
+        list.setDividerHeight(Utils.dpToPx(4));
+        list.setSelector(lampaBackground(Color.argb(56, 10, 39, 76), gold, 7));
+        list.setDrawSelectorOnTop(true);
+        list.setItemsCanFocus(false);
+        list.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
+        list.setPadding(0, Utils.dpToPx(6), 0, 0);
+        list.setClipToPadding(false);
+        list.setAdapter(new QualityAdapter(choices));
+        list.setOnItemClickListener((parent, view, which, id) -> {
+            applyVideoQuality(choices.get(which));
+            dialog.dismiss();
+        });
+        installTvListNavigation(list);
+        int visibleRows = Math.min(choices.size(), 6);
+        int screenHeight = getResources().getDisplayMetrics().heightPixels;
+        int desiredListHeight = Utils.dpToPx(visibleRows * 70 + 10);
+        int maxListHeight = Math.max(Utils.dpToPx(150),
+                screenHeight - Utils.dpToPx(110));
+        panel.addView(list, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Math.min(desiredListHeight, maxListHeight)));
+
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        int panelWidth = Math.min((int) (screenWidth * (isTvBox ? 0.72f : 0.78f)),
+                Utils.dpToPx(920));
+        panelWidth = Math.max(panelWidth, Math.min(Utils.dpToPx(360), screenWidth));
+        FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
+                panelWidth, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+        overlay.addView(panel, panelParams);
+        overlay.setOnClickListener(view -> dialog.dismiss());
+        panel.setOnClickListener(view -> { });
+
+        dialog.setContentView(overlay);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            window.setDimAmount(0f);
+        }
+        dialog.setOnShowListener(ignored -> {
+            Window shownWindow = dialog.getWindow();
+            if (shownWindow != null) {
+                shownWindow.setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT);
+            }
+            int selected = selectedQualityIndex(choices);
+            list.setSelection(selected);
+            list.setItemChecked(selected, true);
+            list.post(list::requestFocus);
+        });
+        dialog.show();
+    }
+
+    private void installTvListNavigation(ListView list) {
+        list.setFocusable(true);
+        list.setFocusableInTouchMode(true);
+        list.setOnKeyListener((view, keyCode, event) -> {
+            boolean navigationKey = keyCode == KeyEvent.KEYCODE_DPAD_UP
+                    || keyCode == KeyEvent.KEYCODE_DPAD_DOWN
+                    || keyCode == KeyEvent.KEYCODE_DPAD_CENTER
+                    || keyCode == KeyEvent.KEYCODE_ENTER
+                    || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER;
+            if (!navigationKey) return false;
+            if (event.getAction() != KeyEvent.ACTION_DOWN) return true;
+
+            int count = list.getAdapter() == null ? 0 : list.getAdapter().getCount();
+            if (count == 0) return true;
+            int selected = list.getSelectedItemPosition();
+            if (selected == ListView.INVALID_POSITION) selected = 0;
+
+            if (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                int target = keyCode == KeyEvent.KEYCODE_DPAD_UP
+                        ? Math.max(0, selected - 1)
+                        : Math.min(count - 1, selected + 1);
+                list.setSelection(target);
+                list.setItemChecked(target, true);
+                list.smoothScrollToPosition(target);
+                return true;
+            }
+
+            int childIndex = selected - list.getFirstVisiblePosition();
+            View child = list.getChildAt(childIndex);
+            if (child != null) {
+                list.performItemClick(child, selected, list.getAdapter().getItemId(selected));
+            }
+            return true;
+        });
+    }
+
+    private void applyVideoQuality(VideoQualityChoice choice) {
+        if (player == null || choice == null) return;
+        selectedVideoQualityMode = choice.mode;
+        selectedVideoTrackGroup = choice.group;
+        selectedVideoTrackIndex = choice.trackIndex;
+        if (choice.sourceUrl != null && lampaPlaylist != null) {
+            LampaPlaylist.Item item = lampaPlaylist.getCurrent();
+            if (item == null || choice.sourceUrl.equals(item.url)) return;
+            item.positionMs = Math.max(0, player.getCurrentPosition());
+            boolean resume = player.getPlayWhenReady();
+            item.url = choice.sourceUrl;
+            decoderQualityFallbackTried = false;
+            alternateStreamTypeTried = false;
+            forcedStreamMimeType = null;
+            applyPlaylistItem(item, false);
+            restorePlayState = resume;
+            initializePlayer();
+            return;
+        }
+
+        TrackSelectionParameters.Builder builder = player.getTrackSelectionParameters().buildUpon()
+                .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+                .setForceHighestSupportedBitrate(choice.mode == VideoQualityChoice.MODE_MAXIMUM);
+        if (choice.mode == VideoQualityChoice.MODE_TRACK && choice.group != null) {
+            builder.setOverrideForType(new TrackSelectionOverride(
+                    choice.group, Collections.singletonList(choice.trackIndex)));
+        }
+        player.setTrackSelectionParameters(builder.build());
+        updateLampaTrackDetails();
+    }
+
+    private void fallbackFromSlowAv1(int currentHeight) {
+        if (player == null || decoderQualityFallbackTried) return;
+
+        LampaPlaylist.Item item = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
+        if (item != null) {
+            item.positionMs = Math.max(0, player.getCurrentPosition());
+            String lowerUrl = lampaPlaylist.useLowerQuality(item);
+            if (lowerUrl != null) {
+                boolean resume = player.getPlayWhenReady();
+                decoderQualityFallbackTried = true;
+                alternateStreamTypeTried = false;
+                forcedStreamMimeType = null;
+                applyPlaylistItem(item, false);
+                restorePlayState = resume;
+                Utils.showText(playerView, getString(R.string.decoder_quality_fallback), 3500);
+                initializePlayer();
+                return;
+            }
+        }
+
+        VideoQualityChoice bestLower = null;
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_VIDEO) continue;
+            for (int index = 0; index < group.length; index++) {
+                if (!group.isTrackSupported(index)) continue;
+                Format format = group.getTrackFormat(index);
+                if (format.height <= 0 || format.height >= currentHeight) continue;
+                if (bestLower == null || format.height > qualityNumber(bestLower.label)
+                        || (format.height == qualityNumber(bestLower.label)
+                        && format.bitrate > bestLower.bitrate)) {
+                    bestLower = VideoQualityChoice.track(
+                            format.height + "p", group.getMediaTrackGroup(), index, format.bitrate);
+                }
+            }
+        }
+        if (bestLower != null) {
+            decoderQualityFallbackTried = true;
+            applyVideoQuality(bestLower);
+            Utils.showText(playerView, getString(R.string.decoder_quality_fallback), 3500);
+        }
+    }
+
+    private static int qualityNumber(String label) {
+        if (label == null) return 0;
+        String normalized = label.toLowerCase(Locale.US);
+        if (normalized.contains("4k") || normalized.contains("uhd")) return 2160;
+        String digits = label.replaceAll("[^0-9]", "");
+        try {
+            return digits.isEmpty() ? 0 : Integer.parseInt(digits);
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
+    }
+
+    private static final class VideoQualityChoice {
+        static final int MODE_AUTO = 0;
+        static final int MODE_MAXIMUM = 1;
+        static final int MODE_TRACK = 2;
+        static final int MODE_SOURCE = 3;
+        final String label;
+        final String details;
+        final String bitrateText;
+        final int mode;
+        final TrackGroup group;
+        final int trackIndex;
+        final int bitrate;
+        final String sourceUrl;
+
+        private VideoQualityChoice(String label, String details, String bitrateText,
+                                   int mode, TrackGroup group, int trackIndex,
+                                   int bitrate, String sourceUrl) {
+            this.label = label;
+            this.details = details;
+            this.bitrateText = bitrateText;
+            this.mode = mode;
+            this.group = group;
+            this.trackIndex = trackIndex;
+            this.bitrate = bitrate;
+            this.sourceUrl = sourceUrl;
+        }
+
+        static VideoQualityChoice auto(String label) {
+            return new VideoQualityChoice(label, "", "", MODE_AUTO, null, -1, -1, null);
+        }
+
+        static VideoQualityChoice maximum(String label) {
+            return new VideoQualityChoice(label, "", "", MODE_MAXIMUM, null, -1, -1, null);
+        }
+
+        static VideoQualityChoice track(String label, TrackGroup group, int index, int bitrate) {
+            return new VideoQualityChoice(label, "", "", MODE_TRACK, group, index, bitrate, null);
+        }
+
+        static VideoQualityChoice track(String label, String details, String bitrateText,
+                                        TrackGroup group, int index, int bitrate) {
+            return new VideoQualityChoice(label, details, bitrateText,
+                    MODE_TRACK, group, index, bitrate, null);
+        }
+
+        static VideoQualityChoice source(String label, String details, String url) {
+            return new VideoQualityChoice(label, details, "", MODE_SOURCE, null, -1, -1, url);
+        }
+    }
+
+    private int selectedQualityIndex(List<VideoQualityChoice> choices) {
+        LampaPlaylist.Item current = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
+        for (int index = 0; index < choices.size(); index++) {
+            VideoQualityChoice choice = choices.get(index);
+            if (choice.mode == VideoQualityChoice.MODE_SOURCE && current != null
+                    && choice.sourceUrl != null && choice.sourceUrl.equals(current.url)) return index;
+            if (choice.mode == VideoQualityChoice.MODE_TRACK
+                    && selectedVideoQualityMode == VideoQualityChoice.MODE_TRACK
+                    && choice.group == selectedVideoTrackGroup
+                    && choice.trackIndex == selectedVideoTrackIndex) return index;
+            if (choice.mode == selectedVideoQualityMode
+                    && (choice.mode == VideoQualityChoice.MODE_AUTO
+                    || choice.mode == VideoQualityChoice.MODE_MAXIMUM)) return index;
+        }
+        return 0;
+    }
+
+    private final class QualityAdapter extends BaseAdapter {
+        private final List<VideoQualityChoice> choices;
+
+        QualityAdapter(List<VideoQualityChoice> choices) {
+            this.choices = choices;
+        }
+
+        @Override public int getCount() { return choices.size(); }
+        @Override public VideoQualityChoice getItem(int position) { return choices.get(position); }
+        @Override public long getItemId(int position) { return position; }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            QualityRow holder;
+            if (convertView == null) {
+                LinearLayout row = new LinearLayout(PlayerActivity.this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(Utils.dpToPx(12), Utils.dpToPx(6), Utils.dpToPx(14), Utils.dpToPx(6));
+                row.setMinimumHeight(Utils.dpToPx(66));
+                row.setFocusable(false);
+                row.setClickable(false);
+
+                TextView badge = new TextView(PlayerActivity.this);
+                badge.setGravity(Gravity.CENTER);
+                badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+                badge.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                row.addView(badge, new LinearLayout.LayoutParams(
+                        Utils.dpToPx(112), Utils.dpToPx(44)));
+
+                LinearLayout textBlock = new LinearLayout(PlayerActivity.this);
+                textBlock.setOrientation(LinearLayout.VERTICAL);
+                textBlock.setGravity(Gravity.CENTER_VERTICAL);
+                TextView title = new TextView(PlayerActivity.this);
+                title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+                title.setTextColor(Color.WHITE);
+                title.setSingleLine(true);
+                TextView details = new TextView(PlayerActivity.this);
+                details.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+                details.setTextColor(Color.rgb(145, 178, 219));
+                details.setSingleLine(true);
+                textBlock.addView(title);
+                textBlock.addView(details);
+                LinearLayout.LayoutParams blockParams = new LinearLayout.LayoutParams(
+                        0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                blockParams.setMarginStart(Utils.dpToPx(14));
+                row.addView(textBlock, blockParams);
+
+                TextView bitrate = new TextView(PlayerActivity.this);
+                bitrate.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+                bitrate.setTextColor(Color.rgb(145, 178, 219));
+                bitrate.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+                bitrate.setSingleLine(true);
+                row.addView(bitrate, new LinearLayout.LayoutParams(
+                        Utils.dpToPx(128), ViewGroup.LayoutParams.MATCH_PARENT));
+
+                TextView check = new TextView(PlayerActivity.this);
+                check.setText("✓");
+                check.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
+                check.setTextColor(Color.rgb(240, 183, 38));
+                check.setGravity(Gravity.CENTER);
+                row.addView(check, new LinearLayout.LayoutParams(
+                        Utils.dpToPx(42), ViewGroup.LayoutParams.MATCH_PARENT));
+
+                holder = new QualityRow(badge, title, details, bitrate, check);
+                row.setTag(holder);
+                convertView = row;
+            } else {
+                holder = (QualityRow) convertView.getTag();
+            }
+
+            VideoQualityChoice choice = getItem(position);
+            boolean special = choice.mode == VideoQualityChoice.MODE_AUTO
+                    || choice.mode == VideoQualityChoice.MODE_MAXIMUM;
+            holder.badge.setText(choice.mode == VideoQualityChoice.MODE_AUTO ? "A"
+                    : choice.mode == VideoQualityChoice.MODE_MAXIMUM ? "★" : choice.label);
+            holder.title.setText(special ? choice.label : choice.details);
+            holder.details.setText(choice.mode == VideoQualityChoice.MODE_AUTO
+                    ? getString(R.string.quality_auto_description)
+                    : choice.mode == VideoQualityChoice.MODE_MAXIMUM
+                    ? getString(R.string.quality_maximum_badge) : "");
+            holder.details.setTextColor(choice.mode == VideoQualityChoice.MODE_MAXIMUM
+                    ? Color.rgb(240, 183, 38) : Color.rgb(145, 178, 219));
+            holder.bitrate.setText(choice.bitrateText);
+            holder.check.setVisibility(position == selectedQualityIndex(choices)
+                    ? View.VISIBLE : View.INVISIBLE);
+            styleQualityBadge(holder.badge, false);
+            styleQualityRow(convertView, holder, false);
+            return convertView;
+        }
+    }
+
+    private void styleQualityRow(View row, QualityRow holder, boolean focused) {
+        int gold = Color.rgb(240, 183, 38);
+        row.setBackground(lampaBackground(focused
+                ? Color.rgb(10, 39, 76) : Color.argb(80, 4, 18, 40),
+                focused ? gold : Color.rgb(35, 58, 84), 7));
+        styleQualityBadge(holder.badge, focused);
+    }
+
+    private void styleQualityBadge(TextView badge, boolean focused) {
+        badge.setTextColor(focused ? Color.rgb(255, 204, 74) : Color.rgb(145, 178, 219));
+        badge.setBackground(lampaBackground(Color.argb(70, 4, 18, 40),
+                focused ? Color.rgb(240, 183, 38) : Color.rgb(62, 91, 126), 6));
+    }
+
+    private static final class QualityRow {
+        final TextView badge;
+        final TextView title;
+        final TextView details;
+        final TextView bitrate;
+        final TextView check;
+
+        QualityRow(TextView badge, TextView title, TextView details,
+                   TextView bitrate, TextView check) {
+            this.badge = badge;
+            this.title = title;
+            this.details = details;
+            this.bitrate = bitrate;
+            this.check = check;
+        }
+    }
+
+    private final class EpisodeAdapter extends BaseAdapter {
+        @Override public int getCount() { return lampaPlaylist == null ? 0 : lampaPlaylist.size(); }
+        @Override public LampaPlaylist.Item getItem(int position) { return lampaPlaylist.get(position); }
+        @Override public long getItemId(int position) { return position; }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            EpisodeRow holder;
+            if (convertView == null) {
+                LinearLayout row = new LinearLayout(PlayerActivity.this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(Utils.dpToPx(10), Utils.dpToPx(8), Utils.dpToPx(14), Utils.dpToPx(8));
+                row.setMinimumHeight(Utils.dpToPx(94));
+                row.setFocusable(false);
+                row.setClickable(false);
+
+                FrameLayout preview = new FrameLayout(PlayerActivity.this);
+                ImageView thumbnail = new ImageView(PlayerActivity.this);
+                thumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                thumbnail.setBackgroundColor(Color.rgb(35, 35, 35));
+                preview.addView(thumbnail, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+                TextView number = new TextView(PlayerActivity.this);
+                number.setTextColor(Color.WHITE);
+                number.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+                number.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                number.setGravity(Gravity.CENTER);
+                number.setBackgroundColor(Color.argb(190, 0, 0, 0));
+                FrameLayout.LayoutParams numberParams = new FrameLayout.LayoutParams(
+                        Utils.dpToPx(30), Utils.dpToPx(28), Gravity.START | Gravity.TOP);
+                preview.addView(number, numberParams);
+
+                LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
+                        Utils.dpToPx(154), Utils.dpToPx(86));
+                row.addView(preview, previewParams);
+
+                TextView title = new TextView(PlayerActivity.this);
+                title.setTextColor(Color.WHITE);
+                title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+                title.setMaxLines(2);
+                title.setEllipsize(TextUtils.TruncateAt.END);
+                title.setGravity(Gravity.CENTER_VERTICAL);
+                LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
+                        0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
+                titleParams.setMarginStart(Utils.dpToPx(16));
+                row.addView(title, titleParams);
+
+                holder = new EpisodeRow(thumbnail, number, title);
+                row.setTag(holder);
+                convertView = row;
+            } else {
+                holder = (EpisodeRow) convertView.getTag();
+            }
+
+            LampaPlaylist.Item item = getItem(position);
+            holder.position = position;
+            holder.number.setText(String.valueOf(position + 1));
+            holder.title.setText(item.displayTitle(position));
+            holder.title.setTypeface(Typeface.DEFAULT,
+                    position == lampaPlaylist.getCurrentIndex() ? Typeface.BOLD : Typeface.NORMAL);
+            holder.number.setTextColor(position == lampaPlaylist.getCurrentIndex()
+                    ? Color.rgb(255, 204, 74) : Color.WHITE);
+            styleEpisodeRow(convertView, holder, false);
+
+            Glide.with(PlayerActivity.this)
+                    .load(item.thumbnail)
+                    .placeholder(new ColorDrawable(Color.rgb(35, 35, 35)))
+                    .error(new ColorDrawable(Color.rgb(35, 35, 35)))
+                    .centerCrop()
+                    .into(holder.thumbnail);
+            return convertView;
+        }
+    }
+
+    private static final class EpisodeRow {
+        final ImageView thumbnail;
+        final TextView number;
+        final TextView title;
+        int position;
+
+        EpisodeRow(ImageView thumbnail, TextView number, TextView title) {
+            this.thumbnail = thumbnail;
+            this.number = number;
+            this.title = title;
+        }
+    }
+
+    private void styleEpisodeRow(View row, EpisodeRow holder, boolean focused) {
+        boolean current = lampaPlaylist != null
+                && holder.position == lampaPlaylist.getCurrentIndex();
+        int fill = focused ? Color.rgb(10, 39, 76)
+                : current ? Color.rgb(19, 54, 94) : Color.argb(55, 4, 18, 40);
+        int stroke = focused ? Color.rgb(240, 183, 38) : Color.rgb(35, 58, 84);
+        row.setBackground(lampaBackground(fill, stroke, 7));
+    }
+
+    private void playPlaylistIndex(int index, boolean outgoingEnded) {
+        if (lampaPlaylist == null || switchingPlaylistItem || lampaPlaylist.get(index) == null) return;
+        switchingPlaylistItem = true;
+        recordCurrentPlaylistItem(outgoingEnded);
+        updateLoading(true);
+        lampaPlaylist.resolve(index, new LampaPlaylist.ResolveCallback() {
+            @Override
+            public void onResolved(LampaPlaylist.Item item) {
+                if (isFinishing() || isDestroyed()) return;
+                lampaPlaylist.setCurrentIndex(index);
+                playlistCurrentRecorded = false;
+                alternateStreamTypeTried = false;
+                decoderQualityFallbackTried = false;
+                forcedStreamMimeType = null;
+                applyPlaylistItem(item, false);
+                playbackFinished = false;
+                restorePlayState = true;
+                focusPlay = true;
+                switchingPlaylistItem = false;
+                initializePlayer();
+                lampaPlaylist.preResolveNext();
+            }
+
+            @Override
+            public void onError(String message) {
+                switchingPlaylistItem = false;
+                playlistCurrentRecorded = false;
+                updateLoading(false);
+                Toast.makeText(PlayerActivity.this,
+                        getString(R.string.playlist_resolve_error, message), Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void recordCurrentPlaylistItem(boolean ended) {
+        if (lampaPlaylist == null || lampaPlaylist.isEmpty() || playlistCurrentRecorded) return;
+        long position = 0;
+        long duration = 0;
+        if (player != null) {
+            position = Math.max(0, player.getCurrentPosition());
+            long playerDuration = player.getDuration();
+            if (playerDuration != C.TIME_UNSET) duration = Math.max(0, playerDuration);
+        }
+        lampaPlaylist.recordResult(lampaPlaylist.getCurrent(), position, duration, ended);
+        playlistCurrentRecorded = true;
     }
 
     @Override
@@ -1178,6 +2662,7 @@ public class PlayerActivity extends Activity {
     public void initializePlayer() {
         boolean isNetworkUri = Utils.isSupportedNetworkUri(mPrefs.mediaUri);
         haveMedia = mPrefs.mediaUri != null;
+        av1DroppedFrames = 0;
 
         if (player != null) {
             player.removeListener(playerListener);
@@ -1188,7 +2673,10 @@ public class PlayerActivity extends Activity {
 
         trackSelector = new DefaultTrackSelector(this);
         trackSelector.setParameters(trackSelector.buildUponParameters()
-                .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true));
+                .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
+                .setExceedRendererCapabilitiesIfNecessary(true)
+                .setAllowMultipleAdaptiveSelections(true));
+        final boolean optimize4k = isCurrent4kCandidate();
         if (mPrefs.tunneling) {
             trackSelector.setParameters(trackSelector.buildUponParameters()
                     .setTunnelingEnabled(true)
@@ -1223,28 +2711,48 @@ public class PlayerActivity extends Activity {
         DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory()
                 .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS)
                 .setTsExtractorTimestampSearchBytes(1500 * TsExtractor.TS_PACKET_SIZE);
+        int decoderPriority = mPrefs.decoderPriority;
+        if (lampaPlaylist != null
+                && decoderPriority == DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON) {
+            // Android often exposes a slow software AV1 MediaCodec ahead of the
+            // bundled dav1d renderer. LampaUA streams should prefer our bundled
+            // decoder, which is considerably smoother on non-AV1 chipsets.
+            decoderPriority = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER;
+        }
         @SuppressLint("WrongConstant") RenderersFactory renderersFactory = new DefaultRenderersFactory(this)
-                .setExtensionRendererMode(mPrefs.decoderPriority)
+                .setExtensionRendererMode(decoderPriority)
+                .setEnableDecoderFallback(true)
                 .setMapDV7ToHevc(mPrefs.mapDV7ToHevc);
 
         ExoPlayer.Builder playerBuilder = new ExoPlayer.Builder(this, renderersFactory)
                 .setTrackSelector(trackSelector)
                 .setMediaSourceFactory(new DefaultMediaSourceFactory(this, extractorsFactory));
 
+        if (optimize4k) {
+            playerBuilder.setLoadControl(new DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(20_000, 90_000, 5_000, 8_000)
+                    .setPrioritizeTimeOverSizeThresholds(true)
+                    .build());
+        }
+
         if (haveMedia && isNetworkUri) {
             if (mPrefs.mediaUri.getScheme().toLowerCase().startsWith("http")) {
-                HashMap<String, String> headers = new HashMap<>();
+                HashMap<String, String> headers = new HashMap<>(apiHeaders);
                 String userInfo = mPrefs.mediaUri.getUserInfo();
                 if (userInfo != null && userInfo.length() > 0 && userInfo.contains(":")) {
                     headers.put("Authorization", "Basic " + Base64.encodeToString(userInfo.getBytes(), Base64.NO_WRAP));
-                    DefaultHttpDataSource.Factory defaultHttpDataSourceFactory = new DefaultHttpDataSource.Factory();
-                    defaultHttpDataSourceFactory.setDefaultRequestProperties(headers);
-                    playerBuilder.setMediaSourceFactory(new DefaultMediaSourceFactory(defaultHttpDataSourceFactory, extractorsFactory));
                 }
+                DefaultHttpDataSource.Factory defaultHttpDataSourceFactory = new DefaultHttpDataSource.Factory()
+                        .setAllowCrossProtocolRedirects(true)
+                        .setConnectTimeoutMs(15000)
+                        .setReadTimeoutMs(30000);
+                if (!headers.isEmpty()) defaultHttpDataSourceFactory.setDefaultRequestProperties(headers);
+                playerBuilder.setMediaSourceFactory(new DefaultMediaSourceFactory(defaultHttpDataSourceFactory, extractorsFactory));
             }
         }
 
         player = playerBuilder.build();
+        player.addAnalyticsListener(lampaPerformanceListener);
 
         AudioAttributes audioAttributes = new AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
@@ -1293,8 +2801,9 @@ public class PlayerActivity extends Activity {
             updatebuttonAspectRatioIcon();
 
             MediaItem.Builder mediaItemBuilder = new MediaItem.Builder()
-                    .setUri(mPrefs.mediaUri)
-                    .setMimeType(mPrefs.mediaType);
+                    .setUri(mPrefs.mediaUri);
+            String streamMimeType = getStreamMimeType(mPrefs.mediaUri, mPrefs.mediaType);
+            if (streamMimeType != null) mediaItemBuilder.setMimeType(streamMimeType);
             String title;
             if (apiTitle != null) {
                 title = apiTitle;
@@ -1340,7 +2849,8 @@ public class PlayerActivity extends Activity {
             } else {
                 titleView.setText(Utils.getFileName(this, mPrefs.mediaUri));
             }
-            titleView.setVisibility(View.VISIBLE);
+            titleView.setVisibility(lampaPlaylist == null ? View.VISIBLE : View.GONE);
+            updateLampaTopPanel();
 
             updateButtons(true);
 
@@ -1485,6 +2995,22 @@ public class PlayerActivity extends Activity {
 
             if (state == Player.STATE_READY) {
                 frameRendered = true;
+                updateLampaTopPanel();
+                updateLampaSegmentMarkers();
+
+                if (lampaPlaylist != null && duration != C.TIME_UNSET && duration > 0) {
+                    LampaPlaylist.Item segmentItem = lampaPlaylist.getCurrent();
+                    lampaPlaylist.fetchRemoteSegments(segmentItem, duration, loaded -> {
+                        if (lampaPlaylist != null && loaded == lampaPlaylist.getCurrent()) {
+                            updateLampaSegmentMarkers();
+                            updateLampaSkipUi();
+                        }
+                    });
+                }
+
+                if (lampaPlaylist != null) {
+                    lampaPlaylist.preResolveNext();
+                }
 
                 if (videoLoading) {
                     videoLoading = false;
@@ -1573,11 +3099,21 @@ public class PlayerActivity extends Activity {
                     }
                 }
             } else if (state == Player.STATE_ENDED) {
+                if (lampaPlaylist != null && lampaPlaylist.hasNext() && lampaPlaylist.isAutoNext()) {
+                    playPlaylistIndex(lampaPlaylist.getCurrentIndex() + 1, true);
+                    return;
+                }
                 playbackFinished = true;
+                recordCurrentPlaylistItem(true);
                 if (apiAccess) {
                     finish();
                 }
             }
+        }
+
+        @Override
+        public void onTracksChanged(@NonNull Tracks tracks) {
+            updateLampaTrackDetails();
         }
 
         @Override
@@ -1586,8 +3122,36 @@ public class PlayerActivity extends Activity {
             if (error instanceof ExoPlaybackException) {
                 final ExoPlaybackException exoPlaybackException = (ExoPlaybackException) error;
                 if (exoPlaybackException.type == ExoPlaybackException.TYPE_SOURCE) {
+                    if (lampaIptv && !alternateStreamTypeTried && mPrefs.mediaUri != null) {
+                        alternateStreamTypeTried = true;
+                        String currentMime = getStreamMimeType(mPrefs.mediaUri, mPrefs.mediaType);
+                        forcedStreamMimeType = "application/x-mpegURL".equals(currentMime)
+                                ? "" : "application/x-mpegURL";
+                        restorePlayState = true;
+                        Utils.showText(playerView, getString(R.string.live_stream_fallback));
+                        initializePlayer();
+                        return;
+                    }
                     releasePlayer(false);
                     return;
+                }
+                if (exoPlaybackException.type == ExoPlaybackException.TYPE_RENDERER
+                        && !decoderQualityFallbackTried && lampaPlaylist != null) {
+                    LampaPlaylist.Item item = lampaPlaylist.getCurrent();
+                    if (item != null) {
+                        if (player != null) item.positionMs = Math.max(0, player.getCurrentPosition());
+                        String fallbackUrl = lampaPlaylist.useLowerQuality(item);
+                        if (fallbackUrl != null) {
+                            decoderQualityFallbackTried = true;
+                            alternateStreamTypeTried = false;
+                            forcedStreamMimeType = null;
+                            applyPlaylistItem(item, false);
+                            restorePlayState = true;
+                            Utils.showText(playerView, getString(R.string.decoder_quality_fallback), 3500);
+                            initializePlayer();
+                            return;
+                        }
+                    }
                 }
                 if (controllerVisible && controllerVisibleFully) {
                     showError(exoPlaybackException);
@@ -1596,6 +3160,44 @@ public class PlayerActivity extends Activity {
                 }
             }
         }
+    }
+
+    private String getStreamMimeType(Uri uri, String suppliedType) {
+        if (forcedStreamMimeType != null) {
+            return forcedStreamMimeType.isEmpty() ? null : forcedStreamMimeType;
+        }
+        if (uri != null) {
+            String value = Uri.decode(uri.toString()).toLowerCase(Locale.ROOT);
+            if (value.contains(".m3u8")) return "application/x-mpegURL";
+            if (value.contains(".mpd") || value.contains("/ytdl/manifest?")) {
+                return "application/dash+xml";
+            }
+            if (value.contains(".ism/manifest") || value.endsWith(".ism")) return "application/vnd.ms-sstr+xml";
+        }
+        return suppliedType != null && suppliedType.endsWith("/*") ? null : suppliedType;
+    }
+
+    private boolean isCurrent4kCandidate() {
+        if (lampaPlaylist != null) {
+            LampaPlaylist.Item item = lampaPlaylist.getCurrent();
+            if (item != null) {
+                for (String label : item.quality.keySet()) {
+                    String candidate = item.quality.get(label);
+                    if (candidate == null || !candidate.equals(item.url)) continue;
+                    String normalized = label.toLowerCase(Locale.US);
+                    String digits = normalized.replaceAll("[^0-9]", "");
+                    if (normalized.contains("4k") || normalized.contains("uhd")) return true;
+                    try {
+                        if (!digits.isEmpty() && Integer.parseInt(digits) >= 2000) return true;
+                    } catch (NumberFormatException ignored) { }
+                }
+                String source = item.url == null ? "" : item.url.toLowerCase(Locale.US);
+                if (source.contains("2160") || source.contains("4k") || source.contains("uhd")) return true;
+            }
+        }
+        Uri uri = mPrefs == null ? null : mPrefs.mediaUri;
+        String source = uri == null ? "" : uri.toString().toLowerCase(Locale.US);
+        return source.contains("2160") || source.contains("4k") || source.contains("uhd");
     }
 
     private void enableRotation() {
@@ -1918,6 +3520,9 @@ public class PlayerActivity extends Activity {
 
     void showSnack(final String textPrimary, final String textSecondary) {
         snackbar = Snackbar.make(coordinatorLayout, textPrimary, Snackbar.LENGTH_LONG);
+        snackbar.setTextColor(Color.WHITE);
+        snackbar.setActionTextColor(Color.rgb(240, 183, 38));
+        snackbar.getView().setBackgroundResource(R.drawable.ua_dialog_background);
         if (textSecondary != null) {
             snackbar.setAction(R.string.error_details, v -> {
                 final AlertDialog.Builder builder = new AlertDialog.Builder(PlayerActivity.this);
@@ -1925,6 +3530,7 @@ public class PlayerActivity extends Activity {
                 builder.setPositiveButton(android.R.string.ok, (dialogInterface, i) -> dialogInterface.dismiss());
                 final AlertDialog dialog = builder.create();
                 dialog.show();
+                styleUaAlertDialog(dialog, true);
             });
         }
         snackbar.setAnchorView(R.id.exo_bottom_bar);
@@ -2081,6 +3687,7 @@ public class PlayerActivity extends Activity {
         });
         final AlertDialog dialog = builder.create();
         dialog.show();
+        styleUaAlertDialog(dialog, true);
     }
 
     void resetHideCallbacks() {
@@ -2181,6 +3788,42 @@ public class PlayerActivity extends Activity {
         builder.setNegativeButton(android.R.string.cancel, (dialog, which) -> {});
         final AlertDialog dialog = builder.create();
         dialog.show();
+        styleUaAlertDialog(dialog, false);
+    }
+
+    private void styleUaAlertDialog(AlertDialog dialog, boolean focusPositive) {
+        if (dialog == null) return;
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawableResource(R.drawable.ua_dialog_background);
+            int screenWidth = getResources().getDisplayMetrics().widthPixels;
+            int width = Math.min((int) (screenWidth * (isTvBox ? 0.62f : 0.76f)),
+                    Utils.dpToPx(760));
+            window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        TextView message = dialog.findViewById(android.R.id.message);
+        if (message != null) {
+            message.setTextColor(Color.WHITE);
+            message.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+            message.setLineSpacing(0f, 1.12f);
+        }
+        Button positive = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        Button negative = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+        Button neutral = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+        styleUaDialogButton(positive);
+        styleUaDialogButton(negative);
+        styleUaDialogButton(neutral);
+        Button preferred = focusPositive ? positive : negative;
+        if (preferred != null) preferred.requestFocus();
+    }
+
+    private void styleUaDialogButton(Button button) {
+        if (button == null) return;
+        button.setTextColor(Color.rgb(240, 183, 38));
+        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        button.setAllCaps(false);
+        button.setBackgroundResource(R.drawable.ua_dialog_button_background);
+        button.setPadding(Utils.dpToPx(16), 0, Utils.dpToPx(16), 0);
     }
 
     void deleteMedia() {

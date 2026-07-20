@@ -9,11 +9,11 @@ android {
 
     defaultConfig {
         def abiFilter = project.findProperty("abiFilter")
-        applicationId "com.brouken.player"
+        applicationId "com.lampaua.player"
         minSdkVersion 23
         targetSdkVersion 36
-        versionCode 214
-        versionName "0.${versionCode}"
+        versionCode 17
+        versionName "1.5.9"
         if (abiFilter) {
             def abiCodeMap = ["x86": 1, "x86_64": 2, "armeabi-v7a": 3, "arm64-v8a": 4]
             versionCode = versionCode * 10 + abiCodeMap[abiFilter]
@@ -23,7 +23,7 @@ android {
         }
     }
     base {
-        archivesName = "Just.Player.v${defaultConfig.versionName}"
+        archivesName = "LampaUA.Player.v${defaultConfig.versionName}"
     }
     buildTypes {
         release {
@@ -105,6 +105,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-rtsp:$media3_version") {
         exclude group: "androidx.media3", module: "media3-exoplayer"
     }
+    implementation "androidx.media3:media3-datasource-rtmp:$media3_version"
     implementation 'androidx.recyclerview:recyclerview:1.4.0'
     implementation 'com.getkeepsafe.taptargetview:taptargetview:1.13.3'
     implementation 'com.google.android.material:material:1.12.0'
@@ -113,6 +114,7 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.1'
     implementation 'androidx.preference:preference:1.2.1'
     implementation 'com.squareup.okhttp3:okhttp:5.3.2'
+    implementation 'com.github.bumptech.glide:glide:4.16.0'
     implementation 'com.sigpwned:chardet4j:78.1.0'
     implementation project(path: ':doubletapplayerview')
     implementation project(path: ':android-file-chooser')

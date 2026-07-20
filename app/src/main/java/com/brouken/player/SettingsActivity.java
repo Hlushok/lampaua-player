@@ -123,9 +123,24 @@ public class SettingsActivity extends AppCompatActivity {
         @Override
         public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
             super.onViewCreated(view, savedInstanceState);
-            if (Build.VERSION.SDK_INT >= 29) {
-                recyclerView = getListView();
-            }
+            recyclerView = getListView();
+            recyclerView.setBackgroundColor(getResources().getColor(R.color.ua_navy));
+            int side = (int) (18 * getResources().getDisplayMetrics().density + 0.5f);
+            int vertical = (int) (6 * getResources().getDisplayMetrics().density + 0.5f);
+            recyclerView.setPadding(side, vertical, side, vertical);
+            recyclerView.setClipToPadding(false);
+            recyclerView.addOnChildAttachStateChangeListener(
+                    new RecyclerView.OnChildAttachStateChangeListener() {
+                        @Override
+                        public void onChildViewAttachedToWindow(@NonNull View child) {
+                            if (child.isFocusable()) {
+                                child.setBackgroundResource(R.drawable.ua_preference_item_background);
+                            }
+                        }
+
+                        @Override
+                        public void onChildViewDetachedFromWindow(@NonNull View child) { }
+                    });
         }
 
         LinkedHashMap<String, String> getLanguages() {

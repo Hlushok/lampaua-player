@@ -17,6 +17,14 @@
             app:title="@string/pref_language_audio"
             app:useSimpleSummaryProvider="true" />
 
+        <ListPreference
+            app:key="menuOpacity"
+            app:defaultValue="88"
+            app:entries="@array/menu_opacity_entries"
+            app:entryValues="@array/menu_opacity_values"
+            app:title="@string/pref_menu_opacity"
+            app:useSimpleSummaryProvider="true" />
+
         <SwitchPreferenceCompat
             app:key="frameRateMatching"
             app:defaultValue="false"

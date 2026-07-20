@@ -1,5 +1,6 @@
 <resources>
     <style name="Theme.Player" parent="BaseTheme.Player">
-        <item name="colorControlHighlight">@color/white</item>
+        <item name="colorControlHighlight">@color/ua_blue</item>
+        <item name="colorControlActivated">@color/ua_gold</item>
     </style>
 </resources>

@@ -3,6 +3,10 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
     <color name="green">#3DDC84</color>
+    <color name="ua_navy">#FF041228</color>
+    <color name="ua_blue">#FF0A274C</color>
+    <color name="ua_gold">#FFF0B726</color>
+    <color name="ua_secondary">#FF91B2DB</color>
     <color name="shortcut_background">#F5F5F5</color>
 
     <color name="ui_controls_background">#98000000</color>

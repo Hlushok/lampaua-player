@@ -452,7 +452,8 @@ class Utils {
         final String scheme = uri.getScheme();
         if (scheme == null)
             return false;
-        return scheme.startsWith("http") || scheme.equals("rtsp");
+        return scheme.startsWith("http") || scheme.equals("rtsp")
+                || scheme.equals("rtmp") || scheme.equals("udp");
     }
 
     public static boolean isTvBox(Context context) {

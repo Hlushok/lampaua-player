@@ -68,6 +68,8 @@
                 <category android:name="android.intent.category.BROWSABLE" />
 
                 <data android:scheme="rtsp" />
+                <data android:scheme="rtmp" />
+                <data android:scheme="udp" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -76,6 +78,8 @@
                 <category android:name="android.intent.category.BROWSABLE" />
 
                 <data android:scheme="rtsp" />
+                <data android:scheme="rtmp" />
+                <data android:scheme="udp" />
                 <data android:mimeType="video/*" />
             </intent-filter>
             <intent-filter>
@@ -702,7 +706,7 @@
             android:label="@string/pref_title"
             android:parentActivityName=".PlayerActivity"
             android:screenOrientation="locked"
-            android:theme="@style/Theme.AppCompat.DayNight.NoActionBar" >
+            android:theme="@style/Theme.Player.Settings" >
             <intent-filter>
                 <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
 

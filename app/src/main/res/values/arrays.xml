@@ -25,4 +25,18 @@
     <item>2</item>
     <item>0</item>
   </string-array>
+
+  <string-array name="menu_opacity_entries">
+    <item>@string/pref_menu_opacity_solid</item>
+    <item>@string/pref_menu_opacity_subtle</item>
+    <item>@string/pref_menu_opacity_balanced</item>
+    <item>@string/pref_menu_opacity_high</item>
+  </string-array>
+
+  <string-array name="menu_opacity_values">
+    <item>100</item>
+    <item>94</item>
+    <item>88</item>
+    <item>78</item>
+  </string-array>
 </resources>

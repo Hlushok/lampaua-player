@@ -126,7 +126,7 @@
         style="@style/ExoStyledControls.Button.Center.Secondary"
         android:src="@drawable/exo_styled_controls_delete"/>
 
-    <ImageButton android:id="@+id/exo_prev"
+    <ImageButton android:id="@+id/lampaua_prev"
         style="@style/ExoStyledControls.Button.Center.Previous"/>
 
     <include layout="@layout/exo_player_control_rewind_button" />
@@ -142,7 +142,7 @@
 
     <include layout="@layout/exo_player_control_ffwd_button" />
 
-    <ImageButton android:id="@+id/exo_next"
+    <ImageButton android:id="@+id/lampaua_next"
         style="@style/ExoStyledControls.Button.Center.Next"/>
 
     <ImageButton android:id="@+id/next"

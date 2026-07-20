@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">Just Player</string>
+    <string name="app_name" translatable="false">UA Player</string>
     <string name="video_resize_fit">Fit</string>
     <string name="video_resize_crop">Crop</string>
     <string name="video_orientation_video">Video orientation</string>
@@ -34,6 +34,32 @@
     <string name="pref_map_dv7_off">Play UHD Blu-ray content containing Dolby Vision as is</string>
     <string name="shortcut_videos">Videos</string>
     <string name="button_open">Open</string>
+    <string name="button_playlist">Episodes</string>
+    <string name="button_quality">Video quality</string>
+    <string name="button_playback_options">Playback options</string>
+    <string name="button_app_settings">UA Player settings</string>
+    <string name="quality_title">Video quality</string>
+    <string name="quality_auto">Auto</string>
+    <string name="quality_maximum">Maximum</string>
+    <string name="quality_unavailable">Quality options are not available yet</string>
+    <string name="quality_auto_description">Optimal quality</string>
+    <string name="quality_maximum_badge">HIGHEST</string>
+    <string name="quality_source">Source</string>
+    <string name="quality_bitrate">%1$.1f Mbps</string>
+    <string name="playlist_title">Episodes</string>
+    <string name="playlist_invalid">Invalid episode list</string>
+    <string name="playlist_resolve_error">Cannot open episode: %1$s</string>
+    <string name="decoder_quality_fallback">The decoder cannot keep up. Trying a lower available quality</string>
+    <string name="live_stream_fallback">Trying alternate live-stream mode</string>
+    <string name="playback_finishes_at">Finishes at %1$s</string>
+    <string name="skip_intro">Skip intro</string>
+    <string name="skip_action">Пропустити</string>
+    <string name="skip_ad">Skip ad</string>
+    <string name="next_episode">Next episode</string>
+    <string name="skip_recap">Skip recap</string>
+    <string name="skip_credits">Skip credits</string>
+    <string name="skip_preview">Skip preview</string>
+    <string name="skip_available_in">Пропустити через %1$d</string>
     <string name="button_crop">Resize</string>
     <string name="button_rotate">Rotate</string>
     <string name="button_pip">Picture-in-picture</string>
@@ -49,6 +75,11 @@
     <string name="pref_decoder_priority_prefer_app">Prefer app decoders</string>
     <string name="pref_decoder_priority_only_device">Device decoders only</string>
     <string name="pref_language_audio">Default audio track</string>
+    <string name="pref_menu_opacity">Player panel transparency</string>
+    <string name="pref_menu_opacity_solid">Off</string>
+    <string name="pref_menu_opacity_subtle">Subtle</string>
+    <string name="pref_menu_opacity_balanced">Balanced</string>
+    <string name="pref_menu_opacity_high">High</string>
     <string name="pref_language_track_device">Device languages</string>
     <string name="pref_language_track_default">Default</string>
     <string name="pref_subtitle_header">Subtitle</string>
@@ -58,4 +89,9 @@
     <string name="pref_subtitle_style_bold">Bold style</string>
     <string name="pref_subtitle_style_bold_on">Use bold typeface as regular</string>
     <string name="pref_subtitle_style_bold_off">Use default regular typeface</string>
+    <string name="update_available_title">UA Player update</string>
+    <string name="update_available_message">Version %1$s is available.</string>
+    <string name="update_download">Update</string>
+    <string name="update_later">Later</string>
+    <string name="update_open_failed">Could not open the update download.</string>
 </resources>
