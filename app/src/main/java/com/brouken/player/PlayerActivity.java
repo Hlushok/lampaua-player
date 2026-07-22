@@ -2976,6 +2976,12 @@ public class PlayerActivity extends Activity {
         }
 
         player = playerBuilder.build();
+
+        if (!mPrefs.allowSystemFrameRate) {
+            // Prevent Surface.setFrameRate() votes on pause/seek. Some TV and HDMI devices
+            // visibly resynchronise even when Android reports that the switch is seamless.
+            player.setVideoChangeFrameRateStrategy(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF);
+        }
         player.addAnalyticsListener(lampaPerformanceListener);
 
         AudioAttributes audioAttributes = new AudioAttributes.Builder()

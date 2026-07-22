@@ -15,6 +15,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.preference.ListPreference;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
+import androidx.preference.SwitchPreferenceCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.text.Collator;
@@ -82,6 +83,10 @@ public class SettingsActivity extends AppCompatActivity {
     public static class SettingsFragment extends PreferenceFragmentCompat {
         @Override
         public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
+            boolean hadAllowSystemFrameRateKey =
+                    androidx.preference.PreferenceManager.getDefaultSharedPreferences(getContext())
+                            .contains("allowSystemFrameRate");
+
             setPreferencesFromResource(R.xml.root_preferences, rootKey);
 
             Preference preferenceAutoPiP = findPreference("autoPiP");
@@ -91,6 +96,13 @@ public class SettingsActivity extends AppCompatActivity {
             Preference preferenceFrameRateMatching = findPreference("frameRateMatching");
             if (preferenceFrameRateMatching != null) {
                 preferenceFrameRateMatching.setEnabled(Build.VERSION.SDK_INT >= 23);
+            }
+            SwitchPreferenceCompat preferenceAllowSystemFrameRate = findPreference("allowSystemFrameRate");
+            if (preferenceAllowSystemFrameRate != null) {
+                preferenceAllowSystemFrameRate.setEnabled(Build.VERSION.SDK_INT >= 30);
+                if (!hadAllowSystemFrameRateKey) {
+                    preferenceAllowSystemFrameRate.setChecked(!Utils.isTvBox(getContext()));
+                }
             }
             ListPreference listPreferenceFileAccess = findPreference("fileAccess");
             if (listPreferenceFileAccess != null) {
