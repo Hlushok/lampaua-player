@@ -42,14 +42,14 @@
     <string name="mediastore_empty">Видеофайлы не найдены</string>
     <string name="pref_shortcuts_header">Ярлыки</string>
     <string name="video_orientation_system">Ориентация устройства</string>
-    <string name="pref_map_dv7_off">Воспроизведение содержимого UHD Blu-ray, содержащего Dolby Vision, как есть</string>
-    <string name="pref_map_dv7">Резервный вариант профиля 7 Dolby Vision</string>
+    <string name="pref_map_dv7_off">Воспроизводить Dolby Vision Profile 7 без преобразования</string>
+    <string name="pref_map_dv7">Dolby Vision Profile 7 → HDR10</string>
     <string name="pref_dangerous_header">Опасный⚠️</string>
     <string name="pref_dangerous_warning">Переключение параметров в этой категории может нарушить воспроизведение обычно совместимого контента</string>
     <string name="pref_language_audio">Звуковая дорожка по умолчанию</string>
     <string name="pref_language_track_device">Языки устройства</string>
     <string name="pref_language_track_default">По умолчанию</string>
-    <string name="pref_map_dv7_on">Воспроизведение контента Dolby Vision profile 7 на дисплеях HDR</string>
+    <string name="pref_map_dv7_on">Использовать совместимый слой HDR10, если устройство не поддерживает Dolby Vision Profile 7</string>
     <string name="pref_subtitle_header">Субтитры</string>
     <string name="pref_subtitle_style_embedded">Встроенные стили</string>
     <string name="pref_subtitle_style_embedded_on">Применить встроенные стили субтитров</string>
