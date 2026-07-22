@@ -79,4 +79,6 @@
     <string name="update_none">У вас уже установлена последняя версия</string>
     <string name="error_playback_stalled">Воспроизведение остановилось. Декодер устройства может не поддерживать этот поток.</string>
     <string name="decoder_compatibility_retry">Ошибка декодера. Повторяю в режиме совместимости</string>
+    <string name="resolver_preparing_retry">Поток подготавливается. Повторяю попытку…</string>
+    <string name="resolver_not_ready">Источник не подготовил поток. Откройте его повторно.</string>
 </resources>

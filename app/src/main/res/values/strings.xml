@@ -51,6 +51,8 @@
     <string name="playlist_resolve_error">Cannot open episode: %1$s</string>
     <string name="decoder_quality_fallback">The decoder cannot keep up. Trying a lower available quality</string>
     <string name="decoder_compatibility_retry">Decoder error. Retrying in compatibility mode</string>
+    <string name="resolver_preparing_retry">The stream is being prepared. Retrying…</string>
+    <string name="resolver_not_ready">The source did not prepare a playable stream. Please open it again.</string>
     <string name="live_stream_fallback">Trying alternate live-stream mode</string>
     <string name="playback_finishes_at">Finishes at %1$s</string>
     <string name="skip_intro">Skip intro</string>

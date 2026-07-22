@@ -85,6 +85,7 @@ import androidx.media3.common.TrackGroup;
 import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
+import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
@@ -246,6 +247,24 @@ public class PlayerActivity extends Activity {
     private int selectedVideoTrackIndex = -1;
     private int av1DroppedFrames;
     private String forcedStreamMimeType;
+    private volatile String resolverControlUri;
+    private String resolverRetryUri;
+    private int resolverRetryCount;
+    private volatile String detectedManifestUri;
+    private volatile String detectedManifestType;
+    private final ResolverResponseDataSource.Listener resolverResponseListener =
+            new ResolverResponseDataSource.Listener() {
+                @Override
+                public void onResolverControlResponse(Uri requestedUri) {
+                    resolverControlUri = requestedUri == null ? null : requestedUri.toString();
+                }
+
+                @Override
+                public void onManifestTypeDetected(Uri requestedUri, String mimeType) {
+                    detectedManifestUri = requestedUri == null ? null : requestedUri.toString();
+                    detectedManifestType = mimeType;
+                }
+            };
     private final Handler lampaUiHandler = new Handler(Looper.getMainLooper());
     private final SimpleDateFormat lampaClockFormatter = new SimpleDateFormat("HH:mm", Locale.getDefault());
     private LinearLayout lampaTopPanel;
@@ -1378,6 +1397,7 @@ public class PlayerActivity extends Activity {
             alternateStreamTypeTried = false;
             decoderQualityFallbackTried = false;
             resetDecoderCompatibilityMode();
+            resetResolverResponseState();
             forcedStreamMimeType = null;
             if (!lampaPlaylist.isEmpty()) {
                 LampaPlaylist.Item current = lampaPlaylist.getCurrent();
@@ -2305,6 +2325,7 @@ public class PlayerActivity extends Activity {
             decoderQualityFallbackTried = false;
             alternateStreamTypeTried = false;
             resetDecoderCompatibilityMode();
+            resetResolverResponseState();
             forcedStreamMimeType = null;
             applyPlaylistItem(item, false);
             restorePlayState = resume;
@@ -2679,6 +2700,7 @@ public class PlayerActivity extends Activity {
                 alternateStreamTypeTried = false;
                 decoderQualityFallbackTried = false;
                 resetDecoderCompatibilityMode();
+                resetResolverResponseState();
                 forcedStreamMimeType = null;
                 applyPlaylistItem(item, false);
                 playbackFinished = false;
@@ -2939,7 +2961,10 @@ public class PlayerActivity extends Activity {
                         .setConnectTimeoutMs(15000)
                         .setReadTimeoutMs(30000);
                 if (!headers.isEmpty()) defaultHttpDataSourceFactory.setDefaultRequestProperties(headers);
-                playerBuilder.setMediaSourceFactory(new DefaultMediaSourceFactory(defaultHttpDataSourceFactory, extractorsFactory));
+                DataSource.Factory inspectedDataSource = new ResolverResponseDataSource.Factory(
+                        defaultHttpDataSourceFactory, resolverResponseListener);
+                playerBuilder.setMediaSourceFactory(new DefaultMediaSourceFactory(
+                        inspectedDataSource, extractorsFactory));
             }
         }
 
@@ -3186,6 +3211,7 @@ public class PlayerActivity extends Activity {
             setEndControlsVisible(haveMedia && (state == Player.STATE_ENDED || isNearEnd));
 
             if (state == Player.STATE_READY) {
+                resetResolverResponseState();
                 frameRendered = true;
                 updateLampaTopPanel();
                 updateLampaSegmentMarkers();
@@ -3318,6 +3344,15 @@ public class PlayerActivity extends Activity {
             if (error instanceof ExoPlaybackException) {
                 final ExoPlaybackException exoPlaybackException = (ExoPlaybackException) error;
                 if (exoPlaybackException.type == ExoPlaybackException.TYPE_SOURCE) {
+                    if (recoverResolverControlResponse()) return;
+                    String detectedManifest = consumeDetectedManifestType();
+                    if (detectedManifest != null && !detectedManifest.equals(forcedStreamMimeType)) {
+                        alternateStreamTypeTried = true;
+                        forcedStreamMimeType = detectedManifest;
+                        restorePlayState = true;
+                        initializePlayer();
+                        return;
+                    }
                     if (lampaPlaylist != null && !alternateStreamTypeTried
                             && mPrefs.mediaUri != null
                             && Utils.isSupportedNetworkUri(mPrefs.mediaUri)
@@ -3396,6 +3431,57 @@ public class PlayerActivity extends Activity {
             initializePlayer();
         });
         return true;
+    }
+
+    private boolean recoverResolverControlResponse() {
+        if (resolverControlUri == null || player == null) return false;
+        MediaItem mediaItem = player.getCurrentMediaItem();
+        String currentUri = mediaItem == null || mediaItem.localConfiguration == null
+                ? null : mediaItem.localConfiguration.uri.toString();
+        if (!resolverControlUri.equals(currentUri)) return false;
+
+        resolverControlUri = null;
+        if (!Objects.equals(resolverRetryUri, currentUri)) {
+            resolverRetryUri = currentUri;
+            resolverRetryCount = 0;
+        }
+        if (resolverRetryCount >= 3) {
+            showSnack(getString(R.string.resolver_not_ready), null);
+            releasePlayer(false);
+            return true;
+        }
+
+        long delayMs = 700L << resolverRetryCount;
+        resolverRetryCount++;
+        restorePlayState = true;
+        updateLoading(true);
+        Utils.showText(playerView, getString(R.string.resolver_preparing_retry), 2500);
+        playerView.postDelayed(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            releasePlayer(false);
+            initializePlayer();
+        }, delayMs);
+        return true;
+    }
+
+    private String consumeDetectedManifestType() {
+        if (detectedManifestUri == null || detectedManifestType == null || player == null) return null;
+        MediaItem mediaItem = player.getCurrentMediaItem();
+        String currentUri = mediaItem == null || mediaItem.localConfiguration == null
+                ? null : mediaItem.localConfiguration.uri.toString();
+        if (!detectedManifestUri.equals(currentUri)) return null;
+        String result = detectedManifestType;
+        detectedManifestUri = null;
+        detectedManifestType = null;
+        return result;
+    }
+
+    private void resetResolverResponseState() {
+        resolverControlUri = null;
+        resolverRetryUri = null;
+        resolverRetryCount = 0;
+        detectedManifestUri = null;
+        detectedManifestType = null;
     }
 
     private boolean recoverDecoderCompatibilityMode() {

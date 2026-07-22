@@ -88,6 +88,8 @@
     <string name="quality_bitrate">%1$.1f Мбіт/с</string>
     <string name="decoder_quality_fallback">Декодер не встигає. Вмикаю нижчу доступну якість</string>
     <string name="decoder_compatibility_retry">Помилка декодера. Повторюю в режимі сумісності</string>
+    <string name="resolver_preparing_retry">Потік готується. Повторюю спробу…</string>
+    <string name="resolver_not_ready">Джерело не підготувало потік. Відкрийте його повторно.</string>
     <string name="live_stream_fallback">Пробую альтернативний режим прямого потоку</string>
     <string name="update_available_title">Оновлення UA Player</string>
     <string name="update_available_message">Доступна версія %1$s.</string>
