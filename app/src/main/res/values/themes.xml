@@ -41,6 +41,8 @@
         <item name="android:windowBackground">@drawable/ua_dialog_background</item>
         <item name="android:textColorPrimary">@color/white</item>
         <item name="android:textColorSecondary">@color/ua_secondary</item>
+        <item name="textColorAlertDialogListItem">@color/white</item>
+        <item name="android:textColorAlertDialogListItem">@color/white</item>
         <item name="colorAccent">@color/ua_gold</item>
         <item name="android:colorAccent">@color/ua_gold</item>
     </style>
