@@ -57,4 +57,25 @@
     <string name="pref_subtitle_style_bold">Полужирный стиль</string>
     <string name="pref_subtitle_style_bold_on">Использовать полужирный шрифт как обычный</string>
     <string name="pref_subtitle_style_bold_off">Использовать стандартный шрифт по умолчанию</string>
+    <string name="pref_skip_header">Пропуск сегментов</string>
+    <string name="pref_skip_enabled">Пропуск заставок и титров</string>
+    <string name="pref_skip_enabled_on">Использовать доступные сегменты пропуска</string>
+    <string name="pref_skip_enabled_off">Воспроизводить без пропуска сегментов</string>
+    <string name="pref_skip_mode">Заставки и повторы</string>
+    <string name="pref_skip_mode_credits">Финальные титры</string>
+    <string name="pref_skip_mode_button">Показывать кнопку «Пропустить»</string>
+    <string name="pref_skip_mode_auto">Пропускать автоматически</string>
+    <string name="pref_skip_fetch">Искать сегменты онлайн</string>
+    <string name="pref_skip_fetch_on">Запрашивать настроенный сервис, если LAMPA не передала сегменты</string>
+    <string name="pref_skip_fetch_off">Использовать только сегменты, переданные LAMPA</string>
+    <string name="pref_update_header">Обновления</string>
+    <string name="pref_current_version">Установленная версия</string>
+    <string name="pref_auto_update">Автоматически проверять обновления</string>
+    <string name="pref_auto_update_on">Предлагать стабильные версии, опубликованные на GitHub</string>
+    <string name="pref_auto_update_off">Проверять только вручную</string>
+    <string name="pref_check_update">Проверить сейчас</string>
+    <string name="pref_check_update_summary">Проверить GitHub Releases на наличие новой версии UA Player</string>
+    <string name="update_checking">Проверяю обновления…</string>
+    <string name="update_none">У вас уже установлена последняя версия</string>
+    <string name="error_playback_stalled">Воспроизведение остановилось. Декодер устройства может не поддерживать этот поток.</string>
 </resources>

@@ -13,12 +13,12 @@ Open-source Android video player for Lampa and LampaUA, based on [Just Player](h
 - video quality, audio track and subtitle selection;
 - episode playlists with titles, thumbnails and remote-control navigation;
 - automatic playback of the next episode;
-- skip markers on the timeline and the **Пропустити** action;
+- configurable intro/recap and end-credit skipping, with timeline markers and the **Пропустити** action;
 - Ukrainian interface and a dark blue/yellow TV layout;
 - playback position/result reporting back to Lampa;
 - AV1/dav1d and FFmpeg extension decoders;
 - 4K-oriented buffering, decoder fallback and dropped-frame fallback;
-- quiet update discovery through the LampaUA service endpoint.
+- independent update discovery through public GitHub Releases.
 
 ## LAMPA integration
 
@@ -32,7 +32,10 @@ UA Player supports the public extended external-player contract introduced in LA
 - `video_list.season`
 - `video_list.episode`
 - `video_list.imdb_id`
+- `video_list.id`
 - `video_list.subtitles`
+- `quality_levels` / `quality_urls`
+- `video_list.quality_levels.$index` / `video_list.quality_urls.$index`
 
 It also remains compatible with the LampaUA JSON bridge:
 

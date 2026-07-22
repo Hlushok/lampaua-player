@@ -6,6 +6,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.LinearLayout;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -117,6 +118,21 @@ public class SettingsActivity extends AppCompatActivity {
                 entries.putAll(getLanguages());
                 listPreferenceLanguageAudio.setEntries(entries.values().toArray(new String[0]));
                 listPreferenceLanguageAudio.setEntryValues(entries.keySet().toArray(new String[0]));
+            }
+
+            Preference currentVersion = findPreference("currentVersion");
+            if (currentVersion != null) {
+                currentVersion.setSummary(BuildConfig.VERSION_NAME);
+            }
+            Preference checkUpdate = findPreference("checkUpdateNow");
+            if (checkUpdate != null) {
+                checkUpdate.setOnPreferenceClickListener(preference -> {
+                    if (getActivity() != null) {
+                        Toast.makeText(getActivity(), R.string.update_checking, Toast.LENGTH_SHORT).show();
+                        UAPlayerUpdater.checkNow(getActivity(), true);
+                    }
+                    return true;
+                });
             }
         }
 

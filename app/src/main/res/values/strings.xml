@@ -94,4 +94,25 @@
     <string name="update_download">Update</string>
     <string name="update_later">Later</string>
     <string name="update_open_failed">Could not open the update download.</string>
+    <string name="pref_skip_header">Skip segments</string>
+    <string name="pref_skip_enabled">Skip intros and credits</string>
+    <string name="pref_skip_enabled_on">Use available skip segments</string>
+    <string name="pref_skip_enabled_off">Play without skipping segments</string>
+    <string name="pref_skip_mode">Intros and recaps</string>
+    <string name="pref_skip_mode_credits">End credits</string>
+    <string name="pref_skip_mode_button">Show the Skip button</string>
+    <string name="pref_skip_mode_auto">Skip automatically</string>
+    <string name="pref_skip_fetch">Find segments online</string>
+    <string name="pref_skip_fetch_on">Ask the configured skip service when LAMPA provides no segments</string>
+    <string name="pref_skip_fetch_off">Use only segments supplied by LAMPA</string>
+    <string name="pref_update_header">Updates</string>
+    <string name="pref_current_version">Installed version</string>
+    <string name="pref_auto_update">Check for updates automatically</string>
+    <string name="pref_auto_update_on">Offer new stable releases published on GitHub</string>
+    <string name="pref_auto_update_off">Check only when requested</string>
+    <string name="pref_check_update">Check now</string>
+    <string name="pref_check_update_summary">Check GitHub Releases for a newer UA Player</string>
+    <string name="update_checking">Checking for updates…</string>
+    <string name="update_none">You already have the latest version</string>
+    <string name="error_playback_stalled">Playback stalled. The device decoder may not support this stream.</string>
 </resources>
