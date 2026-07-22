@@ -235,6 +235,9 @@ public class PlayerActivity extends Activity {
     private boolean lampaIptv;
     private boolean alternateStreamTypeTried;
     private boolean decoderQualityFallbackTried;
+    private boolean decoderCompatibilityMode;
+    private boolean decoderCompatibilityTried;
+    private String decoderCompatibilityUri;
     private boolean forceHevcForDolbyVision;
     private boolean pendingStuckRecovery;
     private String stuckRecoveryAttemptedUri;
@@ -1374,6 +1377,7 @@ public class PlayerActivity extends Activity {
             lampaPlaylist = LampaPlaylist.fromJson(this, raw, index, autoNext);
             alternateStreamTypeTried = false;
             decoderQualityFallbackTried = false;
+            resetDecoderCompatibilityMode();
             forcedStreamMimeType = null;
             if (!lampaPlaylist.isEmpty()) {
                 LampaPlaylist.Item current = lampaPlaylist.getCurrent();
@@ -2300,6 +2304,7 @@ public class PlayerActivity extends Activity {
             item.url = choice.sourceUrl;
             decoderQualityFallbackTried = false;
             alternateStreamTypeTried = false;
+            resetDecoderCompatibilityMode();
             forcedStreamMimeType = null;
             applyPlaylistItem(item, false);
             restorePlayState = resume;
@@ -2673,6 +2678,7 @@ public class PlayerActivity extends Activity {
                 playlistCurrentRecorded = false;
                 alternateStreamTypeTried = false;
                 decoderQualityFallbackTried = false;
+                resetDecoderCompatibilityMode();
                 forcedStreamMimeType = null;
                 applyPlaylistItem(item, false);
                 playbackFinished = false;
@@ -2828,9 +2834,14 @@ public class PlayerActivity extends Activity {
         haveMedia = mPrefs.mediaUri != null;
         av1DroppedFrames = 0;
 
+        String mediaUri = mPrefs.mediaUri == null ? null : mPrefs.mediaUri.toString();
+        if (decoderCompatibilityUri != null && !decoderCompatibilityUri.equals(mediaUri)) {
+            resetDecoderCompatibilityMode();
+        }
+
         if (pendingStuckRecovery) {
             pendingStuckRecovery = false;
-        } else {
+        } else if (!decoderCompatibilityMode) {
             forceHevcForDolbyVision = false;
             stuckRecoveryAttemptedUri = null;
         }
@@ -2848,7 +2859,7 @@ public class PlayerActivity extends Activity {
                 .setExceedRendererCapabilitiesIfNecessary(true)
                 .setAllowMultipleAdaptiveSelections(true));
         final boolean optimize4k = isCurrent4kCandidate();
-        if (mPrefs.tunneling) {
+        if (mPrefs.tunneling && !decoderCompatibilityMode) {
             trackSelector.setParameters(trackSelector.buildUponParameters()
                     .setTunnelingEnabled(true)
             );
@@ -2890,10 +2901,13 @@ public class PlayerActivity extends Activity {
             // decoder, which is considerably smoother on non-AV1 chipsets.
             decoderPriority = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER;
         }
+        if (decoderCompatibilityMode) {
+            decoderPriority = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER;
+        }
         @SuppressLint("WrongConstant") DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(this)
                 .setExtensionRendererMode(decoderPriority)
                 .setEnableDecoderFallback(true)
-                .setMapDV7ToHevc(mPrefs.mapDV7ToHevc);
+                .setMapDV7ToHevc(mPrefs.mapDV7ToHevc || decoderCompatibilityMode);
         if (forceHevcForDolbyVision) {
             renderersFactory.setMediaCodecSelector((mimeType, secure, tunneling) ->
                     MediaCodecSelector.DEFAULT.getDecoderInfos(
@@ -3351,6 +3365,10 @@ public class PlayerActivity extends Activity {
                         }
                     }
                 }
+                if (exoPlaybackException.type == ExoPlaybackException.TYPE_RENDERER
+                        && recoverDecoderCompatibilityMode()) {
+                    return;
+                }
                 if (controllerVisible && controllerVisibleFully) {
                     showError(exoPlaybackException);
                 } else {
@@ -3378,6 +3396,38 @@ public class PlayerActivity extends Activity {
             initializePlayer();
         });
         return true;
+    }
+
+    private boolean recoverDecoderCompatibilityMode() {
+        if (player == null || decoderCompatibilityTried) return false;
+        MediaItem mediaItem = player.getCurrentMediaItem();
+        if (mediaItem == null || mediaItem.localConfiguration == null) return false;
+
+        decoderCompatibilityTried = true;
+        decoderCompatibilityMode = true;
+        decoderCompatibilityUri = mediaItem.localConfiguration.uri.toString();
+        Format format = player.getVideoFormat();
+        if (format != null && MimeTypes.VIDEO_DOLBY_VISION.equals(format.sampleMimeType)) {
+            forceHevcForDolbyVision = true;
+            pendingStuckRecovery = true;
+        }
+        if (lampaPlaylist != null && lampaPlaylist.getCurrent() != null) {
+            lampaPlaylist.getCurrent().positionMs = Math.max(0, player.getCurrentPosition());
+        }
+        restorePlayState = player.getPlayWhenReady();
+        savePlayer();
+        Utils.showText(playerView, getString(R.string.decoder_compatibility_retry), 3500);
+        playerView.post(() -> {
+            releasePlayer(false);
+            initializePlayer();
+        });
+        return true;
+    }
+
+    private void resetDecoderCompatibilityMode() {
+        decoderCompatibilityMode = false;
+        decoderCompatibilityTried = false;
+        decoderCompatibilityUri = null;
     }
 
     private String getStreamMimeType(Uri uri, String suppliedType) {
