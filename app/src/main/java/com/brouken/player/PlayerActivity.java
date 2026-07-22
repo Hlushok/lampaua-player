@@ -122,9 +122,11 @@ import java.io.File;
 import java.lang.reflect.Field;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -1317,7 +1319,8 @@ public class PlayerActivity extends Activity {
                     intent.getIntExtra("tmdb_id", -1));
             if (((imdbId != null && imdbId.startsWith("tt")) || tmdbId > 0
                     || (cardId != null && !cardId.trim().isEmpty())
-                    || intent.hasExtra("quality_levels"))
+                    || intent.hasExtra("quality_levels") || intent.hasExtra("segments")
+                    || intent.hasExtra("season") || intent.hasExtra("episode"))
                     && intent.getData() != null) {
                 JSONObject item = new JSONObject();
                 JSONObject root = new JSONObject();
@@ -1325,6 +1328,11 @@ public class PlayerActivity extends Activity {
                 try {
                     item.put("url", intent.getData().toString());
                     item.put("title", intent.getStringExtra("title"));
+                    if (item.isNull("title")) item.put("title", intent.getStringExtra("filename"));
+                    String thumbnail = intent.getStringExtra("thumbnail");
+                    if (thumbnail != null && !thumbnail.trim().isEmpty()) {
+                        item.put("thumbnail", thumbnail);
+                    }
                     if (cardId != null && !cardId.trim().isEmpty()) item.put("id", cardId);
                     if (imdbId != null && imdbId.startsWith("tt")) item.put("imdb_id", imdbId);
                     if (tmdbId > 0) item.put("tmdb_id", tmdbId);
@@ -1337,6 +1345,12 @@ public class PlayerActivity extends Activity {
                             intent.getIntExtra("episode", -1));
                     if (season > 0) item.put("season", season);
                     if (episode > 0) item.put("episode", episode);
+                    String segmentJson = intent.getStringExtra("segments");
+                    if (segmentJson != null && segmentJson.trim().startsWith("{")) {
+                        item.put("segments", new JSONObject(segmentJson));
+                    }
+                    JSONArray subtitles = officialSubtitles(intent);
+                    if (subtitles.length() > 0) item.put("subtitles", subtitles);
                     if (intent.hasExtra(API_POSITION)) {
                         item.put("position_ms", Math.max(0,
                                 intent.getIntExtra(API_POSITION, 0)));
@@ -1393,15 +1407,15 @@ public class PlayerActivity extends Activity {
                 : (stringUrls != null ? stringUrls.length : 0);
         if (count <= 0) return null;
 
-        ArrayList<String> names = intent.getStringArrayListExtra("video_list.name");
-        ArrayList<String> filenames = intent.getStringArrayListExtra("video_list.filename");
-        ArrayList<String> thumbnails = intent.getStringArrayListExtra("video_list.thumbnail");
-        ArrayList<String> segments = intent.getStringArrayListExtra("video_list.segments");
-        ArrayList<String> seasons = intent.getStringArrayListExtra("video_list.season");
-        ArrayList<String> episodes = intent.getStringArrayListExtra("video_list.episode");
-        ArrayList<String> imdbIds = intent.getStringArrayListExtra("video_list.imdb_id");
-        ArrayList<String> ids = intent.getStringArrayListExtra("video_list.id");
-        ArrayList<Bundle> subtitleBundles = intent.getParcelableArrayListExtra("video_list.subtitles");
+        ArrayList<String> names = stringValues(intent, "video_list.name");
+        ArrayList<String> filenames = stringValues(intent, "video_list.filename");
+        ArrayList<String> thumbnails = stringValues(intent, "video_list.thumbnail");
+        ArrayList<String> segments = stringValues(intent, "video_list.segments");
+        ArrayList<String> seasons = stringValues(intent, "video_list.season");
+        ArrayList<String> episodes = stringValues(intent, "video_list.episode");
+        ArrayList<String> imdbIds = stringValues(intent, "video_list.imdb_id");
+        ArrayList<String> ids = stringValues(intent, "video_list.id");
+        ArrayList<Bundle> subtitleBundles = bundleValues(intent, "video_list.subtitles");
         JSONArray items = new JSONArray();
         String currentUrl = intent.getData() == null ? null : intent.getData().toString();
         int currentIndex = 0;
@@ -1436,7 +1450,10 @@ public class PlayerActivity extends Activity {
                 putOfficialQuality(item, intent,
                         "video_list.quality_levels." + i,
                         "video_list.quality_urls." + i);
-                if (url.equals(currentUrl)) currentIndex = items.length();
+                if (itemMatchesUrl(item, currentUrl)) {
+                    currentIndex = items.length();
+                    item.put("url", currentUrl);
+                }
                 items.put(item);
             }
             if (items.length() == 0) return null;
@@ -1455,6 +1472,28 @@ public class PlayerActivity extends Activity {
         if (bundle == null) return result;
         Parcelable[] uris = bundle.getParcelableArray("uris");
         String[] names = bundle.getStringArray("names");
+        ArrayList<String> nameList = bundle.getStringArrayList("names");
+        if (uris == null) return result;
+        for (int i = 0; i < uris.length; i++) {
+            if (!(uris[i] instanceof Uri)) continue;
+            JSONObject subtitle = new JSONObject();
+            subtitle.put("url", uris[i].toString());
+            if (names != null && i < names.length && names[i] != null) {
+                subtitle.put("label", names[i]);
+            } else if (nameList != null && i < nameList.size() && nameList.get(i) != null) {
+                subtitle.put("label", nameList.get(i));
+            }
+            result.put(subtitle);
+        }
+        return result;
+    }
+
+    private static JSONArray officialSubtitles(Intent intent) throws JSONException {
+        JSONArray result = new JSONArray();
+        Parcelable[] uris = intent.getParcelableArrayExtra("subs");
+        if (uris == null) uris = intent.getParcelableArrayExtra(API_SUBS);
+        String[] names = intent.getStringArrayExtra("subs.name");
+        if (names == null) names = intent.getStringArrayExtra(API_SUBS_NAME);
         if (uris == null) return result;
         for (int i = 0; i < uris.length; i++) {
             if (!(uris[i] instanceof Uri)) continue;
@@ -1470,19 +1509,26 @@ public class PlayerActivity extends Activity {
 
     private static void putOfficialQuality(JSONObject item, Intent intent,
                                            String levelsKey, String urlsKey) throws JSONException {
-        String[] levels = intent.getStringArrayExtra(levelsKey);
-        if (levels == null || levels.length == 0) return;
+        ArrayList<String> levelValues = stringValues(intent, levelsKey);
+        if (levelValues == null || levelValues.isEmpty()) return;
         Parcelable[] parcelableUrls = intent.getParcelableArrayExtra(urlsKey);
         String[] stringUrls = intent.getStringArrayExtra(urlsKey);
+        ArrayList<Uri> parcelableUrlList = intent.getParcelableArrayListExtra(urlsKey);
+        ArrayList<String> stringUrlList = stringValues(intent, urlsKey);
         JSONObject quality = new JSONObject();
-        for (int index = 0; index < levels.length; index++) {
-            String label = levels[index];
+        for (int index = 0; index < levelValues.size(); index++) {
+            String label = levelValues.get(index);
             String url = null;
             if (parcelableUrls != null && index < parcelableUrls.length
                     && parcelableUrls[index] instanceof Uri) {
                 url = parcelableUrls[index].toString();
             } else if (stringUrls != null && index < stringUrls.length) {
                 url = stringUrls[index];
+            } else if (parcelableUrlList != null && index < parcelableUrlList.size()
+                    && parcelableUrlList.get(index) != null) {
+                url = parcelableUrlList.get(index).toString();
+            } else if (stringUrlList != null && index < stringUrlList.size()) {
+                url = stringUrlList.get(index);
             }
             if (label != null && !label.trim().isEmpty()
                     && url != null && !url.trim().isEmpty()) {
@@ -1490,6 +1536,36 @@ public class PlayerActivity extends Activity {
             }
         }
         if (quality.length() > 0) item.put("quality", quality);
+    }
+
+    private static boolean itemMatchesUrl(JSONObject item, String currentUrl) {
+        if (item == null || currentUrl == null || currentUrl.trim().isEmpty()) return false;
+        if (currentUrl.equals(item.optString("url", null))) return true;
+        JSONObject quality = item.optJSONObject("quality");
+        if (quality == null) return false;
+        Iterator<String> keys = quality.keys();
+        while (keys.hasNext()) {
+            if (currentUrl.equals(quality.optString(keys.next(), null))) return true;
+        }
+        return false;
+    }
+
+    private static ArrayList<String> stringValues(Intent intent, String key) {
+        ArrayList<String> list = intent.getStringArrayListExtra(key);
+        if (list != null) return list;
+        String[] array = intent.getStringArrayExtra(key);
+        if (array == null) return null;
+        return new ArrayList<>(Arrays.asList(array));
+    }
+
+    private static ArrayList<Bundle> bundleValues(Intent intent, String key) {
+        ArrayList<Bundle> list = intent.getParcelableArrayListExtra(key);
+        if (list != null) return list;
+        Parcelable[] array = intent.getParcelableArrayExtra(key);
+        if (array == null) return null;
+        ArrayList<Bundle> result = new ArrayList<>();
+        for (Parcelable value : array) result.add(value instanceof Bundle ? (Bundle) value : null);
+        return result;
     }
 
     private static void putIndexedText(JSONObject target, String key,
