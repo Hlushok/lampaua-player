@@ -39,6 +39,7 @@ class Prefs {
     private static final String PREF_KEY_TUNNELING = "tunneling";
     private static final String PREF_KEY_SKIP_SILENCE = "skipSilence";
     private static final String PREF_KEY_FRAMERATE_MATCHING = "frameRateMatching";
+    private static final String PREF_KEY_ALLOW_SYSTEM_FRAMERATE = "allowSystemFrameRate";
     private static final String PREF_KEY_REPEAT_TOGGLE = "repeatToggle";
     private static final String PREF_KEY_SPEED = "speed";
     private static final String PREF_KEY_FILE_ACCESS = "fileAccess";
@@ -81,6 +82,7 @@ class Prefs {
     public boolean tunneling = false;
     public boolean skipSilence = false;
     public boolean frameRateMatching = false;
+    public boolean allowSystemFrameRate = true;
     public boolean repeatToggle = false;
     public String fileAccess = "auto";
     public int decoderPriority = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON;
@@ -90,7 +92,7 @@ class Prefs {
     public boolean subtitleStyleBold = false;
     public boolean skipEnabled = true;
     public String skipMode = SKIP_MODE_BUTTON;
-    public String skipModeCredits = SKIP_MODE_AUTO;
+    public String skipModeCredits = SKIP_MODE_BUTTON;
     public boolean skipFetchOnline = true;
 
     private LinkedHashMap positions;
@@ -134,6 +136,7 @@ class Prefs {
         tunneling = mSharedPreferences.getBoolean(PREF_KEY_TUNNELING, tunneling);
         skipSilence = mSharedPreferences.getBoolean(PREF_KEY_SKIP_SILENCE, skipSilence);
         frameRateMatching = mSharedPreferences.getBoolean(PREF_KEY_FRAMERATE_MATCHING, frameRateMatching);
+        allowSystemFrameRate = mSharedPreferences.getBoolean(PREF_KEY_ALLOW_SYSTEM_FRAMERATE, !Utils.isTvBox(mContext));
         repeatToggle = mSharedPreferences.getBoolean(PREF_KEY_REPEAT_TOGGLE, repeatToggle);
         fileAccess = mSharedPreferences.getString(PREF_KEY_FILE_ACCESS, fileAccess);
         decoderPriority = Integer.parseInt(mSharedPreferences.getString(PREF_KEY_DECODER_PRIORITY, String.valueOf(decoderPriority)));
