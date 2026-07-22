@@ -54,6 +54,43 @@
 
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="@string/pref_skip_header">
+
+        <SwitchPreferenceCompat
+            app:key="skipEnabled"
+            app:defaultValue="true"
+            app:summaryOn="@string/pref_skip_enabled_on"
+            app:summaryOff="@string/pref_skip_enabled_off"
+            app:title="@string/pref_skip_enabled" />
+
+        <ListPreference
+            app:key="skipMode"
+            app:defaultValue="button"
+            app:dependency="skipEnabled"
+            app:entries="@array/skip_mode_entries"
+            app:entryValues="@array/skip_mode_values"
+            app:title="@string/pref_skip_mode"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="skipModeCredits"
+            app:defaultValue="auto"
+            app:dependency="skipEnabled"
+            app:entries="@array/skip_mode_entries"
+            app:entryValues="@array/skip_mode_values"
+            app:title="@string/pref_skip_mode_credits"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            app:key="skipFetchOnline"
+            app:defaultValue="true"
+            app:dependency="skipEnabled"
+            app:summaryOn="@string/pref_skip_fetch_on"
+            app:summaryOff="@string/pref_skip_fetch_off"
+            app:title="@string/pref_skip_fetch" />
+
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="@string/pref_subtitle_header">
 
         <SwitchPreferenceCompat
@@ -103,6 +140,27 @@
             app:summaryOn="@string/pref_map_dv7_on"
             app:summaryOff="@string/pref_map_dv7_off"
             app:title="@string/pref_map_dv7" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/pref_update_header">
+
+        <Preference
+            app:key="currentVersion"
+            app:selectable="false"
+            app:title="@string/pref_current_version" />
+
+        <SwitchPreferenceCompat
+            app:key="autoUpdate"
+            app:defaultValue="true"
+            app:summaryOn="@string/pref_auto_update_on"
+            app:summaryOff="@string/pref_auto_update_off"
+            app:title="@string/pref_auto_update" />
+
+        <Preference
+            app:key="checkUpdateNow"
+            app:summary="@string/pref_check_update_summary"
+            app:title="@string/pref_check_update" />
 
     </PreferenceCategory>
 

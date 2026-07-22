@@ -90,9 +90,9 @@ import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlaybackException;
 import androidx.media3.exoplayer.ExoPlayer;
-import androidx.media3.exoplayer.RenderersFactory;
 import androidx.media3.exoplayer.SeekParameters;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
 import androidx.media3.extractor.DefaultExtractorsFactory;
@@ -233,6 +233,9 @@ public class PlayerActivity extends Activity {
     private boolean lampaIptv;
     private boolean alternateStreamTypeTried;
     private boolean decoderQualityFallbackTried;
+    private boolean forceHevcForDolbyVision;
+    private boolean pendingStuckRecovery;
+    private String stuckRecoveryAttemptedUri;
     private int selectedVideoQualityMode = VideoQualityChoice.MODE_AUTO;
     private TrackGroup selectedVideoTrackGroup;
     private int selectedVideoTrackIndex = -1;
@@ -253,6 +256,7 @@ public class PlayerActivity extends Activity {
     private LampaPlaylist.Segment activeLampaSegment;
     private boolean activeLampaSegmentPreview;
     private LampaPlaylist.Segment focusedLampaSegment;
+    private int skipKeyUpToConsume;
     private View exoPrevious;
     private View exoNext;
     private final Runnable lampaUiTicker = new Runnable() {
@@ -1111,6 +1115,11 @@ public class PlayerActivity extends Activity {
                 || lampaKeyCode == KeyEvent.KEYCODE_DPAD_CENTER
                 || lampaKeyCode == KeyEvent.KEYCODE_NUMPAD_ENTER)) {
             skipActiveLampaSegment();
+            skipKeyUpToConsume = lampaKeyCode;
+            return true;
+        }
+        if (event.getAction() == KeyEvent.ACTION_UP && skipKeyUpToConsume == lampaKeyCode) {
+            skipKeyUpToConsume = 0;
             return true;
         }
         if (isScaling) {
@@ -1303,9 +1312,12 @@ public class PlayerActivity extends Activity {
         if (raw == null || raw.trim().isEmpty()) {
             String imdbId = intent.getStringExtra("lampaua.imdb_id");
             if (imdbId == null) imdbId = intent.getStringExtra("imdb_id");
+            String cardId = intent.getStringExtra("id");
             int tmdbId = intent.getIntExtra("lampaua.tmdb_id",
                     intent.getIntExtra("tmdb_id", -1));
-            if (((imdbId != null && imdbId.startsWith("tt")) || tmdbId > 0)
+            if (((imdbId != null && imdbId.startsWith("tt")) || tmdbId > 0
+                    || (cardId != null && !cardId.trim().isEmpty())
+                    || intent.hasExtra("quality_levels"))
                     && intent.getData() != null) {
                 JSONObject item = new JSONObject();
                 JSONObject root = new JSONObject();
@@ -1313,6 +1325,7 @@ public class PlayerActivity extends Activity {
                 try {
                     item.put("url", intent.getData().toString());
                     item.put("title", intent.getStringExtra("title"));
+                    if (cardId != null && !cardId.trim().isEmpty()) item.put("id", cardId);
                     if (imdbId != null && imdbId.startsWith("tt")) item.put("imdb_id", imdbId);
                     if (tmdbId > 0) item.put("tmdb_id", tmdbId);
                     String mediaType = intent.getStringExtra("lampaua.media_type");
@@ -1328,6 +1341,7 @@ public class PlayerActivity extends Activity {
                         item.put("position_ms", Math.max(0,
                                 intent.getIntExtra(API_POSITION, 0)));
                     }
+                    putOfficialQuality(item, intent, "quality_levels", "quality_urls");
                     items.put(item);
                     root.put("current_index", 0);
                     root.put("auto_next", false);
@@ -1386,6 +1400,7 @@ public class PlayerActivity extends Activity {
         ArrayList<String> seasons = intent.getStringArrayListExtra("video_list.season");
         ArrayList<String> episodes = intent.getStringArrayListExtra("video_list.episode");
         ArrayList<String> imdbIds = intent.getStringArrayListExtra("video_list.imdb_id");
+        ArrayList<String> ids = intent.getStringArrayListExtra("video_list.id");
         ArrayList<Bundle> subtitleBundles = intent.getParcelableArrayListExtra("video_list.subtitles");
         JSONArray items = new JSONArray();
         String currentUrl = intent.getData() == null ? null : intent.getData().toString();
@@ -1406,6 +1421,7 @@ public class PlayerActivity extends Activity {
                 if (!item.has("title")) putIndexedText(item, "title", filenames, i);
                 putIndexedText(item, "thumbnail", thumbnails, i);
                 putIndexedText(item, "imdb_id", imdbIds, i);
+                putIndexedText(item, "id", ids, i);
                 putIndexedPositiveInt(item, "season", seasons, i);
                 putIndexedPositiveInt(item, "episode", episodes, i);
 
@@ -1417,6 +1433,9 @@ public class PlayerActivity extends Activity {
                         ? subtitleBundles.get(i) : null;
                 JSONArray subtitles = officialSubtitles(subBundle);
                 if (subtitles.length() > 0) item.put("subtitles", subtitles);
+                putOfficialQuality(item, intent,
+                        "video_list.quality_levels." + i,
+                        "video_list.quality_urls." + i);
                 if (url.equals(currentUrl)) currentIndex = items.length();
                 items.put(item);
             }
@@ -1447,6 +1466,30 @@ public class PlayerActivity extends Activity {
             result.put(subtitle);
         }
         return result;
+    }
+
+    private static void putOfficialQuality(JSONObject item, Intent intent,
+                                           String levelsKey, String urlsKey) throws JSONException {
+        String[] levels = intent.getStringArrayExtra(levelsKey);
+        if (levels == null || levels.length == 0) return;
+        Parcelable[] parcelableUrls = intent.getParcelableArrayExtra(urlsKey);
+        String[] stringUrls = intent.getStringArrayExtra(urlsKey);
+        JSONObject quality = new JSONObject();
+        for (int index = 0; index < levels.length; index++) {
+            String label = levels[index];
+            String url = null;
+            if (parcelableUrls != null && index < parcelableUrls.length
+                    && parcelableUrls[index] instanceof Uri) {
+                url = parcelableUrls[index].toString();
+            } else if (stringUrls != null && index < stringUrls.length) {
+                url = stringUrls[index];
+            }
+            if (label != null && !label.trim().isEmpty()
+                    && url != null && !url.trim().isEmpty()) {
+                quality.put(label, url);
+            }
+        }
+        if (quality.length() > 0) item.put("quality", quality);
     }
 
     private static void putIndexedText(JSONObject target, String key,
@@ -1761,6 +1804,12 @@ public class PlayerActivity extends Activity {
 
     private void updateLampaSkipUi() {
         if (lampaSkipPanel == null || player == null || lampaPlaylist == null) return;
+        if (!mPrefs.skipEnabled) {
+            activeLampaSegment = null;
+            focusedLampaSegment = null;
+            lampaSkipPanel.setVisibility(View.GONE);
+            return;
+        }
         LampaPlaylist.Item item = lampaPlaylist.getCurrent();
         long position = Math.max(0, player.getCurrentPosition());
         activeLampaSegment = null;
@@ -1790,8 +1839,10 @@ public class PlayerActivity extends Activity {
             return;
         }
         long duration = player.getDuration();
-        boolean credits = duration != C.TIME_UNSET && activeLampaSegment.endMs >= duration - 15000
-                && lampaPlaylist.hasNext();
+        boolean credits = isCreditsSegment(activeLampaSegment, duration);
+        boolean auto = "ad".equalsIgnoreCase(activeLampaSegment.type)
+                || Prefs.SKIP_MODE_AUTO.equals(credits
+                ? mPrefs.skipModeCredits : mPrefs.skipMode);
         if (activeLampaSegmentPreview) {
             long seconds = Math.max(1, (activeLampaSegment.startMs - position + 999) / 1000);
             lampaSkipButton.setText(getString(R.string.skip_available_in, seconds));
@@ -1800,6 +1851,9 @@ public class PlayerActivity extends Activity {
             lampaSkipButton.setAlpha(0.72f);
             lampaSkipProgress.setProgress((int) Math.min(1000,
                     Math.max(0, (activeLampaSegment.startMs - position) * 1000 / 5000)));
+        } else if (auto) {
+            skipActiveLampaSegment();
+            return;
         } else {
             lampaSkipButton.setText(segmentButtonText(activeLampaSegment, credits));
             lampaSkipButton.setEnabled(true);
@@ -1822,6 +1876,10 @@ public class PlayerActivity extends Activity {
             if (timeBar != null) timeBar.setSkipSegments(0, null, null);
             return;
         }
+        if (!mPrefs.skipEnabled) {
+            timeBar.setSkipSegments(0, null, null);
+            return;
+        }
         long duration = player.getDuration();
         LampaPlaylist.Item item = lampaPlaylist.getCurrent();
         if (duration == C.TIME_UNSET || duration <= 0 || item == null || item.segments.isEmpty()) {
@@ -1836,7 +1894,7 @@ public class PlayerActivity extends Activity {
                 valid.add(segment);
             }
         }
-        valid.sort((left, right) -> Long.compare(left.startMs, right.startMs));
+        Collections.sort(valid, (left, right) -> Long.compare(left.startMs, right.startMs));
         long[] starts = new long[valid.size()];
         long[] ends = new long[valid.size()];
         for (int index = 0; index < valid.size(); index++) {
@@ -1847,18 +1905,35 @@ public class PlayerActivity extends Activity {
     }
 
     private String segmentButtonText(LampaPlaylist.Segment segment, boolean creditsWithNext) {
-        if (creditsWithNext) return getString(R.string.next_episode);
+        if (creditsWithNext && reachesMediaEnd(segment, player == null ? C.TIME_UNSET : player.getDuration())
+                && lampaPlaylist != null && lampaPlaylist.hasNext()) {
+            return getString(R.string.next_episode);
+        }
         return getString(R.string.skip_action);
+    }
+
+    private boolean isCreditsSegment(LampaPlaylist.Segment segment, long duration) {
+        if (segment == null) return false;
+        if ("outro".equalsIgnoreCase(segment.kind)
+                || "credits".equalsIgnoreCase(segment.kind)) return true;
+        return duration != C.TIME_UNSET && duration > 0
+                && segment.endMs >= Math.round(duration * 0.75d);
+    }
+
+    private boolean reachesMediaEnd(LampaPlaylist.Segment segment, long duration) {
+        return segment != null && duration != C.TIME_UNSET && duration > 0
+                && segment.endMs >= duration - 1500;
     }
 
     private void skipActiveLampaSegment() {
         if (player == null || activeLampaSegment == null || activeLampaSegmentPreview) return;
         long duration = player.getDuration();
-        boolean credits = duration != C.TIME_UNSET && activeLampaSegment.endMs >= duration - 15000
+        boolean nextEpisode = reachesMediaEnd(activeLampaSegment, duration)
                 && lampaPlaylist != null && lampaPlaylist.hasNext();
-        if (credits) {
+        if (nextEpisode) {
             playRelativeEpisode(1);
         } else {
+            player.setSeekParameters(SeekParameters.EXACT);
             player.seekTo(activeLampaSegment.endMs);
         }
         focusedLampaSegment = null;
@@ -2001,13 +2076,14 @@ public class PlayerActivity extends Activity {
             }
         }
         ArrayList<Integer> longSides = new ArrayList<>(renditions.keySet());
-        longSides.sort(Collections.reverseOrder());
+        Collections.sort(longSides, Collections.reverseOrder());
         for (Integer longSide : longSides) choices.add(renditions.get(longSide));
 
         LampaPlaylist.Item item = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
         if (item != null && !item.quality.isEmpty()) {
             ArrayList<String> labels = new ArrayList<>(item.quality.keySet());
-            labels.sort((left, right) -> Integer.compare(qualityNumber(right), qualityNumber(left)));
+            Collections.sort(labels,
+                    (left, right) -> Integer.compare(qualityNumber(right), qualityNumber(left)));
             for (String label : labels) {
                 String url = item.quality.get(label);
                 if (url != null && !url.trim().isEmpty()) {
@@ -2641,6 +2717,18 @@ public class PlayerActivity extends Activity {
         } else if (requestCode == REQUEST_SETTINGS) {
             mPrefs.loadUserPreferences();
             updateSubtitleStyle(this);
+            updateLampaSegmentMarkers();
+            updateLampaSkipUi();
+            if (mPrefs.skipEnabled && mPrefs.skipFetchOnline && player != null
+                    && lampaPlaylist != null && player.getDuration() > 0) {
+                LampaPlaylist.Item item = lampaPlaylist.getCurrent();
+                lampaPlaylist.fetchRemoteSegments(item, player.getDuration(), loaded -> {
+                    if (lampaPlaylist != null && loaded == lampaPlaylist.getCurrent()) {
+                        updateLampaSegmentMarkers();
+                        updateLampaSkipUi();
+                    }
+                });
+            }
         } else {
             super.onActivityResult(requestCode, resultCode, data);
         }
@@ -2663,6 +2751,13 @@ public class PlayerActivity extends Activity {
         boolean isNetworkUri = Utils.isSupportedNetworkUri(mPrefs.mediaUri);
         haveMedia = mPrefs.mediaUri != null;
         av1DroppedFrames = 0;
+
+        if (pendingStuckRecovery) {
+            pendingStuckRecovery = false;
+        } else {
+            forceHevcForDolbyVision = false;
+            stuckRecoveryAttemptedUri = null;
+        }
 
         if (player != null) {
             player.removeListener(playerListener);
@@ -2719,10 +2814,17 @@ public class PlayerActivity extends Activity {
             // decoder, which is considerably smoother on non-AV1 chipsets.
             decoderPriority = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER;
         }
-        @SuppressLint("WrongConstant") RenderersFactory renderersFactory = new DefaultRenderersFactory(this)
+        @SuppressLint("WrongConstant") DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(this)
                 .setExtensionRendererMode(decoderPriority)
                 .setEnableDecoderFallback(true)
                 .setMapDV7ToHevc(mPrefs.mapDV7ToHevc);
+        if (forceHevcForDolbyVision) {
+            renderersFactory.setMediaCodecSelector((mimeType, secure, tunneling) ->
+                    MediaCodecSelector.DEFAULT.getDecoderInfos(
+                            MimeTypes.VIDEO_DOLBY_VISION.equals(mimeType)
+                                    ? MimeTypes.VIDEO_H265 : mimeType,
+                            secure, tunneling));
+        }
 
         ExoPlayer.Builder playerBuilder = new ExoPlayer.Builder(this, renderersFactory)
                 .setTrackSelector(trackSelector)
@@ -2998,14 +3100,18 @@ public class PlayerActivity extends Activity {
                 updateLampaTopPanel();
                 updateLampaSegmentMarkers();
 
-                if (lampaPlaylist != null && duration != C.TIME_UNSET && duration > 0) {
+                if (mPrefs.skipEnabled && lampaPlaylist != null
+                        && duration != C.TIME_UNSET && duration > 0) {
                     LampaPlaylist.Item segmentItem = lampaPlaylist.getCurrent();
-                    lampaPlaylist.fetchRemoteSegments(segmentItem, duration, loaded -> {
-                        if (lampaPlaylist != null && loaded == lampaPlaylist.getCurrent()) {
-                            updateLampaSegmentMarkers();
-                            updateLampaSkipUi();
-                        }
-                    });
+                    if (mPrefs.skipFetchOnline || (segmentItem != null
+                            && !segmentItem.segments.isEmpty())) {
+                        lampaPlaylist.fetchRemoteSegments(segmentItem, duration, loaded -> {
+                            if (lampaPlaylist != null && loaded == lampaPlaylist.getCurrent()) {
+                                updateLampaSegmentMarkers();
+                                updateLampaSkipUi();
+                            }
+                        });
+                    }
                 }
 
                 if (lampaPlaylist != null) {
@@ -3122,6 +3228,16 @@ public class PlayerActivity extends Activity {
             if (error instanceof ExoPlaybackException) {
                 final ExoPlaybackException exoPlaybackException = (ExoPlaybackException) error;
                 if (exoPlaybackException.type == ExoPlaybackException.TYPE_SOURCE) {
+                    if (lampaPlaylist != null && !alternateStreamTypeTried
+                            && mPrefs.mediaUri != null
+                            && Utils.isSupportedNetworkUri(mPrefs.mediaUri)
+                            && getStreamMimeType(mPrefs.mediaUri, mPrefs.mediaType) == null) {
+                        alternateStreamTypeTried = true;
+                        forcedStreamMimeType = MimeTypes.APPLICATION_M3U8;
+                        restorePlayState = true;
+                        initializePlayer();
+                        return;
+                    }
                     if (lampaIptv && !alternateStreamTypeTried && mPrefs.mediaUri != null) {
                         alternateStreamTypeTried = true;
                         String currentMime = getStreamMimeType(mPrefs.mediaUri, mPrefs.mediaType);
@@ -3132,6 +3248,12 @@ public class PlayerActivity extends Activity {
                         initializePlayer();
                         return;
                     }
+                    releasePlayer(false);
+                    return;
+                }
+                if (error.errorCode == PlaybackException.ERROR_CODE_TIMEOUT) {
+                    if (recoverFromStuckPlayback()) return;
+                    showSnack(getString(R.string.error_playback_stalled), error.getLocalizedMessage());
                     releasePlayer(false);
                     return;
                 }
@@ -3160,6 +3282,26 @@ public class PlayerActivity extends Activity {
                 }
             }
         }
+    }
+
+    private boolean recoverFromStuckPlayback() {
+        if (player == null) return false;
+        MediaItem item = player.getCurrentMediaItem();
+        Format format = player.getVideoFormat();
+        if (item == null || item.localConfiguration == null || format == null
+                || !MimeTypes.VIDEO_DOLBY_VISION.equals(format.sampleMimeType)) return false;
+        String uri = item.localConfiguration.uri.toString();
+        if (uri.equals(stuckRecoveryAttemptedUri)) return false;
+        stuckRecoveryAttemptedUri = uri;
+        forceHevcForDolbyVision = true;
+        pendingStuckRecovery = true;
+        restorePlayState = true;
+        savePlayer();
+        playerView.post(() -> {
+            releasePlayer(false);
+            initializePlayer();
+        });
+        return true;
     }
 
     private String getStreamMimeType(Uri uri, String suppliedType) {
@@ -3519,22 +3661,37 @@ public class PlayerActivity extends Activity {
     }
 
     void showSnack(final String textPrimary, final String textSecondary) {
+        if (isTvBox) {
+            AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                    .setMessage(textPrimary)
+                    .setPositiveButton(android.R.string.ok, null);
+            if (textSecondary != null && !textSecondary.trim().isEmpty()) {
+                builder.setNeutralButton(R.string.error_details,
+                        (dialog, which) -> showErrorDetails(textSecondary));
+            }
+            AlertDialog dialog = builder.create();
+            dialog.show();
+            styleUaAlertDialog(dialog, true);
+            return;
+        }
         snackbar = Snackbar.make(coordinatorLayout, textPrimary, Snackbar.LENGTH_LONG);
         snackbar.setTextColor(Color.WHITE);
         snackbar.setActionTextColor(Color.rgb(240, 183, 38));
         snackbar.getView().setBackgroundResource(R.drawable.ua_dialog_background);
         if (textSecondary != null) {
-            snackbar.setAction(R.string.error_details, v -> {
-                final AlertDialog.Builder builder = new AlertDialog.Builder(PlayerActivity.this);
-                builder.setMessage(textSecondary);
-                builder.setPositiveButton(android.R.string.ok, (dialogInterface, i) -> dialogInterface.dismiss());
-                final AlertDialog dialog = builder.create();
-                dialog.show();
-                styleUaAlertDialog(dialog, true);
-            });
+            snackbar.setAction(R.string.error_details, v -> showErrorDetails(textSecondary));
         }
         snackbar.setAnchorView(R.id.exo_bottom_bar);
         snackbar.show();
+    }
+
+    private void showErrorDetails(String text) {
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setMessage(text)
+                .setPositiveButton(android.R.string.ok, null)
+                .create();
+        dialog.show();
+        styleUaAlertDialog(dialog, true);
     }
 
     void reportScrubbing(long position) {

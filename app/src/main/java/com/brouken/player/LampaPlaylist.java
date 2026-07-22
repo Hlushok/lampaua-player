@@ -480,7 +480,8 @@ final class LampaPlaylist {
             }
             if (!duplicate) target.add(candidate);
         }
-        target.sort((left, right) -> Long.compare(left.startMs, right.startMs));
+        java.util.Collections.sort(target,
+                (left, right) -> Long.compare(left.startMs, right.startMs));
     }
 
     private static JSONArray segmentsToJson(List<Segment> segments) {

@@ -93,4 +93,25 @@
     <string name="update_download">Оновити</string>
     <string name="update_later">Пізніше</string>
     <string name="update_open_failed">Не вдалося відкрити завантаження оновлення.</string>
+    <string name="pref_skip_header">Пропуск сегментів</string>
+    <string name="pref_skip_enabled">Пропуск заставок і титрів</string>
+    <string name="pref_skip_enabled_on">Використовувати доступні сегменти пропуску</string>
+    <string name="pref_skip_enabled_off">Відтворювати без пропуску сегментів</string>
+    <string name="pref_skip_mode">Заставки та повтори</string>
+    <string name="pref_skip_mode_credits">Фінальні титри</string>
+    <string name="pref_skip_mode_button">Показувати кнопку «Пропустити»</string>
+    <string name="pref_skip_mode_auto">Пропускати автоматично</string>
+    <string name="pref_skip_fetch">Шукати сегменти онлайн</string>
+    <string name="pref_skip_fetch_on">Запитувати налаштований сервіс, якщо LAMPA не передала сегменти</string>
+    <string name="pref_skip_fetch_off">Використовувати лише сегменти, передані LAMPA</string>
+    <string name="pref_update_header">Оновлення</string>
+    <string name="pref_current_version">Встановлена версія</string>
+    <string name="pref_auto_update">Автоматично перевіряти оновлення</string>
+    <string name="pref_auto_update_on">Пропонувати стабільні версії, опубліковані на GitHub</string>
+    <string name="pref_auto_update_off">Перевіряти лише вручну</string>
+    <string name="pref_check_update">Перевірити зараз</string>
+    <string name="pref_check_update_summary">Перевірити GitHub Releases на наявність нової версії UA Player</string>
+    <string name="update_checking">Перевіряю оновлення…</string>
+    <string name="update_none">У вас уже встановлена найновіша версія</string>
+    <string name="error_playback_stalled">Відтворення зупинилося. Декодер пристрою може не підтримувати цей потік.</string>
 </resources>
