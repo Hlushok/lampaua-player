@@ -1813,9 +1813,12 @@ public class PlayerActivity extends Activity {
                     ? item.episode : index + 1));
         }
         if (item != null && item.thumbnail != null && !item.thumbnail.trim().isEmpty()) {
+            lampaTopThumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
             Glide.with(this).load(item.thumbnail).centerCrop().into(lampaTopThumbnail);
         } else {
-            lampaTopThumbnail.setImageDrawable(null);
+            Glide.with(this).clear(lampaTopThumbnail);
+            lampaTopThumbnail.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            lampaTopThumbnail.setImageResource(R.drawable.ua_player_icon);
         }
         updateLampaTrackDetails();
     }
@@ -1843,6 +1846,10 @@ public class PlayerActivity extends Activity {
         }
         ArrayList<String> parts = new ArrayList<>();
         Uri media = mPrefs == null ? null : mPrefs.mediaUri;
+        if (media == null && video == null && audio == null && !lampaIptv) {
+            lampaTopDetails.setText("");
+            return;
+        }
         String path = media == null ? "" : String.valueOf(media.getLastPathSegment()).toLowerCase(Locale.US);
         String mediaUrl = media == null ? "" : media.toString().toLowerCase(Locale.US);
         if (lampaIptv) parts.add("LIVE");
