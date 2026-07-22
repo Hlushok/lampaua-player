@@ -133,7 +133,10 @@ class Utils {
                 WindowInsetsController windowInsetsController = window.getInsetsController();
                 if (windowInsetsController != null) {
                     if (show) {
-                        windowInsetsController.show(WindowInsets.Type.systemBars());
+                        // Playback controls may temporarily expose the navigation bar,
+                        // but the status bar should never cover the player surface.
+                        windowInsetsController.show(WindowInsets.Type.navigationBars());
+                        windowInsetsController.hide(WindowInsets.Type.statusBars());
                     } else {
                         windowInsetsController.hide(WindowInsets.Type.systemBars());
                     }
@@ -143,7 +146,8 @@ class Utils {
             if (show) {
                 playerView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN);
             } else {
                 playerView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LOW_PROFILE
                         | View.SYSTEM_UI_FLAG_FULLSCREEN

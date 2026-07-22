@@ -1,6 +1,7 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
 
     <style name="BaseTheme.Player" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowFullscreen">true</item>
         <item name="android:statusBarColor">@color/ui_controls_background</item>
         <item name="android:navigationBarColor">@color/ui_controls_background</item>
         <item name="android:windowBackground">@color/black</item>
