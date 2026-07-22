@@ -40,6 +40,9 @@ final class LampaPlaylist {
     private static final long DEFAULT_CACHE_TTL_MS = TimeUnit.MINUTES.toMillis(15);
     private static final long MAX_CACHE_TTL_MS = TimeUnit.HOURS.toMillis(2);
     private static final long SEGMENT_CACHE_TTL_MS = TimeUnit.DAYS.toMillis(7);
+    private static final int MAX_RESOLVE_ATTEMPTS = 5;
+    private static final long INITIAL_RESOLVE_RETRY_MS = 700;
+    private static final long MAX_RESOLVE_RETRY_MS = 4_000;
     private static final String LAMPAC_SKIP_URL = "https://kinohub.uk/lite/lampauaskip/segments";
 
     interface ResolveCallback {
@@ -118,6 +121,7 @@ final class LampaPlaylist {
             .followRedirects(true)
             .build();
     private final List<Item> items = new ArrayList<>();
+    private final HashMap<Integer, ArrayList<ResolveCallback>> pendingResolves = new HashMap<>();
     private final JSONArray playbackResults = new JSONArray();
     private int currentIndex;
     private boolean autoNext = true;
@@ -545,6 +549,12 @@ final class LampaPlaylist {
             return;
         }
 
+        ArrayList<ResolveCallback> existing = pendingResolves.get(index);
+        if (existing != null) {
+            existing.add(callback);
+            return;
+        }
+
         String cacheKey = cacheKey(item.resolverUrl);
         String cached = cache.getString(cacheKey + ".json", null);
         long cachedAt = cache.getLong(cacheKey + ".time", 0);
@@ -559,6 +569,17 @@ final class LampaPlaylist {
             }
         }
 
+        ArrayList<ResolveCallback> callbacks = new ArrayList<>();
+        callbacks.add(callback);
+        pendingResolves.put(index, callbacks);
+        requestResolve(index, item, cacheKey, 0);
+    }
+
+    private void requestResolve(int index, Item item, String cacheKey, int attempt) {
+        if (item.isResolved()) {
+            completeResolve(index, item, null);
+            return;
+        }
         Request.Builder request = new Request.Builder().url(item.resolverUrl).get();
         for (String name : item.resolverHeaders.keySet()) {
             request.header(name, item.resolverHeaders.get(name));
@@ -566,48 +587,159 @@ final class LampaPlaylist {
         client.newCall(request.build()).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                mainHandler.post(() -> callback.onError(e.getMessage() == null ? "Resolver request failed" : e.getMessage()));
+                if (attempt + 1 < MAX_RESOLVE_ATTEMPTS) {
+                    scheduleResolveRetry(index, item, cacheKey, attempt, -1);
+                } else {
+                    completeResolve(index, null,
+                            e.getMessage() == null ? "Resolver request failed" : e.getMessage());
+                }
             }
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
                 try (Response closeable = response) {
+                    if (isRetryableResolverStatus(response.code())) {
+                        scheduleResolveRetry(index, item, cacheKey, attempt,
+                                retryAfterMillis(response));
+                        return;
+                    }
                     if (!response.isSuccessful() || response.body() == null) {
-                        mainHandler.post(() -> callback.onError("Resolver HTTP " + response.code()));
+                        completeResolve(index, null, "Resolver HTTP " + response.code());
+                        return;
+                    }
+                    if (isPlayableResponse(response)) {
+                        item.url = response.request().url().toString();
+                        persistResolvedItem(cacheKey, item, resolvedPayload(item));
+                        completeResolve(index, item, null);
                         return;
                     }
                     String body = response.body().string();
+                    if (body.trim().startsWith("http://") || body.trim().startsWith("https://")) {
+                        item.url = body.trim();
+                        persistResolvedItem(cacheKey, item, resolvedPayload(item));
+                        completeResolve(index, item, null);
+                        return;
+                    }
                     try {
                         JSONObject payload = new JSONObject(body);
                         applyResolvedPayload(item, payload);
                         if (!item.isResolved()) {
-                            mainHandler.post(() -> callback.onError("Resolver returned no playable URL"));
+                            if (isResolverPending(payload) && attempt + 1 < MAX_RESOLVE_ATTEMPTS) {
+                                scheduleResolveRetry(index, item, cacheKey, attempt, -1);
+                            } else {
+                                completeResolve(index, null, isResolverPending(payload)
+                                        ? "Stream is still being prepared"
+                                        : "Resolver returned no playable URL");
+                            }
                             return;
                         }
-                        item.resolvedAt = System.currentTimeMillis();
-                        cache.edit()
-                                .putString(cacheKey + ".json", payload.toString())
-                                .putLong(cacheKey + ".time", item.resolvedAt)
-                                .apply();
-                        mainHandler.post(() -> callback.onResolved(item));
+                        persistResolvedItem(cacheKey, item, payload);
+                        completeResolve(index, item, null);
                     } catch (JSONException e) {
-                        mainHandler.post(() -> callback.onError("Invalid resolver response"));
+                        completeResolve(index, null, "Invalid resolver response");
                     }
                 }
             }
         });
     }
 
+    private void scheduleResolveRetry(int index, Item item, String cacheKey,
+                                      int attempt, long requestedDelayMs) {
+        if (attempt + 1 >= MAX_RESOLVE_ATTEMPTS) {
+            completeResolve(index, null, "Stream is still being prepared");
+            return;
+        }
+        long delay = requestedDelayMs >= 0 ? requestedDelayMs
+                : Math.min(MAX_RESOLVE_RETRY_MS, INITIAL_RESOLVE_RETRY_MS << attempt);
+        delay = Math.max(250, Math.min(delay, MAX_RESOLVE_RETRY_MS));
+        mainHandler.postDelayed(() -> requestResolve(index, item, cacheKey, attempt + 1), delay);
+    }
+
+    private void completeResolve(int index, Item item, String error) {
+        mainHandler.post(() -> {
+            ArrayList<ResolveCallback> callbacks = pendingResolves.remove(index);
+            if (callbacks == null) return;
+            for (ResolveCallback callback : callbacks) {
+                if (item != null) callback.onResolved(item);
+                else callback.onError(error == null ? "Resolver request failed" : error);
+            }
+        });
+    }
+
+    private void persistResolvedItem(String cacheKey, Item item, JSONObject payload) {
+        item.resolvedAt = System.currentTimeMillis();
+        cache.edit()
+                .putString(cacheKey + ".json", payload.toString())
+                .putLong(cacheKey + ".time", item.resolvedAt)
+                .apply();
+    }
+
+    private static JSONObject resolvedPayload(Item item) {
+        JSONObject payload = new JSONObject();
+        try {
+            payload.put("url", item.url);
+        } catch (JSONException ignored) { }
+        return payload;
+    }
+
+    private static boolean isRetryableResolverStatus(int code) {
+        return code == 202 || code == 204 || code == 425 || code == 429 || code == 503;
+    }
+
+    private static long retryAfterMillis(Response response) {
+        String value = response.header("Retry-After");
+        if (value == null) return -1;
+        try {
+            return TimeUnit.SECONDS.toMillis(Math.max(0, Long.parseLong(value.trim())));
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
+    }
+
+    private static boolean isPlayableResponse(Response response) {
+        String contentType = response.header("Content-Type", "").toLowerCase();
+        return contentType.startsWith("video/") || contentType.startsWith("audio/")
+                || contentType.contains("mpegurl") || contentType.contains("dash+xml")
+                || contentType.contains("octet-stream");
+    }
+
+    private static boolean isResolverPending(JSONObject payload) {
+        if (payload == null) return false;
+        if (payload.has("rch") && !payload.isNull("rch")) return true;
+        String status = firstText(payload, "status", "state", "message");
+        if (status != null) {
+            String normalized = status.toLowerCase();
+            if (normalized.contains("pending") || normalized.contains("prepar")
+                    || normalized.contains("processing") || normalized.contains("loading")
+                    || normalized.contains("not_ready") || normalized.contains("not ready")
+                    || normalized.contains("wait")) return true;
+        }
+        for (String name : new String[]{"ready", "is_ready", "isReady", "IsReadyToPlayback"}) {
+            if (payload.has(name) && !payload.isNull(name) && !payload.optBoolean(name, false)) {
+                return true;
+            }
+        }
+        JSONObject dataObject = payload.optJSONObject("data");
+        if (dataObject != null && isResolverPending(dataObject)) return true;
+        JSONObject result = payload.optJSONObject("result");
+        return result != null && isResolverPending(result);
+    }
+
     private static void applyResolvedPayload(Item item, JSONObject payload) {
         JSONObject source = payload;
+        JSONObject result = payload.optJSONObject("result");
+        if (result != null) source = result;
+        JSONObject dataObject = payload.optJSONObject("data");
+        if (dataObject != null) source = dataObject;
         JSONArray data = payload.optJSONArray("data");
         if (data != null && data.length() > 0 && data.optJSONObject(0) != null) {
             source = data.optJSONObject(0);
         }
 
-        String resolvedUrl = firstText(source, "url", "media_url", "stream_url");
+        String resolvedUrl = firstText(source, "url", "media_url", "stream_url", "link", "file");
         HashMap<String, String> quality = new HashMap<>();
         readStringMap(source.optJSONObject("quality"), quality);
+        if (quality.isEmpty()) readStringMap(source.optJSONObject("qualities"), quality);
         if ((resolvedUrl == null || resolvedUrl.isEmpty()) && !quality.isEmpty()) {
             resolvedUrl = quality.values().iterator().next();
         }
