@@ -85,6 +85,7 @@ import androidx.media3.common.TrackGroup;
 import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
+import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
@@ -122,9 +123,11 @@ import java.io.File;
 import java.lang.reflect.Field;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -233,6 +236,9 @@ public class PlayerActivity extends Activity {
     private boolean lampaIptv;
     private boolean alternateStreamTypeTried;
     private boolean decoderQualityFallbackTried;
+    private boolean decoderCompatibilityMode;
+    private boolean decoderCompatibilityTried;
+    private String decoderCompatibilityUri;
     private boolean forceHevcForDolbyVision;
     private boolean pendingStuckRecovery;
     private String stuckRecoveryAttemptedUri;
@@ -241,6 +247,24 @@ public class PlayerActivity extends Activity {
     private int selectedVideoTrackIndex = -1;
     private int av1DroppedFrames;
     private String forcedStreamMimeType;
+    private volatile String resolverControlUri;
+    private String resolverRetryUri;
+    private int resolverRetryCount;
+    private volatile String detectedManifestUri;
+    private volatile String detectedManifestType;
+    private final ResolverResponseDataSource.Listener resolverResponseListener =
+            new ResolverResponseDataSource.Listener() {
+                @Override
+                public void onResolverControlResponse(Uri requestedUri) {
+                    resolverControlUri = requestedUri == null ? null : requestedUri.toString();
+                }
+
+                @Override
+                public void onManifestTypeDetected(Uri requestedUri, String mimeType) {
+                    detectedManifestUri = requestedUri == null ? null : requestedUri.toString();
+                    detectedManifestType = mimeType;
+                }
+            };
     private final Handler lampaUiHandler = new Handler(Looper.getMainLooper());
     private final SimpleDateFormat lampaClockFormatter = new SimpleDateFormat("HH:mm", Locale.getDefault());
     private LinearLayout lampaTopPanel;
@@ -1317,7 +1341,8 @@ public class PlayerActivity extends Activity {
                     intent.getIntExtra("tmdb_id", -1));
             if (((imdbId != null && imdbId.startsWith("tt")) || tmdbId > 0
                     || (cardId != null && !cardId.trim().isEmpty())
-                    || intent.hasExtra("quality_levels"))
+                    || intent.hasExtra("quality_levels") || intent.hasExtra("segments")
+                    || intent.hasExtra("season") || intent.hasExtra("episode"))
                     && intent.getData() != null) {
                 JSONObject item = new JSONObject();
                 JSONObject root = new JSONObject();
@@ -1325,6 +1350,11 @@ public class PlayerActivity extends Activity {
                 try {
                     item.put("url", intent.getData().toString());
                     item.put("title", intent.getStringExtra("title"));
+                    if (item.isNull("title")) item.put("title", intent.getStringExtra("filename"));
+                    String thumbnail = intent.getStringExtra("thumbnail");
+                    if (thumbnail != null && !thumbnail.trim().isEmpty()) {
+                        item.put("thumbnail", thumbnail);
+                    }
                     if (cardId != null && !cardId.trim().isEmpty()) item.put("id", cardId);
                     if (imdbId != null && imdbId.startsWith("tt")) item.put("imdb_id", imdbId);
                     if (tmdbId > 0) item.put("tmdb_id", tmdbId);
@@ -1337,6 +1367,12 @@ public class PlayerActivity extends Activity {
                             intent.getIntExtra("episode", -1));
                     if (season > 0) item.put("season", season);
                     if (episode > 0) item.put("episode", episode);
+                    String segmentJson = intent.getStringExtra("segments");
+                    if (segmentJson != null && segmentJson.trim().startsWith("{")) {
+                        item.put("segments", new JSONObject(segmentJson));
+                    }
+                    JSONArray subtitles = officialSubtitles(intent);
+                    if (subtitles.length() > 0) item.put("subtitles", subtitles);
                     if (intent.hasExtra(API_POSITION)) {
                         item.put("position_ms", Math.max(0,
                                 intent.getIntExtra(API_POSITION, 0)));
@@ -1360,6 +1396,8 @@ public class PlayerActivity extends Activity {
             lampaPlaylist = LampaPlaylist.fromJson(this, raw, index, autoNext);
             alternateStreamTypeTried = false;
             decoderQualityFallbackTried = false;
+            resetDecoderCompatibilityMode();
+            resetResolverResponseState();
             forcedStreamMimeType = null;
             if (!lampaPlaylist.isEmpty()) {
                 LampaPlaylist.Item current = lampaPlaylist.getCurrent();
@@ -1393,15 +1431,15 @@ public class PlayerActivity extends Activity {
                 : (stringUrls != null ? stringUrls.length : 0);
         if (count <= 0) return null;
 
-        ArrayList<String> names = intent.getStringArrayListExtra("video_list.name");
-        ArrayList<String> filenames = intent.getStringArrayListExtra("video_list.filename");
-        ArrayList<String> thumbnails = intent.getStringArrayListExtra("video_list.thumbnail");
-        ArrayList<String> segments = intent.getStringArrayListExtra("video_list.segments");
-        ArrayList<String> seasons = intent.getStringArrayListExtra("video_list.season");
-        ArrayList<String> episodes = intent.getStringArrayListExtra("video_list.episode");
-        ArrayList<String> imdbIds = intent.getStringArrayListExtra("video_list.imdb_id");
-        ArrayList<String> ids = intent.getStringArrayListExtra("video_list.id");
-        ArrayList<Bundle> subtitleBundles = intent.getParcelableArrayListExtra("video_list.subtitles");
+        ArrayList<String> names = stringValues(intent, "video_list.name");
+        ArrayList<String> filenames = stringValues(intent, "video_list.filename");
+        ArrayList<String> thumbnails = stringValues(intent, "video_list.thumbnail");
+        ArrayList<String> segments = stringValues(intent, "video_list.segments");
+        ArrayList<String> seasons = stringValues(intent, "video_list.season");
+        ArrayList<String> episodes = stringValues(intent, "video_list.episode");
+        ArrayList<String> imdbIds = stringValues(intent, "video_list.imdb_id");
+        ArrayList<String> ids = stringValues(intent, "video_list.id");
+        ArrayList<Bundle> subtitleBundles = bundleValues(intent, "video_list.subtitles");
         JSONArray items = new JSONArray();
         String currentUrl = intent.getData() == null ? null : intent.getData().toString();
         int currentIndex = 0;
@@ -1436,7 +1474,10 @@ public class PlayerActivity extends Activity {
                 putOfficialQuality(item, intent,
                         "video_list.quality_levels." + i,
                         "video_list.quality_urls." + i);
-                if (url.equals(currentUrl)) currentIndex = items.length();
+                if (itemMatchesUrl(item, currentUrl)) {
+                    currentIndex = items.length();
+                    item.put("url", currentUrl);
+                }
                 items.put(item);
             }
             if (items.length() == 0) return null;
@@ -1455,6 +1496,28 @@ public class PlayerActivity extends Activity {
         if (bundle == null) return result;
         Parcelable[] uris = bundle.getParcelableArray("uris");
         String[] names = bundle.getStringArray("names");
+        ArrayList<String> nameList = bundle.getStringArrayList("names");
+        if (uris == null) return result;
+        for (int i = 0; i < uris.length; i++) {
+            if (!(uris[i] instanceof Uri)) continue;
+            JSONObject subtitle = new JSONObject();
+            subtitle.put("url", uris[i].toString());
+            if (names != null && i < names.length && names[i] != null) {
+                subtitle.put("label", names[i]);
+            } else if (nameList != null && i < nameList.size() && nameList.get(i) != null) {
+                subtitle.put("label", nameList.get(i));
+            }
+            result.put(subtitle);
+        }
+        return result;
+    }
+
+    private static JSONArray officialSubtitles(Intent intent) throws JSONException {
+        JSONArray result = new JSONArray();
+        Parcelable[] uris = intent.getParcelableArrayExtra("subs");
+        if (uris == null) uris = intent.getParcelableArrayExtra(API_SUBS);
+        String[] names = intent.getStringArrayExtra("subs.name");
+        if (names == null) names = intent.getStringArrayExtra(API_SUBS_NAME);
         if (uris == null) return result;
         for (int i = 0; i < uris.length; i++) {
             if (!(uris[i] instanceof Uri)) continue;
@@ -1470,19 +1533,26 @@ public class PlayerActivity extends Activity {
 
     private static void putOfficialQuality(JSONObject item, Intent intent,
                                            String levelsKey, String urlsKey) throws JSONException {
-        String[] levels = intent.getStringArrayExtra(levelsKey);
-        if (levels == null || levels.length == 0) return;
+        ArrayList<String> levelValues = stringValues(intent, levelsKey);
+        if (levelValues == null || levelValues.isEmpty()) return;
         Parcelable[] parcelableUrls = intent.getParcelableArrayExtra(urlsKey);
         String[] stringUrls = intent.getStringArrayExtra(urlsKey);
+        ArrayList<Uri> parcelableUrlList = intent.getParcelableArrayListExtra(urlsKey);
+        ArrayList<String> stringUrlList = stringValues(intent, urlsKey);
         JSONObject quality = new JSONObject();
-        for (int index = 0; index < levels.length; index++) {
-            String label = levels[index];
+        for (int index = 0; index < levelValues.size(); index++) {
+            String label = levelValues.get(index);
             String url = null;
             if (parcelableUrls != null && index < parcelableUrls.length
                     && parcelableUrls[index] instanceof Uri) {
                 url = parcelableUrls[index].toString();
             } else if (stringUrls != null && index < stringUrls.length) {
                 url = stringUrls[index];
+            } else if (parcelableUrlList != null && index < parcelableUrlList.size()
+                    && parcelableUrlList.get(index) != null) {
+                url = parcelableUrlList.get(index).toString();
+            } else if (stringUrlList != null && index < stringUrlList.size()) {
+                url = stringUrlList.get(index);
             }
             if (label != null && !label.trim().isEmpty()
                     && url != null && !url.trim().isEmpty()) {
@@ -1490,6 +1560,36 @@ public class PlayerActivity extends Activity {
             }
         }
         if (quality.length() > 0) item.put("quality", quality);
+    }
+
+    private static boolean itemMatchesUrl(JSONObject item, String currentUrl) {
+        if (item == null || currentUrl == null || currentUrl.trim().isEmpty()) return false;
+        if (currentUrl.equals(item.optString("url", null))) return true;
+        JSONObject quality = item.optJSONObject("quality");
+        if (quality == null) return false;
+        Iterator<String> keys = quality.keys();
+        while (keys.hasNext()) {
+            if (currentUrl.equals(quality.optString(keys.next(), null))) return true;
+        }
+        return false;
+    }
+
+    private static ArrayList<String> stringValues(Intent intent, String key) {
+        ArrayList<String> list = intent.getStringArrayListExtra(key);
+        if (list != null) return list;
+        String[] array = intent.getStringArrayExtra(key);
+        if (array == null) return null;
+        return new ArrayList<>(Arrays.asList(array));
+    }
+
+    private static ArrayList<Bundle> bundleValues(Intent intent, String key) {
+        ArrayList<Bundle> list = intent.getParcelableArrayListExtra(key);
+        if (list != null) return list;
+        Parcelable[] array = intent.getParcelableArrayExtra(key);
+        if (array == null) return null;
+        ArrayList<Bundle> result = new ArrayList<>();
+        for (Parcelable value : array) result.add(value instanceof Bundle ? (Bundle) value : null);
+        return result;
     }
 
     private static void putIndexedText(JSONObject target, String key,
@@ -2224,6 +2324,8 @@ public class PlayerActivity extends Activity {
             item.url = choice.sourceUrl;
             decoderQualityFallbackTried = false;
             alternateStreamTypeTried = false;
+            resetDecoderCompatibilityMode();
+            resetResolverResponseState();
             forcedStreamMimeType = null;
             applyPlaylistItem(item, false);
             restorePlayState = resume;
@@ -2597,6 +2699,8 @@ public class PlayerActivity extends Activity {
                 playlistCurrentRecorded = false;
                 alternateStreamTypeTried = false;
                 decoderQualityFallbackTried = false;
+                resetDecoderCompatibilityMode();
+                resetResolverResponseState();
                 forcedStreamMimeType = null;
                 applyPlaylistItem(item, false);
                 playbackFinished = false;
@@ -2752,9 +2856,14 @@ public class PlayerActivity extends Activity {
         haveMedia = mPrefs.mediaUri != null;
         av1DroppedFrames = 0;
 
+        String mediaUri = mPrefs.mediaUri == null ? null : mPrefs.mediaUri.toString();
+        if (decoderCompatibilityUri != null && !decoderCompatibilityUri.equals(mediaUri)) {
+            resetDecoderCompatibilityMode();
+        }
+
         if (pendingStuckRecovery) {
             pendingStuckRecovery = false;
-        } else {
+        } else if (!decoderCompatibilityMode) {
             forceHevcForDolbyVision = false;
             stuckRecoveryAttemptedUri = null;
         }
@@ -2772,7 +2881,7 @@ public class PlayerActivity extends Activity {
                 .setExceedRendererCapabilitiesIfNecessary(true)
                 .setAllowMultipleAdaptiveSelections(true));
         final boolean optimize4k = isCurrent4kCandidate();
-        if (mPrefs.tunneling) {
+        if (mPrefs.tunneling && !decoderCompatibilityMode) {
             trackSelector.setParameters(trackSelector.buildUponParameters()
                     .setTunnelingEnabled(true)
             );
@@ -2814,10 +2923,13 @@ public class PlayerActivity extends Activity {
             // decoder, which is considerably smoother on non-AV1 chipsets.
             decoderPriority = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER;
         }
+        if (decoderCompatibilityMode) {
+            decoderPriority = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER;
+        }
         @SuppressLint("WrongConstant") DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(this)
                 .setExtensionRendererMode(decoderPriority)
                 .setEnableDecoderFallback(true)
-                .setMapDV7ToHevc(mPrefs.mapDV7ToHevc);
+                .setMapDV7ToHevc(mPrefs.mapDV7ToHevc || decoderCompatibilityMode);
         if (forceHevcForDolbyVision) {
             renderersFactory.setMediaCodecSelector((mimeType, secure, tunneling) ->
                     MediaCodecSelector.DEFAULT.getDecoderInfos(
@@ -2849,7 +2961,10 @@ public class PlayerActivity extends Activity {
                         .setConnectTimeoutMs(15000)
                         .setReadTimeoutMs(30000);
                 if (!headers.isEmpty()) defaultHttpDataSourceFactory.setDefaultRequestProperties(headers);
-                playerBuilder.setMediaSourceFactory(new DefaultMediaSourceFactory(defaultHttpDataSourceFactory, extractorsFactory));
+                DataSource.Factory inspectedDataSource = new ResolverResponseDataSource.Factory(
+                        defaultHttpDataSourceFactory, resolverResponseListener);
+                playerBuilder.setMediaSourceFactory(new DefaultMediaSourceFactory(
+                        inspectedDataSource, extractorsFactory));
             }
         }
 
@@ -3096,6 +3211,7 @@ public class PlayerActivity extends Activity {
             setEndControlsVisible(haveMedia && (state == Player.STATE_ENDED || isNearEnd));
 
             if (state == Player.STATE_READY) {
+                resetResolverResponseState();
                 frameRendered = true;
                 updateLampaTopPanel();
                 updateLampaSegmentMarkers();
@@ -3228,6 +3344,15 @@ public class PlayerActivity extends Activity {
             if (error instanceof ExoPlaybackException) {
                 final ExoPlaybackException exoPlaybackException = (ExoPlaybackException) error;
                 if (exoPlaybackException.type == ExoPlaybackException.TYPE_SOURCE) {
+                    if (recoverResolverControlResponse()) return;
+                    String detectedManifest = consumeDetectedManifestType();
+                    if (detectedManifest != null && !detectedManifest.equals(forcedStreamMimeType)) {
+                        alternateStreamTypeTried = true;
+                        forcedStreamMimeType = detectedManifest;
+                        restorePlayState = true;
+                        initializePlayer();
+                        return;
+                    }
                     if (lampaPlaylist != null && !alternateStreamTypeTried
                             && mPrefs.mediaUri != null
                             && Utils.isSupportedNetworkUri(mPrefs.mediaUri)
@@ -3275,6 +3400,10 @@ public class PlayerActivity extends Activity {
                         }
                     }
                 }
+                if (exoPlaybackException.type == ExoPlaybackException.TYPE_RENDERER
+                        && recoverDecoderCompatibilityMode()) {
+                    return;
+                }
                 if (controllerVisible && controllerVisibleFully) {
                     showError(exoPlaybackException);
                 } else {
@@ -3302,6 +3431,89 @@ public class PlayerActivity extends Activity {
             initializePlayer();
         });
         return true;
+    }
+
+    private boolean recoverResolverControlResponse() {
+        if (resolverControlUri == null || player == null) return false;
+        MediaItem mediaItem = player.getCurrentMediaItem();
+        String currentUri = mediaItem == null || mediaItem.localConfiguration == null
+                ? null : mediaItem.localConfiguration.uri.toString();
+        if (!resolverControlUri.equals(currentUri)) return false;
+
+        resolverControlUri = null;
+        if (!Objects.equals(resolverRetryUri, currentUri)) {
+            resolverRetryUri = currentUri;
+            resolverRetryCount = 0;
+        }
+        if (resolverRetryCount >= 3) {
+            showSnack(getString(R.string.resolver_not_ready), null);
+            releasePlayer(false);
+            return true;
+        }
+
+        long delayMs = 700L << resolverRetryCount;
+        resolverRetryCount++;
+        restorePlayState = true;
+        updateLoading(true);
+        Utils.showText(playerView, getString(R.string.resolver_preparing_retry), 2500);
+        playerView.postDelayed(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            releasePlayer(false);
+            initializePlayer();
+        }, delayMs);
+        return true;
+    }
+
+    private String consumeDetectedManifestType() {
+        if (detectedManifestUri == null || detectedManifestType == null || player == null) return null;
+        MediaItem mediaItem = player.getCurrentMediaItem();
+        String currentUri = mediaItem == null || mediaItem.localConfiguration == null
+                ? null : mediaItem.localConfiguration.uri.toString();
+        if (!detectedManifestUri.equals(currentUri)) return null;
+        String result = detectedManifestType;
+        detectedManifestUri = null;
+        detectedManifestType = null;
+        return result;
+    }
+
+    private void resetResolverResponseState() {
+        resolverControlUri = null;
+        resolverRetryUri = null;
+        resolverRetryCount = 0;
+        detectedManifestUri = null;
+        detectedManifestType = null;
+    }
+
+    private boolean recoverDecoderCompatibilityMode() {
+        if (player == null || decoderCompatibilityTried) return false;
+        MediaItem mediaItem = player.getCurrentMediaItem();
+        if (mediaItem == null || mediaItem.localConfiguration == null) return false;
+
+        decoderCompatibilityTried = true;
+        decoderCompatibilityMode = true;
+        decoderCompatibilityUri = mediaItem.localConfiguration.uri.toString();
+        Format format = player.getVideoFormat();
+        if (format != null && MimeTypes.VIDEO_DOLBY_VISION.equals(format.sampleMimeType)) {
+            forceHevcForDolbyVision = true;
+            pendingStuckRecovery = true;
+        }
+        if (lampaPlaylist != null && lampaPlaylist.getCurrent() != null) {
+            lampaPlaylist.getCurrent().positionMs = Math.max(0, player.getCurrentPosition());
+        }
+        restorePlayState = player.getPlayWhenReady();
+        savePlayer();
+        Utils.showText(playerView, getString(R.string.decoder_compatibility_retry), 3500);
+        playerView.post(() -> {
+            releasePlayer(false);
+            initializePlayer();
+        });
+        return true;
+    }
+
+    private void resetDecoderCompatibilityMode() {
+        decoderCompatibilityMode = false;
+        decoderCompatibilityTried = false;
+        decoderCompatibilityUri = null;
     }
 
     private String getStreamMimeType(Uri uri, String suppliedType) {

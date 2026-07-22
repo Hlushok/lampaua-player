@@ -3,7 +3,7 @@
 Open-source Android video player for Lampa and LampaUA, based on [Just Player](https://github.com/moneytoo/Player).
 
 - Android application ID: `com.lampaua.player`
-- Current version: `1.5.9` (`versionCode 17`)
+- Current version: `1.6.0` (`versionCode 18`)
 - Android 6.0+ and Android TV
 - Media3/ExoPlayer playback engine
 
@@ -18,6 +18,8 @@ Open-source Android video player for Lampa and LampaUA, based on [Just Player](h
 - playback position/result reporting back to Lampa;
 - AV1/dav1d and FFmpeg extension decoders;
 - 4K-oriented buffering, decoder fallback and dropped-frame fallback;
+- bounded retry and request coalescing for deferred Lampac stream resolution;
+- compatibility recovery after renderer failures and manifest detection for extensionless streams;
 - independent update discovery through public GitHub Releases.
 
 ## LAMPA integration
