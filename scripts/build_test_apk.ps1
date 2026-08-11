@@ -66,7 +66,7 @@ try {
 
     $destinationDirectory = Join-Path $projectRoot "test-builds"
     New-Item -ItemType Directory -Force -Path $destinationDirectory | Out-Null
-    $destination = Join-Path $destinationDirectory "UA-Player-1.6.0-test.apk"
+    $destination = Join-Path $destinationDirectory "UA-Player-1.6.1-test.apk"
     Copy-Item -LiteralPath $apk.FullName -Destination $destination -Force
     Write-Output "Test APK: $destination"
 } finally {
