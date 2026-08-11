@@ -419,6 +419,7 @@ public class PlayerActivity extends Activity {
     private int skipUndoPlaylistIndex = -1;
     private long pendingPlaylistRestorePosition = C.TIME_UNSET;
     private int skipKeyUpToConsume;
+    private final Runnable primaryTvFocusRunnable = this::requestPrimaryTvFocus;
     private View exoPrevious;
     private View exoNext;
     private final Runnable lampaUiTicker = new Runnable() {
@@ -969,12 +970,7 @@ public class PlayerActivity extends Activity {
                 // https://developer.android.com/training/system-ui/immersive
                 Utils.toggleSystemUi(PlayerActivity.this, playerView, visibility == View.VISIBLE);
                 if (visibility == View.VISIBLE) {
-                    // Because when using dpad controls, focus resets to first item in bottom controls bar
-                    if (isSkipActionEnabled()) {
-                        lampaSkipButton.requestFocus();
-                    } else {
-                        findViewById(R.id.exo_play_pause).requestFocus();
-                    }
+                    requestPrimaryTvFocus();
                 }
 
                 if (controllerVisible && playerView.isControllerFullyVisible()) {
@@ -1073,6 +1069,13 @@ public class PlayerActivity extends Activity {
         if (isTvBox && Build.VERSION.SDK_INT >= 31) {
             updateSubtitleStyle(this);
         }
+        postPrimaryTvFocus();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) postPrimaryTvFocus();
     }
 
     @Override
@@ -2587,6 +2590,24 @@ public class PlayerActivity extends Activity {
     private boolean isSkipActionEnabled() {
         return lampaSkipPanel != null && lampaSkipPanel.getVisibility() == View.VISIBLE
                 && skipModel != null && skipModel.enabled();
+    }
+
+    private void postPrimaryTvFocus() {
+        if (!isTvBox || playerView == null) return;
+        playerView.removeCallbacks(primaryTvFocusRunnable);
+        playerView.post(primaryTvFocusRunnable);
+    }
+
+    private void requestPrimaryTvFocus() {
+        if (playerView == null || exoPlayPause == null) return;
+        TvFocusPolicy.Target target = TvFocusPolicy.choose(isTvBox,
+                playerView.isControllerFullyVisible(), isSkipActionEnabled(),
+                exoPlayPause.isShown());
+        if (target == TvFocusPolicy.Target.SKIP && lampaSkipButton != null) {
+            lampaSkipButton.requestFocus();
+        } else if (target == TvFocusPolicy.Target.PLAY_PAUSE) {
+            exoPlayPause.requestFocus();
+        }
     }
 
     private void activateSkipModel() {
@@ -4996,8 +5017,11 @@ public class PlayerActivity extends Activity {
             loadingProgressBar.setVisibility(View.GONE);
             if (loadingRateView != null) loadingRateView.setVisibility(View.GONE);
             exoPlayPause.setVisibility(View.VISIBLE);
-            if (focusPlay) {
-                focusPlay = false;
+            boolean shouldFocusPlay = focusPlay;
+            focusPlay = false;
+            if (isTvBox) {
+                postPrimaryTvFocus();
+            } else if (shouldFocusPlay) {
                 exoPlayPause.requestFocus();
             }
         }
