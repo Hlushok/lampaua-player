@@ -58,7 +58,7 @@ public class ResourceContractTest {
         assertTrue(image.length > 8_000);
         assertEquals(320, pngInt(image, 16));
         assertEquals(180, pngInt(image, 20));
-        assertEquals("0000000000000000000000000000000000000000000000000000000000000000",
+        assertEquals("67cff9977c881c0fd1a31060455c5841531f2188ae78cecdd628c90d0e3c4d15",
                 sha256(image));
     }
 
