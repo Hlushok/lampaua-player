@@ -97,7 +97,7 @@
 
         <ListPreference
             app:key="skipMode"
-            app:defaultValue="button"
+            app:defaultValue="full"
             app:dependency="skipEnabled"
             app:entries="@array/skip_mode_entries"
             app:entryValues="@array/skip_mode_values"
@@ -106,7 +106,7 @@
 
         <ListPreference
             app:key="skipModeCredits"
-            app:defaultValue="button"
+            app:defaultValue="full"
             app:dependency="skipEnabled"
             app:entries="@array/skip_mode_entries"
             app:entryValues="@array/skip_mode_values"

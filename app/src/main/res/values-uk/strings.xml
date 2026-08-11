@@ -105,6 +105,8 @@
     <string name="skip_credits">Пропустити титри</string>
     <string name="skip_preview">Пропустити анонс</string>
     <string name="skip_available_in">Пропуск через %1$d</string>
+    <string name="skip_cancel_countdown">Скасувати · %1$d</string>
+    <string name="skip_undo">Повернутися</string>
     <string name="button_quality">Якість відео</string>
     <string name="button_playback_options">Швидкість та аудіо</string>
     <string name="button_app_settings">Налаштування UA Player</string>
@@ -148,6 +150,8 @@
     <string name="pref_skip_mode">Заставки та повтори</string>
     <string name="pref_skip_mode_credits">Фінальні титри</string>
     <string name="pref_skip_mode_button">Показувати кнопку «Пропустити»</string>
+    <string name="pref_skip_mode_brief">Показувати коротко</string>
+    <string name="pref_skip_mode_full">Показувати до кінця сегмента</string>
     <string name="pref_skip_mode_auto">Пропускати автоматично</string>
     <string name="pref_skip_fetch">Шукати сегменти онлайн</string>
     <string name="pref_skip_fetch_on">Запитувати налаштований сервіс, якщо LAMPA не передала сегменти</string>

@@ -41,12 +41,14 @@
   </string-array>
 
   <string-array name="skip_mode_entries">
-    <item>@string/pref_skip_mode_button</item>
+    <item>@string/pref_skip_mode_brief</item>
+    <item>@string/pref_skip_mode_full</item>
     <item>@string/pref_skip_mode_auto</item>
   </string-array>
 
   <string-array name="skip_mode_values">
-    <item>button</item>
+    <item>brief</item>
+    <item>full</item>
     <item>auto</item>
   </string-array>
 

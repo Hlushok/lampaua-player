@@ -98,7 +98,11 @@
     <string name="pref_skip_mode">Заставки и повторы</string>
     <string name="pref_skip_mode_credits">Финальные титры</string>
     <string name="pref_skip_mode_button">Показывать кнопку «Пропустить»</string>
+    <string name="pref_skip_mode_brief">Показывать кратко</string>
+    <string name="pref_skip_mode_full">Показывать до конца сегмента</string>
     <string name="pref_skip_mode_auto">Пропускать автоматически</string>
+    <string name="skip_cancel_countdown">Отменить · %1$d</string>
+    <string name="skip_undo">Вернуться</string>
     <string name="pref_skip_fetch">Искать сегменты онлайн</string>
     <string name="pref_skip_fetch_on">Запрашивать настроенный сервис, если LAMPA не передала сегменты</string>
     <string name="pref_skip_fetch_off">Использовать только сегменты, переданные LAMPA</string>

@@ -118,6 +118,9 @@ import com.brouken.player.dtpv.youtube.YouTubeOverlay;
 import com.brouken.player.update.UpdateInfo;
 import com.brouken.player.update.UpdateUi;
 import com.brouken.player.update.Updater;
+import com.brouken.player.skip.SkipController;
+import com.brouken.player.skip.SkipPolicy;
+import com.brouken.player.skip.SkipSegment;
 import com.bumptech.glide.Glide;
 import com.getkeepsafe.taptargetview.TapTarget;
 import com.getkeepsafe.taptargetview.TapTargetView;
@@ -409,9 +412,12 @@ public class PlayerActivity extends Activity {
     private LinearLayout lampaSkipPanel;
     private TextView lampaSkipButton;
     private ProgressBar lampaSkipProgress;
-    private LampaPlaylist.Segment activeLampaSegment;
-    private boolean activeLampaSegmentPreview;
-    private LampaPlaylist.Segment focusedLampaSegment;
+    private final SkipController skipController = new SkipController();
+    private SkipController.Model skipModel;
+    private String focusedSkipKey;
+    private boolean skipPlaylistAdvance;
+    private int skipUndoPlaylistIndex = -1;
+    private long pendingPlaylistRestorePosition = C.TIME_UNSET;
     private int skipKeyUpToConsume;
     private View exoPrevious;
     private View exoNext;
@@ -964,8 +970,7 @@ public class PlayerActivity extends Activity {
                 Utils.toggleSystemUi(PlayerActivity.this, playerView, visibility == View.VISIBLE);
                 if (visibility == View.VISIBLE) {
                     // Because when using dpad controls, focus resets to first item in bottom controls bar
-                    if (activeLampaSegment != null && !activeLampaSegmentPreview
-                            && lampaSkipButton != null && lampaSkipButton.isShown()) {
+                    if (isSkipActionEnabled()) {
                         lampaSkipButton.requestFocus();
                     } else {
                         findViewById(R.id.exo_play_pause).requestFocus();
@@ -1221,15 +1226,14 @@ public class PlayerActivity extends Activity {
     @SuppressLint("GestureBackNavigation")
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (activeLampaSegment != null && !activeLampaSegmentPreview
-                && lampaSkipButton != null && lampaSkipButton.isShown()
+        if (isSkipActionEnabled()
                 && (keyCode == KeyEvent.KEYCODE_BUTTON_START
                 || keyCode == KeyEvent.KEYCODE_BUTTON_A
                 || keyCode == KeyEvent.KEYCODE_BUTTON_SELECT
                 || keyCode == KeyEvent.KEYCODE_ENTER
                 || keyCode == KeyEvent.KEYCODE_DPAD_CENTER
                 || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER)) {
-            skipActiveLampaSegment();
+            activateSkipModel();
             return true;
         }
         switch (keyCode) {
@@ -1365,15 +1369,14 @@ public class PlayerActivity extends Activity {
     public boolean dispatchKeyEvent(KeyEvent event) {
         final int lampaKeyCode = event.getKeyCode();
         if (event.getAction() == KeyEvent.ACTION_DOWN
-                && activeLampaSegment != null && !activeLampaSegmentPreview
-                && lampaSkipButton != null && lampaSkipButton.isShown()
+                && isSkipActionEnabled()
                 && (lampaKeyCode == KeyEvent.KEYCODE_BUTTON_START
                 || lampaKeyCode == KeyEvent.KEYCODE_BUTTON_A
                 || lampaKeyCode == KeyEvent.KEYCODE_BUTTON_SELECT
                 || lampaKeyCode == KeyEvent.KEYCODE_ENTER
                 || lampaKeyCode == KeyEvent.KEYCODE_DPAD_CENTER
                 || lampaKeyCode == KeyEvent.KEYCODE_NUMPAD_ENTER)) {
-            skipActiveLampaSegment();
+            activateSkipModel();
             skipKeyUpToConsume = lampaKeyCode;
             return true;
         }
@@ -2021,7 +2024,7 @@ public class PlayerActivity extends Activity {
         lampaSkipButton.setPadding(Utils.dpToPx(20), Utils.dpToPx(10), Utils.dpToPx(20), Utils.dpToPx(8));
         lampaSkipButton.setFocusable(true);
         lampaSkipButton.setClickable(true);
-        lampaSkipButton.setOnClickListener(view -> skipActiveLampaSegment());
+        lampaSkipButton.setOnClickListener(view -> activateSkipModel());
         lampaSkipProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         lampaSkipProgress.setMax(1000);
         lampaSkipProgress.setProgressTintList(android.content.res.ColorStateList.valueOf(gold));
@@ -2423,67 +2426,61 @@ public class PlayerActivity extends Activity {
     private void updateLampaSkipUi() {
         if (lampaSkipPanel == null || player == null || lampaPlaylist == null) return;
         if (!mPrefs.skipEnabled) {
-            activeLampaSegment = null;
-            focusedLampaSegment = null;
+            skipModel = null;
+            focusedSkipKey = null;
             lampaSkipPanel.setVisibility(View.GONE);
             return;
         }
         LampaPlaylist.Item item = lampaPlaylist.getCurrent();
         long position = Math.max(0, player.getCurrentPosition());
-        activeLampaSegment = null;
-        activeLampaSegmentPreview = false;
-        if (item != null) {
-            for (LampaPlaylist.Segment segment : item.segments) {
-                if (segment.contains(position)) {
-                    activeLampaSegment = segment;
-                    break;
-                }
-            }
-            if (activeLampaSegment == null) {
-                for (LampaPlaylist.Segment segment : item.segments) {
-                    long startsIn = segment.startMs - position;
-                    if (startsIn > 0 && startsIn <= 5000
-                            && (activeLampaSegment == null
-                            || segment.startMs < activeLampaSegment.startMs)) {
-                        activeLampaSegment = segment;
-                        activeLampaSegmentPreview = true;
-                    }
-                }
-            }
-        }
-        if (activeLampaSegment == null) {
-            focusedLampaSegment = null;
+        long duration = player.getDuration();
+        if (item == null || duration == C.TIME_UNSET || duration <= 0) {
+            skipModel = null;
             lampaSkipPanel.setVisibility(View.GONE);
             return;
         }
-        long duration = player.getDuration();
-        boolean credits = isCreditsSegment(activeLampaSegment, duration);
-        boolean auto = "ad".equalsIgnoreCase(activeLampaSegment.type)
-                || Prefs.SKIP_MODE_AUTO.equals(credits
-                ? mPrefs.skipModeCredits : mPrefs.skipMode);
-        if (activeLampaSegmentPreview) {
-            long seconds = Math.max(1, (activeLampaSegment.startMs - position + 999) / 1000);
-            lampaSkipButton.setText(getString(R.string.skip_available_in, seconds));
-            lampaSkipButton.setEnabled(false);
-            lampaSkipButton.setClickable(false);
-            lampaSkipButton.setAlpha(0.72f);
-            lampaSkipProgress.setProgress((int) Math.min(1000,
-                    Math.max(0, (activeLampaSegment.startMs - position) * 1000 / 5000)));
-        } else if (auto) {
-            skipActiveLampaSegment();
+
+        List<SkipSegment> segments = validatedSkipSegments(item, duration);
+        SkipPolicy.Mode mode = skipModeForPosition(segments, position, duration);
+        skipModel = skipController.update(segments, position, duration,
+                lampaPlaylist.hasNext(), mode, SystemClock.elapsedRealtime());
+        if (skipModel.action != SkipController.Action.NONE) {
+            applySkipAction(skipModel);
+            lampaSkipPanel.setVisibility(View.GONE);
             return;
-        } else {
-            lampaSkipButton.setText(segmentButtonText(activeLampaSegment, credits));
-            lampaSkipButton.setEnabled(true);
-            lampaSkipButton.setClickable(true);
-            lampaSkipButton.setAlpha(1f);
-            long width = Math.max(1, activeLampaSegment.endMs - activeLampaSegment.startMs);
-            lampaSkipProgress.setProgress((int) Math.min(1000,
-                    Math.max(0, (activeLampaSegment.endMs - position) * 1000 / width)));
         }
+        if (skipModel.state == SkipController.State.HIDDEN) {
+            focusedSkipKey = null;
+            lampaSkipPanel.setVisibility(View.GONE);
+            return;
+        }
+
+        switch (skipModel.state) {
+            case COUNTDOWN:
+                lampaSkipButton.setText(getString(R.string.skip_available_in, skipModel.seconds));
+                break;
+            case AUTO_PENDING:
+                lampaSkipButton.setText(getString(R.string.skip_cancel_countdown, skipModel.seconds));
+                break;
+            case UNDO_AVAILABLE:
+                lampaSkipButton.setText(R.string.skip_undo);
+                break;
+            case AVAILABLE:
+                lampaSkipButton.setText(segmentButtonText(skipModel.segment, duration));
+                break;
+            default:
+                break;
+        }
+        boolean enabled = skipModel.enabled();
+        lampaSkipButton.setEnabled(enabled);
+        lampaSkipButton.setClickable(enabled);
+        lampaSkipButton.setAlpha(enabled ? 1f : 0.72f);
+        lampaSkipProgress.setProgress(skipModel.progress);
         lampaSkipPanel.setVisibility(View.VISIBLE);
-        if (!activeLampaSegmentPreview && focusedLampaSegment != activeLampaSegment) {
-            focusedLampaSegment = activeLampaSegment;
+        String focusKey = skipModel.segment == null ? skipModel.state.name()
+                : skipModel.state.name() + ":" + skipModel.segment.key();
+        if (enabled && !focusKey.equals(focusedSkipKey)) {
+            focusedSkipKey = focusKey;
             playerView.showController();
             lampaSkipButton.post(() -> lampaSkipButton.requestFocus());
         }
@@ -2505,57 +2502,141 @@ public class PlayerActivity extends Activity {
             return;
         }
 
-        ArrayList<LampaPlaylist.Segment> valid = new ArrayList<>();
-        for (LampaPlaylist.Segment segment : item.segments) {
-            if (segment != null && segment.endMs > segment.startMs
-                    && segment.startMs < duration && segment.endMs > 0) {
-                valid.add(segment);
-            }
-        }
-        Collections.sort(valid, (left, right) -> Long.compare(left.startMs, right.startMs));
+        List<SkipSegment> valid = validatedSkipSegments(item, duration);
         long[] starts = new long[valid.size()];
         long[] ends = new long[valid.size()];
         for (int index = 0; index < valid.size(); index++) {
-            starts[index] = Math.max(0, valid.get(index).startMs);
-            ends[index] = Math.min(duration, valid.get(index).endMs);
+            starts[index] = valid.get(index).startMs;
+            ends[index] = valid.get(index).endMs;
         }
         timeBar.setSkipSegments(duration, starts, ends);
     }
 
-    private String segmentButtonText(LampaPlaylist.Segment segment, boolean creditsWithNext) {
-        if (creditsWithNext && reachesMediaEnd(segment, player == null ? C.TIME_UNSET : player.getDuration())
+    private List<SkipSegment> validatedSkipSegments(LampaPlaylist.Item item, long duration) {
+        ArrayList<SkipSegment> segments = new ArrayList<>();
+        if (item != null) {
+            for (LampaPlaylist.Segment segment : item.segments) {
+                segments.add(new SkipSegment(segment.startMs, segment.endMs,
+                        skipKind(segment), segment.source));
+            }
+        }
+        return SkipPolicy.validate(segments, duration);
+    }
+
+    private SkipSegment.Kind skipKind(LampaPlaylist.Segment segment) {
+        if (segment == null) return SkipSegment.Kind.UNKNOWN;
+        if ("ad".equalsIgnoreCase(segment.type) || "ad".equalsIgnoreCase(segment.kind)) {
+            return SkipSegment.Kind.AD;
+        }
+        String kind = segment.kind == null ? "" : segment.kind.trim().toLowerCase(Locale.US);
+        switch (kind) {
+            case "intro": return SkipSegment.Kind.INTRO;
+            case "recap": return SkipSegment.Kind.RECAP;
+            case "outro": return SkipSegment.Kind.OUTRO;
+            case "credits": return SkipSegment.Kind.CREDITS;
+            case "preview": return SkipSegment.Kind.PREVIEW;
+            default: return SkipSegment.Kind.UNKNOWN;
+        }
+    }
+
+    private SkipPolicy.Mode skipModeForPosition(List<SkipSegment> segments, long position,
+                                                long duration) {
+        SkipSegment relevant = null;
+        for (SkipSegment segment : segments) {
+            if (segment.contains(position)
+                    || (segment.startMs > position && segment.startMs - position <= 5000)) {
+                relevant = segment;
+                break;
+            }
+        }
+        if (relevant != null && relevant.kind == SkipSegment.Kind.AD) {
+            return SkipPolicy.Mode.AUTO;
+        }
+        String preference = relevant != null && isCreditsSegment(relevant, duration)
+                ? mPrefs.skipModeCredits : mPrefs.skipMode;
+        return parseSkipMode(preference);
+    }
+
+    private SkipPolicy.Mode parseSkipMode(String value) {
+        if (Prefs.SKIP_MODE_AUTO.equals(value)) return SkipPolicy.Mode.AUTO;
+        if (Prefs.SKIP_MODE_BRIEF.equals(value)) return SkipPolicy.Mode.BRIEF_BUTTON;
+        return SkipPolicy.Mode.FULL_BUTTON;
+    }
+
+    private String segmentButtonText(SkipSegment segment, long duration) {
+        if (reachesMediaEnd(segment, duration)
                 && lampaPlaylist != null && lampaPlaylist.hasNext()) {
             return getString(R.string.next_episode);
         }
         return getString(R.string.skip_action);
     }
 
-    private boolean isCreditsSegment(LampaPlaylist.Segment segment, long duration) {
+    private boolean isCreditsSegment(SkipSegment segment, long duration) {
         if (segment == null) return false;
-        if ("outro".equalsIgnoreCase(segment.kind)
-                || "credits".equalsIgnoreCase(segment.kind)) return true;
+        if (segment.kind == SkipSegment.Kind.OUTRO
+                || segment.kind == SkipSegment.Kind.CREDITS) return true;
         return duration != C.TIME_UNSET && duration > 0
                 && segment.endMs >= Math.round(duration * 0.75d);
     }
 
-    private boolean reachesMediaEnd(LampaPlaylist.Segment segment, long duration) {
+    private boolean reachesMediaEnd(SkipSegment segment, long duration) {
         return segment != null && duration != C.TIME_UNSET && duration > 0
                 && segment.endMs >= duration - 1500;
     }
 
-    private void skipActiveLampaSegment() {
-        if (player == null || activeLampaSegment == null || activeLampaSegmentPreview) return;
-        long duration = player.getDuration();
-        boolean nextEpisode = reachesMediaEnd(activeLampaSegment, duration)
-                && lampaPlaylist != null && lampaPlaylist.hasNext();
-        if (nextEpisode) {
-            playRelativeEpisode(1);
+    private boolean isSkipActionEnabled() {
+        return lampaSkipPanel != null && lampaSkipPanel.getVisibility() == View.VISIBLE
+                && skipModel != null && skipModel.enabled();
+    }
+
+    private void activateSkipModel() {
+        if (!isSkipActionEnabled() || player == null) return;
+        SkipController.Model action = skipController.activate(skipModel,
+                Math.max(0, player.getCurrentPosition()), player.getDuration(),
+                lampaPlaylist != null && lampaPlaylist.hasNext(),
+                SystemClock.elapsedRealtime());
+        skipModel = action;
+        if (action.action != SkipController.Action.NONE) {
+            applySkipAction(action);
         } else {
-            player.setSeekParameters(SeekParameters.EXACT);
-            player.seekTo(activeLampaSegment.endMs);
+            focusedSkipKey = null;
+            lampaSkipPanel.setVisibility(View.GONE);
         }
-        focusedLampaSegment = null;
-        lampaSkipPanel.setVisibility(View.GONE);
+    }
+
+    private void applySkipAction(SkipController.Model action) {
+        if (action == null || player == null) return;
+        switch (action.action) {
+            case SEEK_TO_END:
+                player.setSeekParameters(SeekParameters.EXACT);
+                player.seekTo(action.targetMs);
+                break;
+            case PLAY_NEXT:
+                if (lampaPlaylist != null && lampaPlaylist.hasNext()) {
+                    skipUndoPlaylistIndex = lampaPlaylist.getCurrentIndex();
+                    skipPlaylistAdvance = true;
+                    playRelativeEpisode(1);
+                }
+                break;
+            case RESTORE_POSITION:
+                if (lampaPlaylist != null && skipUndoPlaylistIndex >= 0
+                        && skipUndoPlaylistIndex < lampaPlaylist.size()
+                        && skipUndoPlaylistIndex != lampaPlaylist.getCurrentIndex()) {
+                    pendingPlaylistRestorePosition = action.targetMs;
+                    int target = skipUndoPlaylistIndex;
+                    skipUndoPlaylistIndex = -1;
+                    playPlaylistIndex(target, false);
+                } else {
+                    player.setSeekParameters(SeekParameters.EXACT);
+                    player.seekTo(action.targetMs);
+                    skipUndoPlaylistIndex = -1;
+                }
+                break;
+            default:
+                break;
+        }
+        focusedSkipKey = null;
+        if (lampaSkipPanel != null) lampaSkipPanel.setVisibility(View.GONE);
     }
 
     private void playRelativeEpisode(int offset) {
@@ -3208,6 +3289,12 @@ public class PlayerActivity extends Activity {
 
     private void playPlaylistIndex(int index, boolean outgoingEnded) {
         if (lampaPlaylist == null || switchingPlaylistItem || lampaPlaylist.get(index) == null) return;
+        if (!skipPlaylistAdvance) {
+            skipController.reset();
+            skipModel = null;
+            focusedSkipKey = null;
+            skipUndoPlaylistIndex = -1;
+        }
         switchingPlaylistItem = true;
         recordCurrentPlaylistItem(outgoingEnded);
         updateLoading(true);
@@ -3223,9 +3310,15 @@ public class PlayerActivity extends Activity {
                 resetResolverResponseState();
                 forcedStreamMimeType = null;
                 applyPlaylistItem(item, false);
+                if (pendingPlaylistRestorePosition != C.TIME_UNSET) {
+                    item.positionMs = Math.max(0, pendingPlaylistRestorePosition);
+                    mPrefs.updatePosition(item.positionMs);
+                    pendingPlaylistRestorePosition = C.TIME_UNSET;
+                }
                 playbackFinished = false;
                 restorePlayState = true;
                 focusPlay = true;
+                skipPlaylistAdvance = false;
                 switchingPlaylistItem = false;
                 initializePlayer();
                 lampaPlaylist.preResolveNext();
@@ -3233,6 +3326,8 @@ public class PlayerActivity extends Activity {
 
             @Override
             public void onError(String message) {
+                skipPlaylistAdvance = false;
+                pendingPlaylistRestorePosition = C.TIME_UNSET;
                 switchingPlaylistItem = false;
                 playlistCurrentRecorded = false;
                 updateLoading(false);

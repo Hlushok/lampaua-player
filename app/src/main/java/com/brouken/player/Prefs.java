@@ -59,6 +59,8 @@ class Prefs {
     private static final String PREF_KEY_VOLUME_GESTURES = "volumeGesturesEnabled";
     private static final String PREF_KEY_BRIGHTNESS_GESTURES = "brightnessGesturesEnabled";
 
+    public static final String SKIP_MODE_BRIEF = "brief";
+    public static final String SKIP_MODE_FULL = "full";
     public static final String SKIP_MODE_BUTTON = "button";
     public static final String SKIP_MODE_AUTO = "auto";
 
@@ -98,8 +100,8 @@ class Prefs {
     public boolean subtitleStyleEmbedded = true;
     public boolean subtitleStyleBold = false;
     public boolean skipEnabled = true;
-    public String skipMode = SKIP_MODE_BUTTON;
-    public String skipModeCredits = SKIP_MODE_BUTTON;
+    public String skipMode = SKIP_MODE_FULL;
+    public String skipModeCredits = SKIP_MODE_FULL;
     public boolean skipFetchOnline = true;
     public boolean systemVolume = true;
     public int playerVolume = 100;
@@ -162,6 +164,8 @@ class Prefs {
         skipEnabled = mSharedPreferences.getBoolean(PREF_KEY_SKIP_ENABLED, skipEnabled);
         skipMode = mSharedPreferences.getString(PREF_KEY_SKIP_MODE, skipMode);
         skipModeCredits = mSharedPreferences.getString(PREF_KEY_SKIP_MODE_CREDITS, skipModeCredits);
+        if (SKIP_MODE_BUTTON.equals(skipMode)) skipMode = SKIP_MODE_FULL;
+        if (SKIP_MODE_BUTTON.equals(skipModeCredits)) skipModeCredits = SKIP_MODE_FULL;
         skipFetchOnline = mSharedPreferences.getBoolean(PREF_KEY_SKIP_FETCH, skipFetchOnline);
         systemVolume = mSharedPreferences.getBoolean(PREF_KEY_SYSTEM_VOLUME, systemVolume);
         playerVolume = Math.max(0, Math.min(100,
