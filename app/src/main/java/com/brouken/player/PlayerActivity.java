@@ -37,6 +37,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Parcelable;
+import android.os.SystemClock;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
 import android.text.TextUtils;
@@ -175,6 +176,12 @@ public class PlayerActivity extends Activity {
     private static final int REQUEST_PAUSE = 2;
     private static final int CONTROL_TYPE_PLAY = 1;
     private static final int CONTROL_TYPE_PAUSE = 2;
+    private static final long VIDEO_LOAD_TIMEOUT_MS = 30_000L;
+    private static final long STALL_CHECK_INTERVAL_MS = 1_500L;
+    private static final long STALL_TIMEOUT_MS = 10_000L;
+    private static final long STABLE_PLAYBACK_MS = 15_000L;
+    private static final long LIVE_RECOVERY_FORGET_MS = 60_000L;
+    private static final int MAX_LIVE_RECOVERIES = 2;
 
     private CoordinatorLayout coordinatorLayout;
     private TextView titleView;
@@ -250,10 +257,60 @@ public class PlayerActivity extends Activity {
     private int av1DroppedFrames;
     private String forcedStreamMimeType;
     private volatile String resolverControlUri;
-    private String resolverRetryUri;
-    private int resolverRetryCount;
     private volatile String detectedManifestUri;
     private volatile String detectedManifestType;
+    private String playbackRecoveryKey;
+    private int sourceRecoveryAttempts;
+    private int compatibilityRecoveryAttempts;
+    private int liveRecoveryAttempts;
+    private long lastLiveRecoveryAt;
+    private long playbackWaitStartedAt;
+    private long lastPositionAdvanceAt;
+    private long lastObservedPosition = C.TIME_UNSET;
+    private long stablePlaybackStartedAt;
+    private long stablePlaybackStartPosition = C.TIME_UNSET;
+    private boolean playbackEverReady;
+    private final Runnable loadTimeoutRunnable = () -> {
+        if (player == null || player.getPlaybackState() != Player.STATE_BUFFERING || !haveMedia) return;
+        PlaybackRecoveryPolicy.FailureKind kind = Utils.isSupportedNetworkUri(mPrefs.mediaUri)
+                ? (playbackEverReady ? PlaybackRecoveryPolicy.FailureKind.STALL_MIDSTREAM
+                : PlaybackRecoveryPolicy.FailureKind.NETWORK_READ)
+                : PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE;
+        if (!recoverPlayback(kind)) {
+            stopPlaybackAfterRecoveryFailure(kind, null);
+        }
+    };
+    private final Runnable stallWatchdogRunnable = new Runnable() {
+        @Override public void run() {
+            if (player == null || !player.isPlaying()) return;
+            long now = SystemClock.elapsedRealtime();
+            long position = player.getCurrentPosition();
+            if (lastObservedPosition == C.TIME_UNSET || position > lastObservedPosition + 250) {
+                lastObservedPosition = position;
+                lastPositionAdvanceAt = now;
+            } else if (now - lastPositionAdvanceAt >= STALL_TIMEOUT_MS) {
+                PlaybackRecoveryPolicy.FailureKind kind = player.isCurrentMediaItemLive()
+                        ? PlaybackRecoveryPolicy.FailureKind.LIVE_STALL
+                        : (playbackEverReady && position - stablePlaybackStartPosition >= 2_000
+                        ? PlaybackRecoveryPolicy.FailureKind.STALL_MIDSTREAM
+                        : PlaybackRecoveryPolicy.FailureKind.STALL_AT_START);
+                if (!recoverPlayback(kind)) stopPlaybackAfterRecoveryFailure(kind, null);
+                return;
+            }
+            playerView.postDelayed(this, STALL_CHECK_INTERVAL_MS);
+        }
+    };
+    private final Runnable stablePlaybackRunnable = () -> {
+        if (player == null || !player.isPlaying() || player.getPlaybackState() != Player.STATE_READY) return;
+        long progress = player.getCurrentPosition() - stablePlaybackStartPosition;
+        if (SystemClock.elapsedRealtime() - stablePlaybackStartedAt >= STABLE_PLAYBACK_MS
+                && progress >= 5_000) {
+            sourceRecoveryAttempts = 0;
+            if (SystemClock.elapsedRealtime() - lastLiveRecoveryAt >= LIVE_RECOVERY_FORGET_MS) {
+                liveRecoveryAttempts = 0;
+            }
+        }
+    };
     private final ResolverResponseDataSource.Listener resolverResponseListener =
             new ResolverResponseDataSource.Listener() {
                 @Override
@@ -2360,7 +2417,13 @@ public class PlayerActivity extends Activity {
     }
 
     private void fallbackFromSlowAv1(int currentHeight) {
-        if (player == null || decoderQualityFallbackTried) return;
+        if (tryLowerQualityRecovery(currentHeight)) {
+            Utils.showText(playerView, getString(R.string.decoder_quality_fallback), 3500);
+        }
+    }
+
+    private boolean tryLowerQualityRecovery(int currentHeight) {
+        if (player == null || decoderQualityFallbackTried) return false;
 
         LampaPlaylist.Item item = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
         if (item != null) {
@@ -2373,9 +2436,8 @@ public class PlayerActivity extends Activity {
                 forcedStreamMimeType = null;
                 applyPlaylistItem(item, false);
                 restorePlayState = resume;
-                Utils.showText(playerView, getString(R.string.decoder_quality_fallback), 3500);
                 initializePlayer();
-                return;
+                return true;
             }
         }
 
@@ -2397,8 +2459,9 @@ public class PlayerActivity extends Activity {
         if (bestLower != null) {
             decoderQualityFallbackTried = true;
             applyVideoQuality(bestLower);
-            Utils.showText(playerView, getString(R.string.decoder_quality_fallback), 3500);
+            return true;
         }
+        return false;
     }
 
     private static int qualityNumber(String label) {
@@ -2877,6 +2940,7 @@ public class PlayerActivity extends Activity {
         av1DroppedFrames = 0;
 
         String mediaUri = mPrefs.mediaUri == null ? null : mPrefs.mediaUri.toString();
+        ensurePlaybackRecoveryKey(mediaUri);
         if (decoderCompatibilityUri != null && !decoderCompatibilityUri.equals(mediaUri)) {
             resetDecoderCompatibilityMode();
         }
@@ -3159,6 +3223,7 @@ public class PlayerActivity extends Activity {
     }
 
     public void releasePlayer(boolean save) {
+        cancelPlaybackWatchdogs();
         if (save) {
             savePlayer();
         }
@@ -3225,6 +3290,12 @@ public class PlayerActivity extends Activity {
 
             if (!isPlaying) {
                 PlayerActivity.locked = false;
+                playerView.removeCallbacks(stallWatchdogRunnable);
+            } else {
+                lastObservedPosition = player.getCurrentPosition();
+                lastPositionAdvanceAt = SystemClock.elapsedRealtime();
+                playerView.removeCallbacks(stallWatchdogRunnable);
+                playerView.postDelayed(stallWatchdogRunnable, STALL_CHECK_INTERVAL_MS);
             }
         }
 
@@ -3244,6 +3315,15 @@ public class PlayerActivity extends Activity {
             if (state == Player.STATE_READY) {
                 resetResolverResponseState();
                 frameRendered = true;
+                playerView.removeCallbacks(loadTimeoutRunnable);
+                playbackWaitStartedAt = 0L;
+                playbackEverReady = true;
+                stablePlaybackStartedAt = SystemClock.elapsedRealtime();
+                stablePlaybackStartPosition = player.getCurrentPosition();
+                lastObservedPosition = stablePlaybackStartPosition;
+                lastPositionAdvanceAt = stablePlaybackStartedAt;
+                playerView.removeCallbacks(stablePlaybackRunnable);
+                playerView.postDelayed(stablePlaybackRunnable, STABLE_PLAYBACK_MS);
                 if (lampaPlaylist != null) playlistPlaybackEverReady = true;
                 updateLampaTopPanel();
                 updateLampaSegmentMarkers();
@@ -3352,7 +3432,12 @@ public class PlayerActivity extends Activity {
                         setSelectedTracks(mPrefs.subtitleTrackId, mPrefs.audioTrackId);
                     }
                 }
+            } else if (state == Player.STATE_BUFFERING) {
+                if (playbackWaitStartedAt == 0L) playbackWaitStartedAt = SystemClock.elapsedRealtime();
+                playerView.removeCallbacks(loadTimeoutRunnable);
+                playerView.postDelayed(loadTimeoutRunnable, VIDEO_LOAD_TIMEOUT_MS);
             } else if (state == Player.STATE_ENDED) {
+                cancelPlaybackWatchdogs();
                 if (lampaPlaylist != null && playlistPlaybackEverReady
                         && lampaPlaylist.hasNext() && lampaPlaylist.isAutoNext()) {
                     playPlaylistIndex(lampaPlaylist.getCurrentIndex() + 1, true);
@@ -3373,6 +3458,7 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onPlayerError(PlaybackException error) {
+            cancelPlaybackWatchdogs();
             updateLoading(false);
             if (error instanceof ExoPlaybackException) {
                 final ExoPlaybackException exoPlaybackException = (ExoPlaybackException) error;
@@ -3406,36 +3492,27 @@ public class PlayerActivity extends Activity {
                         initializePlayer();
                         return;
                     }
-                    releasePlayer(false);
+                    PlaybackRecoveryPolicy.FailureKind kind = Utils.isSupportedNetworkUri(mPrefs.mediaUri)
+                            ? PlaybackRecoveryPolicy.FailureKind.NETWORK_READ
+                            : PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE;
+                    if (recoverPlayback(kind)) return;
+                    stopPlaybackAfterRecoveryFailure(kind, error.getLocalizedMessage());
                     return;
                 }
                 if (error.errorCode == PlaybackException.ERROR_CODE_TIMEOUT) {
                     if (recoverFromStuckPlayback()) return;
-                    showSnack(getString(R.string.error_playback_stalled), error.getLocalizedMessage());
-                    releasePlayer(false);
+                    PlaybackRecoveryPolicy.FailureKind kind = player != null
+                            && player.isCurrentMediaItemLive()
+                            ? PlaybackRecoveryPolicy.FailureKind.LIVE_STALL
+                            : (playbackEverReady
+                            ? PlaybackRecoveryPolicy.FailureKind.STALL_MIDSTREAM
+                            : PlaybackRecoveryPolicy.FailureKind.STALL_AT_START);
+                    if (recoverPlayback(kind)) return;
+                    stopPlaybackAfterRecoveryFailure(kind, error.getLocalizedMessage());
                     return;
                 }
-                if (exoPlaybackException.type == ExoPlaybackException.TYPE_RENDERER
-                        && !decoderQualityFallbackTried && lampaPlaylist != null) {
-                    LampaPlaylist.Item item = lampaPlaylist.getCurrent();
-                    if (item != null) {
-                        if (player != null) item.positionMs = Math.max(0, player.getCurrentPosition());
-                        String fallbackUrl = lampaPlaylist.useLowerQuality(item);
-                        if (fallbackUrl != null) {
-                            decoderQualityFallbackTried = true;
-                            alternateStreamTypeTried = false;
-                            forcedStreamMimeType = null;
-                            applyPlaylistItem(item, false);
-                            restorePlayState = true;
-                            Utils.showText(playerView, getString(R.string.decoder_quality_fallback), 3500);
-                            initializePlayer();
-                            return;
-                        }
-                    }
-                }
-                if (exoPlaybackException.type == ExoPlaybackException.TYPE_RENDERER
-                        && recoverDecoderCompatibilityMode()) {
-                    return;
+                if (exoPlaybackException.type == ExoPlaybackException.TYPE_RENDERER) {
+                    if (recoverPlayback(PlaybackRecoveryPolicy.FailureKind.DECODER)) return;
                 }
                 if (controllerVisible && controllerVisibleFully) {
                     showError(exoPlaybackException);
@@ -3474,26 +3551,10 @@ public class PlayerActivity extends Activity {
         if (!resolverControlUri.equals(currentUri)) return false;
 
         resolverControlUri = null;
-        if (!Objects.equals(resolverRetryUri, currentUri)) {
-            resolverRetryUri = currentUri;
-            resolverRetryCount = 0;
-        }
-        if (resolverRetryCount >= 3) {
+        if (!recoverPlayback(PlaybackRecoveryPolicy.FailureKind.RESOLVER_NOT_READY)) {
             showSnack(getString(R.string.resolver_not_ready), null);
             releasePlayer(false);
-            return true;
         }
-
-        long delayMs = 700L << resolverRetryCount;
-        resolverRetryCount++;
-        restorePlayState = true;
-        updateLoading(true);
-        Utils.showText(playerView, getString(R.string.resolver_preparing_retry), 2500);
-        playerView.postDelayed(() -> {
-            if (isFinishing() || isDestroyed()) return;
-            releasePlayer(false);
-            initializePlayer();
-        }, delayMs);
         return true;
     }
 
@@ -3511,8 +3572,6 @@ public class PlayerActivity extends Activity {
 
     private void resetResolverResponseState() {
         resolverControlUri = null;
-        resolverRetryUri = null;
-        resolverRetryCount = 0;
         detectedManifestUri = null;
         detectedManifestType = null;
     }
@@ -3523,6 +3582,7 @@ public class PlayerActivity extends Activity {
         if (mediaItem == null || mediaItem.localConfiguration == null) return false;
 
         decoderCompatibilityTried = true;
+        compatibilityRecoveryAttempts++;
         decoderCompatibilityMode = true;
         decoderCompatibilityUri = mediaItem.localConfiguration.uri.toString();
         Format format = player.getVideoFormat();
@@ -3547,6 +3607,122 @@ public class PlayerActivity extends Activity {
         decoderCompatibilityMode = false;
         decoderCompatibilityTried = false;
         decoderCompatibilityUri = null;
+    }
+
+    private void ensurePlaybackRecoveryKey(String mediaUri) {
+        String nextKey = mediaUri;
+        if (lampaPlaylist != null && lampaPlaylist.getCurrent() != null) {
+            nextKey = lampaPlaylist.getCurrent().resumeKey();
+        }
+        if (Objects.equals(playbackRecoveryKey, nextKey)) return;
+        cancelPlaybackWatchdogs();
+        playbackRecoveryKey = nextKey;
+        sourceRecoveryAttempts = 0;
+        compatibilityRecoveryAttempts = 0;
+        liveRecoveryAttempts = 0;
+        lastLiveRecoveryAt = 0L;
+        playbackWaitStartedAt = 0L;
+        lastPositionAdvanceAt = 0L;
+        lastObservedPosition = C.TIME_UNSET;
+        stablePlaybackStartedAt = 0L;
+        stablePlaybackStartPosition = C.TIME_UNSET;
+        playbackEverReady = false;
+    }
+
+    private void cancelPlaybackWatchdogs() {
+        if (playerView == null) return;
+        playerView.removeCallbacks(loadTimeoutRunnable);
+        playerView.removeCallbacks(stallWatchdogRunnable);
+        playerView.removeCallbacks(stablePlaybackRunnable);
+    }
+
+    private boolean recoverPlayback(PlaybackRecoveryPolicy.FailureKind kind) {
+        if (player == null || kind == null) return false;
+        long now = SystemClock.elapsedRealtime();
+        int attempts = sourceRecoveryAttempts;
+        if (kind == PlaybackRecoveryPolicy.FailureKind.LIVE_STALL) {
+            if (now - lastLiveRecoveryAt >= LIVE_RECOVERY_FORGET_MS) liveRecoveryAttempts = 0;
+            if (liveRecoveryAttempts >= MAX_LIVE_RECOVERIES) return false;
+            attempts = liveRecoveryAttempts;
+        }
+
+        boolean lowerAvailable = hasLowerQualityCandidate();
+        PlaybackRecoveryPolicy.Action action = PlaybackRecoveryPolicy.decide(
+                kind, playbackEverReady, attempts, compatibilityRecoveryAttempts, lowerAvailable);
+        switch (action) {
+            case RETRY_SOURCE:
+                if (kind == PlaybackRecoveryPolicy.FailureKind.LIVE_STALL) {
+                    liveRecoveryAttempts++;
+                    lastLiveRecoveryAt = now;
+                } else {
+                    sourceRecoveryAttempts++;
+                }
+                savePlayer();
+                restorePlayState = player.getPlayWhenReady();
+                updateLoading(true);
+                Utils.showText(playerView, getString(
+                        kind == PlaybackRecoveryPolicy.FailureKind.RESOLVER_NOT_READY
+                                ? R.string.resolver_preparing_retry
+                                : R.string.playback_recovery_retry), 2500);
+                String retryKey = playbackRecoveryKey;
+                long delay = Math.min(3_000L, 600L * Math.max(1,
+                        kind == PlaybackRecoveryPolicy.FailureKind.LIVE_STALL
+                                ? liveRecoveryAttempts : sourceRecoveryAttempts));
+                playerView.postDelayed(() -> {
+                    if (isFinishing() || isDestroyed() || switchingPlaylistItem
+                            || !Objects.equals(retryKey, playbackRecoveryKey)) return;
+                    releasePlayer(false);
+                    initializePlayer();
+                }, delay);
+                return true;
+            case RETRY_COMPATIBILITY:
+                if (recoverDecoderCompatibilityMode()) return true;
+                if (lowerAvailable && tryLowerQualityRecovery(currentVideoHeight())) {
+                    Utils.showText(playerView, getString(R.string.decoder_quality_fallback), 3500);
+                    return true;
+                }
+                return false;
+            case LOWER_QUALITY:
+                if (tryLowerQualityRecovery(currentVideoHeight())) {
+                    Utils.showText(playerView, getString(R.string.decoder_quality_fallback), 3500);
+                    return true;
+                }
+                return false;
+            case FAIL:
+            default:
+                return false;
+        }
+    }
+
+    private int currentVideoHeight() {
+        Format format = player == null ? null : player.getVideoFormat();
+        return format == null || format.height <= 0 ? Integer.MAX_VALUE : format.height;
+    }
+
+    private boolean hasLowerQualityCandidate() {
+        if (player == null || decoderQualityFallbackTried) return false;
+        LampaPlaylist.Item item = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
+        if (item != null && lampaPlaylist.hasLowerQuality(item)) return true;
+        int currentHeight = currentVideoHeight();
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_VIDEO) continue;
+            for (int index = 0; index < group.length; index++) {
+                Format format = group.getTrackFormat(index);
+                if (group.isTrackSupported(index) && format.height > 0 && format.height < currentHeight) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void stopPlaybackAfterRecoveryFailure(PlaybackRecoveryPolicy.FailureKind kind,
+                                                  String detail) {
+        cancelPlaybackWatchdogs();
+        int message = kind == PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE
+                ? R.string.error_local_media_corrupt : R.string.error_playback_stalled;
+        showSnack(getString(message), detail);
+        releasePlayer(false);
     }
 
     private String getStreamMimeType(Uri uri, String suppliedType) {

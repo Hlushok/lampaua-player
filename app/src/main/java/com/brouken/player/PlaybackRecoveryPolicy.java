@@ -1,0 +1,52 @@
+package com.brouken.player;
+
+final class PlaybackRecoveryPolicy {
+
+    static final int MAX_SOURCE_RETRIES = 3;
+    static final int MAX_COMPATIBILITY_RETRIES = 1;
+
+    enum Action {
+        RETRY_SOURCE,
+        RETRY_COMPATIBILITY,
+        LOWER_QUALITY,
+        FAIL
+    }
+
+    enum FailureKind {
+        NETWORK_READ,
+        RESOLVER_NOT_READY,
+        DECODER,
+        STALL_AT_START,
+        STALL_MIDSTREAM,
+        LIVE_STALL,
+        TRUNCATED_LOCAL_FILE,
+        UNKNOWN
+    }
+
+    private PlaybackRecoveryPolicy() {
+    }
+
+    static Action decide(FailureKind kind, boolean everReady, int sourceRetries,
+                         int compatibilityRetries, boolean lowerQualityAvailable) {
+        if (kind == null || kind == FailureKind.TRUNCATED_LOCAL_FILE
+                || kind == FailureKind.UNKNOWN) {
+            return Action.FAIL;
+        }
+
+        if (kind == FailureKind.NETWORK_READ || kind == FailureKind.RESOLVER_NOT_READY
+                || kind == FailureKind.LIVE_STALL) {
+            return sourceRetries < MAX_SOURCE_RETRIES ? Action.RETRY_SOURCE : Action.FAIL;
+        }
+
+        if (!everReady && sourceRetries < MAX_SOURCE_RETRIES) {
+            return Action.RETRY_SOURCE;
+        }
+        if (compatibilityRetries < MAX_COMPATIBILITY_RETRIES) {
+            return Action.RETRY_COMPATIBILITY;
+        }
+        if (lowerQualityAvailable) {
+            return Action.LOWER_QUALITY;
+        }
+        return Action.FAIL;
+    }
+}

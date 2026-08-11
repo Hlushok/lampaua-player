@@ -271,6 +271,26 @@ final class LampaPlaylist {
         return selected;
     }
 
+    boolean hasLowerQuality(Item item) {
+        if (item == null || item.quality.isEmpty()) return false;
+        int currentScore = Integer.MAX_VALUE;
+        for (String label : item.quality.keySet()) {
+            if (item.quality.get(label).equals(item.url)) {
+                currentScore = qualityScore(label);
+                break;
+            }
+        }
+        for (String label : item.quality.keySet()) {
+            String candidate = item.quality.get(label);
+            if (candidate == null || candidate.equals(item.url)) continue;
+            int score = qualityScore(label);
+            if (currentScore == Integer.MAX_VALUE ? score <= 1080 : score < currentScore) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static int qualityScore(String label) {
         if (label == null) return 0;
         String digits = label.replaceAll("[^0-9]", "");
