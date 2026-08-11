@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.preference.PreferenceManager;
+import android.provider.DocumentsContract;
 
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.ui.AspectRatioFrameLayout;
@@ -14,7 +15,6 @@ import java.io.FileOutputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.LinkedHashMap;
-import java.util.Set;
 
 class Prefs {
     // Previously used
@@ -96,6 +96,8 @@ class Prefs {
     public boolean skipFetchOnline = true;
 
     private LinkedHashMap positions;
+    private final LinkedHashMap<String, Long> sessionPositions = new LinkedHashMap<>();
+    private String positionKey;
 
     public boolean persistentMode = true;
     public long nonPersitentPosition = -1L;
@@ -152,6 +154,7 @@ class Prefs {
 
     public void updateMedia(final Context context, final Uri uri, final String type) {
         mediaUri = uri;
+        positionKey = uri == null ? null : uri.toString();
         mediaType = type;
         updateSubtitle(null);
         updateMeta(null, null, AspectRatioFrameLayout.RESIZE_MODE_FIT, 1.f, 1.f);
@@ -195,17 +198,19 @@ class Prefs {
     }
 
     public void updatePosition(final long position) {
-        if (mediaUri == null)
+        String key = effectivePositionKey();
+        if (key == null)
             return;
 
         while (positions.size() > 100)
             positions.remove(positions.keySet().toArray()[0]);
 
         if (persistentMode) {
-            positions.put(mediaUri.toString(), position);
+            positions.put(key, position);
             savePositions();
         } else {
             nonPersitentPosition = position;
+            sessionPositions.put(key, position);
         }
     }
 
@@ -258,34 +263,59 @@ class Prefs {
     }
 
     public long getPosition() {
+        String key = effectivePositionKey();
+        if (key == null) return 0L;
         if (!persistentMode) {
-            return nonPersitentPosition;
+            Long sessionPosition = sessionPositions.get(key);
+            return sessionPosition == null ? Math.max(0L, nonPersitentPosition) : sessionPosition;
         }
 
-        Object val = positions.get(mediaUri.toString());
+        Object val = positions.get(key);
         if (val != null)
             return (long) val;
 
         // Return position for uri from limited scope (loaded after using Next action)
-        if (ContentResolver.SCHEME_CONTENT.equals(mediaUri.getScheme())) {
-            final String searchPath = SubtitleUtils.getTrailPathFromUri(mediaUri);
-            if (searchPath == null || searchPath.length() < 1)
-                return 0L;
-            final Set<String> keySet = positions.keySet();
-            final Object[] keys = keySet.toArray();
+        final String searchId = documentIdentity(mediaUri);
+        if (mediaUri != null && key.equals(mediaUri.toString()) && searchId != null) {
+            final Object[] keys = positions.keySet().toArray();
             for (int i = keys.length; i > 0; i--) {
-                final String key = (String) keys[i - 1];
-                final Uri uri = Uri.parse(key);
-                if (ContentResolver.SCHEME_CONTENT.equals(uri.getScheme())) {
-                    final String keyPath = SubtitleUtils.getTrailPathFromUri(uri);
-                    if (searchPath.equals(keyPath)) {
-                        return (long) positions.get(key);
-                    }
+                final String storedKey = (String) keys[i - 1];
+                if (searchId.equals(documentIdentity(Uri.parse(storedKey)))) {
+                    return (long) positions.get(storedKey);
                 }
             }
         }
 
         return 0L;
+    }
+
+    public void selectPositionKey(final String key, final long initialPosition) {
+        positionKey = key == null || key.trim().isEmpty()
+                ? (mediaUri == null ? null : mediaUri.toString()) : key;
+        if (positionKey == null) return;
+        if (persistentMode) {
+            if (!positions.containsKey(positionKey)) {
+                positions.put(positionKey, Math.max(0L, initialPosition));
+                savePositions();
+            }
+        } else if (!sessionPositions.containsKey(positionKey)) {
+            sessionPositions.put(positionKey, Math.max(0L, initialPosition));
+        }
+        nonPersitentPosition = getPosition();
+    }
+
+    private String effectivePositionKey() {
+        if (positionKey != null && !positionKey.isEmpty()) return positionKey;
+        return mediaUri == null ? null : mediaUri.toString();
+    }
+
+    private static String documentIdentity(final Uri uri) {
+        if (uri == null || !ContentResolver.SCHEME_CONTENT.equals(uri.getScheme())) return null;
+        try {
+            return uri.getAuthority() + '/' + DocumentsContract.getDocumentId(uri);
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     public void updateOrientation() {
@@ -328,6 +358,10 @@ class Prefs {
     }
 
     public void setPersistent(boolean persistentMode) {
+        if (this.persistentMode != persistentMode && persistentMode) {
+            sessionPositions.clear();
+            nonPersitentPosition = -1L;
+        }
         this.persistentMode = persistentMode;
     }
 }

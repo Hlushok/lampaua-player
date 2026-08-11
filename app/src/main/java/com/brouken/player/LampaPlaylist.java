@@ -97,6 +97,7 @@ final class LampaPlaylist {
         long resolvedAt;
         boolean segmentLookupStarted;
         long cacheTtlMs = DEFAULT_CACHE_TTL_MS;
+        private String stableResumeKey;
         final HashMap<String, String> headers = new HashMap<>();
         final HashMap<String, String> resolverHeaders = new HashMap<>();
         final HashMap<String, String> quality = new HashMap<>();
@@ -105,6 +106,20 @@ final class LampaPlaylist {
 
         boolean isResolved() {
             return url != null && !url.trim().isEmpty();
+        }
+
+        String resumeKey() {
+            if (stableResumeKey != null) return stableResumeKey;
+            String tmdb = tmdbId > 0 ? String.valueOf(tmdbId) : null;
+            if ((imdbId == null || imdbId.trim().isEmpty()) && tmdb == null
+                    && id != null && !id.trim().isEmpty()) {
+                stableResumeKey = "item:" + id.trim() + "|season=" + season + "|episode=" + episode;
+            } else {
+                String identityUrl = resolverUrl == null || resolverUrl.trim().isEmpty()
+                        ? url : resolverUrl;
+                stableResumeKey = PlaylistIdentity.key(identityUrl, imdbId, tmdb, season, episode);
+            }
+            return stableResumeKey;
         }
 
         String displayTitle(int index) {
@@ -745,7 +760,6 @@ final class LampaPlaylist {
         }
         if (resolvedUrl != null && !resolvedUrl.isEmpty()) item.url = resolvedUrl;
         if (!quality.isEmpty()) {
-            item.quality.clear();
             item.quality.putAll(quality);
         }
         JSONObject headers = source.optJSONObject("headers");
@@ -755,13 +769,28 @@ final class LampaPlaylist {
         }
         JSONArray subtitles = source.optJSONArray("subtitles");
         if (subtitles != null) {
-            item.subtitles.clear();
-            readSubtitles(subtitles, item.subtitles);
+            ArrayList<Subtitle> resolvedSubtitles = new ArrayList<>();
+            readSubtitles(subtitles, resolvedSubtitles);
+            for (Subtitle candidate : resolvedSubtitles) {
+                boolean present = false;
+                for (Subtitle existing : item.subtitles) {
+                    if (candidate.url.equals(existing.url)) {
+                        present = true;
+                        break;
+                    }
+                }
+                if (!present) item.subtitles.add(candidate);
+            }
         }
         String title = firstText(source, "title", "name");
-        if (title != null && !title.isEmpty()) item.title = title;
+        if ((item.title == null || item.title.isEmpty()) && title != null && !title.isEmpty()) {
+            item.title = title;
+        }
         String thumbnail = firstText(source, "thumbnail", "poster", "image");
-        if (thumbnail != null && !thumbnail.isEmpty()) item.thumbnail = thumbnail;
+        if ((item.thumbnail == null || item.thumbnail.isEmpty())
+                && thumbnail != null && !thumbnail.isEmpty()) {
+            item.thumbnail = thumbnail;
+        }
     }
 
     private static void readStringMap(JSONObject json, HashMap<String, String> target) {

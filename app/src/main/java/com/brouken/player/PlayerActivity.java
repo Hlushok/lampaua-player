@@ -233,6 +233,8 @@ public class PlayerActivity extends Activity {
     private LampaPlaylist lampaPlaylist;
     private boolean switchingPlaylistItem;
     private boolean playlistCurrentRecorded;
+    private String playlistPlaybackKey;
+    private boolean playlistPlaybackEverReady;
     private boolean lampaIptv;
     private boolean alternateStreamTypeTried;
     private boolean decoderQualityFallbackTried;
@@ -1635,7 +1637,13 @@ public class PlayerActivity extends Activity {
             }
         }
         mPrefs.updateMedia(this, Uri.parse(item.url), "video/*");
-        mPrefs.updatePosition(item.positionMs);
+        String resumeKey = item.resumeKey();
+        if (!resumeKey.equals(playlistPlaybackKey)) {
+            playlistPlaybackKey = resumeKey;
+            playlistPlaybackEverReady = false;
+        }
+        mPrefs.selectPositionKey(resumeKey, item.positionMs);
+        item.positionMs = mPrefs.getPosition();
         updateLampaTopPanel();
         updateEpisodeControls();
     }
@@ -2738,7 +2746,12 @@ public class PlayerActivity extends Activity {
             long playerDuration = player.getDuration();
             if (playerDuration != C.TIME_UNSET) duration = Math.max(0, playerDuration);
         }
-        lampaPlaylist.recordResult(lampaPlaylist.getCurrent(), position, duration, ended);
+        LampaPlaylist.Item item = lampaPlaylist.getCurrent();
+        boolean completed = ended && playlistPlaybackEverReady;
+        item.positionMs = completed ? 0 : position;
+        mPrefs.selectPositionKey(item.resumeKey(), item.positionMs);
+        mPrefs.updatePosition(item.positionMs);
+        lampaPlaylist.recordResult(item, position, duration, completed);
         playlistCurrentRecorded = true;
     }
 
@@ -3125,7 +3138,12 @@ public class PlayerActivity extends Activity {
             if (haveMedia) {
                 // Prevent overwriting temporarily inaccessible media position
                 if (player.isCurrentMediaItemSeekable()) {
-                    mPrefs.updatePosition(player.getCurrentPosition());
+                    long position = player.getPlaybackState() == Player.STATE_ENDED
+                            && playlistPlaybackEverReady ? 0 : player.getCurrentPosition();
+                    mPrefs.updatePosition(position);
+                    if (lampaPlaylist != null && lampaPlaylist.getCurrent() != null) {
+                        lampaPlaylist.getCurrent().positionMs = Math.max(0, position);
+                    }
                 }
                 mPrefs.updateMeta(getSelectedTrack(C.TRACK_TYPE_AUDIO),
                         getSelectedTrack(C.TRACK_TYPE_TEXT),
@@ -3226,6 +3244,7 @@ public class PlayerActivity extends Activity {
             if (state == Player.STATE_READY) {
                 resetResolverResponseState();
                 frameRendered = true;
+                if (lampaPlaylist != null) playlistPlaybackEverReady = true;
                 updateLampaTopPanel();
                 updateLampaSegmentMarkers();
 
@@ -3334,7 +3353,8 @@ public class PlayerActivity extends Activity {
                     }
                 }
             } else if (state == Player.STATE_ENDED) {
-                if (lampaPlaylist != null && lampaPlaylist.hasNext() && lampaPlaylist.isAutoNext()) {
+                if (lampaPlaylist != null && playlistPlaybackEverReady
+                        && lampaPlaylist.hasNext() && lampaPlaylist.isAutoNext()) {
                     playPlaylistIndex(lampaPlaylist.getCurrentIndex() + 1, true);
                     return;
                 }
