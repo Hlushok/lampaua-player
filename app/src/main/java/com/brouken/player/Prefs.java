@@ -52,6 +52,11 @@ class Prefs {
     private static final String PREF_KEY_SKIP_MODE = "skipMode";
     private static final String PREF_KEY_SKIP_MODE_CREDITS = "skipModeCredits";
     private static final String PREF_KEY_SKIP_FETCH = "skipFetchOnline";
+    private static final String PREF_KEY_SYSTEM_VOLUME = "systemVolume";
+    private static final String PREF_KEY_PLAYER_VOLUME = "playerVolume";
+    private static final String PREF_KEY_VOLUME_BOOST = "volumeBoost";
+    private static final String PREF_KEY_VOLUME_GESTURES = "volumeGesturesEnabled";
+    private static final String PREF_KEY_BRIGHTNESS_GESTURES = "brightnessGesturesEnabled";
 
     public static final String SKIP_MODE_BUTTON = "button";
     public static final String SKIP_MODE_AUTO = "auto";
@@ -94,6 +99,11 @@ class Prefs {
     public String skipMode = SKIP_MODE_BUTTON;
     public String skipModeCredits = SKIP_MODE_BUTTON;
     public boolean skipFetchOnline = true;
+    public boolean systemVolume = true;
+    public int playerVolume = 100;
+    public int volumeBoost = 0;
+    public boolean volumeGesturesEnabled = true;
+    public boolean brightnessGesturesEnabled = true;
 
     private LinkedHashMap positions;
     private final LinkedHashMap<String, Long> sessionPositions = new LinkedHashMap<>();
@@ -150,6 +160,19 @@ class Prefs {
         skipMode = mSharedPreferences.getString(PREF_KEY_SKIP_MODE, skipMode);
         skipModeCredits = mSharedPreferences.getString(PREF_KEY_SKIP_MODE_CREDITS, skipModeCredits);
         skipFetchOnline = mSharedPreferences.getBoolean(PREF_KEY_SKIP_FETCH, skipFetchOnline);
+        systemVolume = mSharedPreferences.getBoolean(PREF_KEY_SYSTEM_VOLUME, systemVolume);
+        playerVolume = Math.max(0, Math.min(100,
+                mSharedPreferences.getInt(PREF_KEY_PLAYER_VOLUME, playerVolume)));
+        try {
+            volumeBoost = Math.max(0, Math.min(100, Integer.parseInt(
+                    mSharedPreferences.getString(PREF_KEY_VOLUME_BOOST, String.valueOf(volumeBoost)))));
+        } catch (NumberFormatException ignored) {
+            volumeBoost = 0;
+        }
+        volumeGesturesEnabled = mSharedPreferences.getBoolean(
+                PREF_KEY_VOLUME_GESTURES, volumeGesturesEnabled);
+        brightnessGesturesEnabled = mSharedPreferences.getBoolean(
+                PREF_KEY_BRIGHTNESS_GESTURES, brightnessGesturesEnabled);
     }
 
     public void updateMedia(final Context context, final Uri uri, final String type) {
@@ -221,6 +244,11 @@ class Prefs {
             sharedPreferencesEditor.putInt(PREF_KEY_BRIGHTNESS, brightness);
             sharedPreferencesEditor.apply();
         }
+    }
+
+    public void updatePlayerVolume(final int volume) {
+        playerVolume = Math.max(0, Math.min(100, volume));
+        mSharedPreferences.edit().putInt(PREF_KEY_PLAYER_VOLUME, playerVolume).apply();
     }
 
     public void markFirstRun() {

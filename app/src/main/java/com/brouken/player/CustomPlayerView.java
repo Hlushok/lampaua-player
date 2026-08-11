@@ -277,9 +277,11 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
                 }
                 gestureOrientation = Orientation.VERTICAL;
 
-                if (motionEvent.getX() < (float)(getWidth() / 2)) {
+                if (motionEvent.getX() < (float)(getWidth() / 2)
+                        && PlayerActivity.brightnessGesturesEnabled) {
                     brightnessControl.changeBrightness(this, gestureScrollY > 0, canSetAutoBrightness);
-                } else {
+                } else if (motionEvent.getX() >= (float)(getWidth() / 2)
+                        && PlayerActivity.volumeGesturesEnabled) {
                     Utils.adjustVolume(getContext(), mAudioManager, this, gestureScrollY > 0, canBoostVolume, false);
                 }
 

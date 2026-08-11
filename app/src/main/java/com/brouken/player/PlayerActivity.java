@@ -86,6 +86,7 @@ import androidx.media3.common.TrackGroup;
 import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
+import androidx.media3.common.audio.AudioProcessor;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.DefaultLoadControl;
@@ -94,6 +95,9 @@ import androidx.media3.exoplayer.ExoPlaybackException;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.SeekParameters;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
+import androidx.media3.exoplayer.audio.AudioSink;
+import androidx.media3.exoplayer.audio.DefaultAudioSink;
+import androidx.media3.exoplayer.audio.ForwardingAudioSink;
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
@@ -132,16 +136,22 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.TimeUnit;
 
 public class PlayerActivity extends Activity {
 
     private PlayerListener playerListener;
     private BroadcastReceiver mReceiver;
+    private BroadcastReceiver audioOutputReceiver;
+    private boolean audioOutputReceiverPrimed;
     private AudioManager mAudioManager;
     private MediaSession mediaSession;
     private DefaultTrackSelector trackSelector;
     public static LoudnessEnhancer loudnessEnhancer;
+    public static BoostAudioProcessor boostProcessor;
+    private static TrackingAudioSink audioSink;
 
     public CustomPlayerView playerView;
     public static ExoPlayer player;
@@ -158,6 +168,11 @@ public class PlayerActivity extends Activity {
     public static Snackbar snackbar;
     private ExoPlaybackException errorToShow;
     public static int boostLevel = 0;
+    public static boolean systemVolume = true;
+    public static float playerVolume = 100f;
+    public static int maxVolumeBoost = 0;
+    public static boolean volumeGesturesEnabled = true;
+    public static boolean brightnessGesturesEnabled = true;
     private boolean isScaling = false;
     private boolean isScaleStarting = false;
     private float scaleFactor = 1.0f;
@@ -311,6 +326,10 @@ public class PlayerActivity extends Activity {
             }
         }
     };
+    private final AudioRecoveryState audioRecoveryState = new AudioRecoveryState();
+    private boolean audioRestartInFlight;
+    private int audioRestartRetries;
+    private final Runnable audioRestartRunnable = this::restartPassthroughAudio;
     private final ResolverResponseDataSource.Listener resolverResponseListener =
             new ResolverResponseDataSource.Listener() {
                 @Override
@@ -375,6 +394,12 @@ public class PlayerActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         // Rotate ASAP, before super/inflating to avoid glitches with activity launch animation
         mPrefs = new Prefs(this);
+        systemVolume = mPrefs.systemVolume;
+        playerVolume = mPrefs.playerVolume;
+        maxVolumeBoost = mPrefs.volumeBoost;
+        volumeGesturesEnabled = mPrefs.volumeGesturesEnabled;
+        brightnessGesturesEnabled = mPrefs.brightnessGesturesEnabled;
+        boostLevel = 0;
         Utils.setOrientation(this, mPrefs.orientation);
 
         super.onCreate(savedInstanceState);
@@ -913,6 +938,7 @@ public class PlayerActivity extends Activity {
             Utils.toggleSystemUi(this, playerView, true);
         }
         initializePlayer();
+        registerAudioOutputReceiver();
         updateButtonRotation();
         lampaUiHandler.removeCallbacks(lampaUiTicker);
         lampaUiHandler.post(lampaUiTicker);
@@ -922,6 +948,10 @@ public class PlayerActivity extends Activity {
     public void onResume() {
         super.onResume();
         restorePlayStateAllowed = true;
+        audioRecoveryState.onResume();
+        if (player != null && player.isPlaying() && audioRecoveryState.shouldRebuildSink()) {
+            requestPassthroughAudioRestart();
+        }
         updateLampaMenuOpacity();
         if (isTvBox && Build.VERSION.SDK_INT >= 31) {
             updateSubtitleStyle(this);
@@ -931,6 +961,7 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        audioRecoveryState.onPause();
         savePlayer();
     }
 
@@ -943,7 +974,34 @@ public class PlayerActivity extends Activity {
         }
         playerView.setCustomErrorMessage(null);
         lampaUiHandler.removeCallbacks(lampaUiTicker);
+        unregisterAudioOutputReceiver();
         releasePlayer(false);
+    }
+
+    private void registerAudioOutputReceiver() {
+        if (audioOutputReceiver != null) return;
+        audioOutputReceiverPrimed = false;
+        audioOutputReceiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context context, Intent intent) {
+                if (!AudioManager.ACTION_HDMI_AUDIO_PLUG.equals(intent.getAction())) return;
+                if (!audioOutputReceiverPrimed) {
+                    audioOutputReceiverPrimed = true;
+                    return;
+                }
+                audioRecoveryState.onAudioOutputChanged();
+                if (player != null && player.isPlaying()) requestPassthroughAudioRestart();
+            }
+        };
+        ContextCompat.registerReceiver(this, audioOutputReceiver,
+                new IntentFilter(AudioManager.ACTION_HDMI_AUDIO_PLUG),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    private void unregisterAudioOutputReceiver() {
+        if (audioOutputReceiver == null) return;
+        unregisterReceiver(audioOutputReceiver);
+        audioOutputReceiver = null;
+        audioOutputReceiverPrimed = false;
     }
 
     @SuppressLint("GestureBackNavigation")
@@ -2903,6 +2961,16 @@ public class PlayerActivity extends Activity {
             }
         } else if (requestCode == REQUEST_SETTINGS) {
             mPrefs.loadUserPreferences();
+            systemVolume = mPrefs.systemVolume;
+            playerVolume = mPrefs.playerVolume;
+            maxVolumeBoost = mPrefs.volumeBoost;
+            volumeGesturesEnabled = mPrefs.volumeGesturesEnabled;
+            brightnessGesturesEnabled = mPrefs.brightnessGesturesEnabled;
+            if (boostLevel * 10 > maxVolumeBoost) {
+                boostLevel = (int) Math.ceil(maxVolumeBoost / 10f);
+            }
+            Utils.applyPlayerVolume();
+            Utils.applyBoost();
             updateSubtitleStyle(this);
             updateLampaSegmentMarkers();
             updateLampaSkipUi();
@@ -2932,6 +3000,41 @@ public class PlayerActivity extends Activity {
         SubtitleUtils.clearCache(this);
         uri = Utils.convertToUTF(this, uri);
         mPrefs.updateSubtitle(uri);
+    }
+
+    private static final class TrackingAudioSink extends ForwardingAudioSink {
+        private final Set<String> blockedMimes;
+        private volatile boolean passthrough;
+
+        TrackingAudioSink(AudioSink sink, Set<String> initiallyBlocked) {
+            super(sink);
+            blockedMimes = new CopyOnWriteArraySet<>(initiallyBlocked);
+        }
+
+        @Override
+        public void configure(AudioSink.AudioSinkConfig config) throws AudioSink.ConfigurationException {
+            passthrough = !MimeTypes.AUDIO_RAW.equals(config.format.sampleMimeType);
+            super.configure(config);
+        }
+
+        boolean isPassthrough() {
+            return passthrough;
+        }
+
+        void block(String mime) {
+            if (mime != null && !mime.isEmpty()) blockedMimes.add(mime);
+        }
+
+        @Override
+        public int getFormatSupport(Format format) {
+            return blockedMimes.contains(format.sampleMimeType)
+                    ? AudioSink.SINK_FORMAT_UNSUPPORTED : super.getFormatSupport(format);
+        }
+
+        @Override
+        public boolean supportsFormat(Format format) {
+            return !blockedMimes.contains(format.sampleMimeType) && super.supportsFormat(format);
+        }
     }
 
     public void initializePlayer() {
@@ -3010,7 +3113,22 @@ public class PlayerActivity extends Activity {
         if (decoderCompatibilityMode) {
             decoderPriority = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER;
         }
-        @SuppressLint("WrongConstant") DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(this)
+        DefaultRenderersFactory baseRenderersFactory = new DefaultRenderersFactory(this) {
+            @Override
+            protected AudioSink buildAudioSink(Context context, boolean enableFloatOutput,
+                                               boolean enableAudioTrackPlaybackParams) {
+                boostProcessor = new BoostAudioProcessor();
+                AudioSink sink = new DefaultAudioSink.Builder(context)
+                        .setEnableFloatOutput(enableFloatOutput)
+                        .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                        .setAudioProcessors(new AudioProcessor[]{boostProcessor})
+                        .build();
+                audioSink = new TrackingAudioSink(
+                        sink, audioRecoveryState.blockedPassthroughMimeTypes());
+                return audioSink;
+            }
+        };
+        @SuppressLint("WrongConstant") DefaultRenderersFactory renderersFactory = baseRenderersFactory
                 .setExtensionRendererMode(decoderPriority)
                 .setEnableDecoderFallback(true)
                 .setMapDV7ToHevc(mPrefs.mapDV7ToHevc || decoderCompatibilityMode);
@@ -3053,6 +3171,9 @@ public class PlayerActivity extends Activity {
         }
 
         player = playerBuilder.build();
+        audioRecoveryState.clearRebuildRequest();
+        audioRestartInFlight = false;
+        audioRestartRetries = 0;
 
         if (!mPrefs.allowSystemFrameRate) {
             // Prevent Surface.setFrameRate() votes on pause/seek. Some TV and HDMI devices
@@ -3066,6 +3187,8 @@ public class PlayerActivity extends Activity {
                 .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
                 .build();
         player.setAudioAttributes(audioAttributes, true);
+        player.setVolume(systemVolume ? 1f : Math.max(0f, Math.min(1f, playerVolume / 100f)));
+        Utils.applyBoost();
 
         if (mPrefs.skipSilence) {
             player.setSkipSilenceEnabled(true);
@@ -3195,6 +3318,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void savePlayer() {
+        mPrefs.updatePlayerVolume(Math.round(playerVolume));
         if (player != null) {
             mPrefs.updateBrightness(mBrightnessControl.currentBrightnessLevel);
             mPrefs.updateOrientation();
@@ -3224,6 +3348,11 @@ public class PlayerActivity extends Activity {
 
     public void releasePlayer(boolean save) {
         cancelPlaybackWatchdogs();
+        if (playerView != null) {
+            playerView.removeCallbacks(audioRestartRunnable);
+        }
+        audioRestartInFlight = false;
+        audioRestartRetries = 0;
         if (save) {
             savePlayer();
         }
@@ -3243,9 +3372,72 @@ public class PlayerActivity extends Activity {
             player.clearMediaItems();
             player.release();
             player = null;
+            audioSink = null;
+            boostProcessor = null;
         }
         titleView.setVisibility(View.GONE);
         updateButtons(false);
+    }
+
+    public static boolean canBoostCurrentOutput() {
+        return maxVolumeBoost > 0 && boostProcessor != null
+                && (audioSink == null || !audioSink.isPassthrough());
+    }
+
+    private void restartPassthroughAudio() {
+        if (!alive || player == null || audioSink == null || !audioSink.isPassthrough()
+                || mPrefs.tunneling
+                || !player.getCurrentTracks().isTypeSelected(C.TRACK_TYPE_AUDIO)) {
+            return;
+        }
+        if (audioRestartInFlight || !player.isPlaying()) {
+            if (audioRestartRetries < 5) {
+                audioRestartRetries++;
+                playerView.postDelayed(audioRestartRunnable, 100);
+            }
+            return;
+        }
+        if (!audioRecoveryState.consumeRebuildRequest()) return;
+        audioRestartInFlight = true;
+        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true).build());
+    }
+
+    private void requestPassthroughAudioRestart() {
+        audioRestartRetries = 0;
+        playerView.removeCallbacks(audioRestartRunnable);
+        playerView.post(audioRestartRunnable);
+    }
+
+    private boolean recoverFromAudioTrackFailure(PlaybackException error) {
+        if (error == null || player == null || audioSink == null) return false;
+        if (error.errorCode != PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED
+                && error.errorCode != PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED) {
+            return false;
+        }
+        String mime = null;
+        for (Throwable cause = error.getCause(); cause != null; cause = cause.getCause()) {
+            if (cause instanceof AudioSink.InitializationException) {
+                Format format = ((AudioSink.InitializationException) cause).format;
+                mime = format == null ? null : format.sampleMimeType;
+                break;
+            }
+        }
+        if (mime == null && player.getAudioFormat() != null) {
+            mime = player.getAudioFormat().sampleMimeType;
+        }
+        if (mime == null || audioRecoveryState.blockedPassthroughMimeTypes().contains(mime)) {
+            return false;
+        }
+        audioRecoveryState.onWriteFailure(mime);
+        audioSink.block(mime);
+        restorePlayState = player.getPlayWhenReady();
+        savePlayer();
+        playerView.post(() -> {
+            releasePlayer(false);
+            initializePlayer();
+        });
+        return true;
     }
 
     private class PlayerListener implements Player.Listener {
@@ -3256,10 +3448,28 @@ public class PlayerActivity extends Activity {
                     loudnessEnhancer.release();
                 }
                 loudnessEnhancer = new LoudnessEnhancer(audioSessionId);
+                Utils.applyBoost();
             } catch (Exception e) {
                 e.printStackTrace();
             }
             notifyAudioSessionUpdate(true);
+        }
+
+        @Override
+        public void onPositionDiscontinuity(Player.PositionInfo oldPosition,
+                                            Player.PositionInfo newPosition, int reason) {
+            if (reason == Player.DISCONTINUITY_REASON_SEEK
+                    && oldPosition.mediaItemIndex == newPosition.mediaItemIndex) {
+                audioRecoveryState.onSeek();
+            }
+        }
+
+        @Override
+        public void onPlayWhenReadyChanged(boolean playWhenReady, int reason) {
+            if (!playWhenReady) {
+                playerView.removeCallbacks(audioRestartRunnable);
+                audioRecoveryState.onPause();
+            }
         }
 
         @Override
@@ -3292,6 +3502,10 @@ public class PlayerActivity extends Activity {
                 PlayerActivity.locked = false;
                 playerView.removeCallbacks(stallWatchdogRunnable);
             } else {
+                audioRecoveryState.onResume();
+                if (audioRecoveryState.shouldRebuildSink()) {
+                    requestPassthroughAudioRestart();
+                }
                 lastObservedPosition = player.getCurrentPosition();
                 lastPositionAdvanceAt = SystemClock.elapsedRealtime();
                 playerView.removeCallbacks(stallWatchdogRunnable);
@@ -3453,6 +3667,14 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onTracksChanged(@NonNull Tracks tracks) {
+            if (audioRestartInFlight) {
+                audioRestartInFlight = false;
+                if (player != null) {
+                    player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false).build());
+                }
+                return;
+            }
             updateLampaTrackDetails();
         }
 
@@ -3460,6 +3682,7 @@ public class PlayerActivity extends Activity {
         public void onPlayerError(PlaybackException error) {
             cancelPlaybackWatchdogs();
             updateLoading(false);
+            if (recoverFromAudioTrackFailure(error)) return;
             if (error instanceof ExoPlaybackException) {
                 final ExoPlaybackException exoPlaybackException = (ExoPlaybackException) error;
                 if (exoPlaybackException.type == ExoPlaybackException.TYPE_SOURCE) {

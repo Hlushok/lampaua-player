@@ -186,7 +186,10 @@ class Utils {
     }
 
     public static boolean isVolumeMax(final AudioManager audioManager) {
-        return audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) == audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        return PlayerActivity.systemVolume
+                ? audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                    == audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                : PlayerActivity.playerVolume >= 99.5f;
     }
 
     public static boolean isVolumeMin(final AudioManager audioManager) {
@@ -197,74 +200,73 @@ class Utils {
     public static void adjustVolume(final Context context, final AudioManager audioManager, final CustomPlayerView playerView, final boolean raise, boolean canBoost, boolean clear) {
         playerView.removeCallbacks(playerView.textClearRunnable);
 
-        final int volume = getVolume(context,false, audioManager);
-        final int volumeMax = getVolume(context,true, audioManager);
-        boolean volumeActive = volume != 0;
+        final int volume = PlayerActivity.systemVolume
+                ? getVolume(context, false, audioManager) : Math.round(PlayerActivity.playerVolume);
+        final int volumeMax = PlayerActivity.systemVolume
+                ? getVolume(context, true, audioManager) : 100;
+        final boolean maxed = volume >= volumeMax;
+        if (!maxed) PlayerActivity.boostLevel = 0;
+        canBoost = canBoost && PlayerActivity.canBoostCurrentOutput();
 
-        // Handle volume changes outside the app (lose boost if volume is not maxed out)
-        if (volume != volumeMax) {
-            PlayerActivity.boostLevel = 0;
-        }
-
-        try {
-            if (PlayerActivity.loudnessEnhancer == null || !PlayerActivity.loudnessEnhancer.hasControl()) {
-                canBoost = false;
-            }
-        } catch (Exception e) {
-            canBoost = false;
-            e.printStackTrace();
-        }
-
-        if (volume != volumeMax || (PlayerActivity.boostLevel == 0 && !raise)) {
-            if (PlayerActivity.loudnessEnhancer != null) {
-                try {
-                    PlayerActivity.loudnessEnhancer.setEnabled(false);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            }
-            audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, raise ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_LOWER, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
-            final int volumeNew = getVolume(context, false, audioManager);
-            // Custom volume step on Samsung devices (Sound Assistant)
-            if (raise && volume == volumeNew) {
-                playerView.volumeUpsInRow++;
+        if (!maxed || (PlayerActivity.boostLevel == 0 && !raise)) {
+            applyBoost();
+            if (PlayerActivity.systemVolume) {
+                audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC,
+                        raise ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_LOWER,
+                        AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
             } else {
-                playerView.volumeUpsInRow = 0;
-            }
-            if (playerView.volumeUpsInRow > 4 && !isVolumeMin(audioManager)) {
-                audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE | AudioManager.FLAG_SHOW_UI);
-            } else {
-                volumeActive = volumeNew != 0;
-                playerView.setCustomErrorMessage(volumeActive ? " " + volumeNew : "");
+                float step = 100f / Math.max(1,
+                        audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
+                PlayerActivity.playerVolume = Math.max(0f, Math.min(100f,
+                        PlayerActivity.playerVolume + (raise ? step : -step)));
+                applyPlayerVolume();
             }
         } else {
-            if (canBoost && raise && PlayerActivity.boostLevel < 10)
+            int maxSteps = (int) Math.ceil(PlayerActivity.maxVolumeBoost / 10f);
+            if (canBoost && raise && PlayerActivity.boostLevel < maxSteps) {
                 PlayerActivity.boostLevel++;
-            else if (!raise && PlayerActivity.boostLevel > 0)
+            } else if (!raise && PlayerActivity.boostLevel > 0) {
                 PlayerActivity.boostLevel--;
-
-            if (PlayerActivity.loudnessEnhancer != null) {
-                try {
-                    PlayerActivity.loudnessEnhancer.setTargetGain(PlayerActivity.boostLevel * 200);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
             }
-            playerView.setCustomErrorMessage(" " + (volumeMax + PlayerActivity.boostLevel));
+            applyBoost();
         }
 
+        int basePercent;
+        if (PlayerActivity.systemVolume) {
+            int max = Math.max(1, getVolume(context, true, audioManager));
+            basePercent = Math.round(getVolume(context, false, audioManager) * 100f / max);
+        } else {
+            basePercent = Math.round(PlayerActivity.playerVolume);
+        }
+        int extra = Math.min(PlayerActivity.maxVolumeBoost, PlayerActivity.boostLevel * 10);
+        boolean volumeActive = basePercent > 0;
+        playerView.setCustomErrorMessage(volumeActive ? " " + (basePercent + extra) + "%" : "");
         playerView.setIconVolume(volumeActive);
-        if (PlayerActivity.loudnessEnhancer != null) {
-            try {
-                PlayerActivity.loudnessEnhancer.setEnabled(PlayerActivity.boostLevel > 0);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
         playerView.setHighlight(PlayerActivity.boostLevel > 0);
 
         if (clear) {
             playerView.postDelayed(playerView.textClearRunnable, CustomPlayerView.MESSAGE_TIMEOUT_KEY);
+        }
+    }
+
+    static void applyPlayerVolume() {
+        if (PlayerActivity.player != null) {
+            PlayerActivity.player.setVolume(PlayerActivity.systemVolume
+                    ? 1f : Math.max(0f, Math.min(1f, PlayerActivity.playerVolume / 100f)));
+        }
+    }
+
+    static void applyBoost() {
+        int extra = Math.min(PlayerActivity.maxVolumeBoost, PlayerActivity.boostLevel * 10);
+        if (!PlayerActivity.canBoostCurrentOutput()) extra = 0;
+        if (PlayerActivity.boostProcessor != null) {
+            PlayerActivity.boostProcessor.setGain(1f + extra / 100f);
+        }
+        if (PlayerActivity.loudnessEnhancer != null) {
+            try {
+                PlayerActivity.loudnessEnhancer.setEnabled(false);
+            } catch (Exception ignored) {
+            }
         }
     }
 

@@ -85,5 +85,14 @@
     <string name="resolver_preparing_retry">Поток подготавливается. Повторяю попытку…</string>
     <string name="playback_recovery_retry">Воспроизведение прервано. Переподключаюсь…</string>
     <string name="error_local_media_corrupt">Локальный медиафайл неполный или повреждён.</string>
+    <string name="pref_system_volume">Управление громкостью</string>
+    <string name="pref_system_volume_on">Использовать громкость устройства</string>
+    <string name="pref_system_volume_off">Использовать громкость UA Player</string>
+    <string name="pref_volume_boost">Максимальное усиление плеера</string>
+    <string name="pref_volume_boost_off">До 100% (выключено)</string>
+    <string name="pref_volume_gestures">Жесты громкости</string>
+    <string name="pref_volume_gestures_summary">Изменять громкость справа на экране</string>
+    <string name="pref_brightness_gestures">Жесты яркости</string>
+    <string name="pref_brightness_gestures_summary">Изменять яркость слева на экране</string>
     <string name="resolver_not_ready">Источник не подготовил поток. Откройте его повторно.</string>
 </resources>

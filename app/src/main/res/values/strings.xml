@@ -57,6 +57,15 @@
     <string name="resolver_preparing_retry">The stream is being prepared. Retrying…</string>
     <string name="playback_recovery_retry">Playback interrupted. Reconnecting…</string>
     <string name="error_local_media_corrupt">The local media file is incomplete or damaged.</string>
+    <string name="pref_system_volume">Volume control</string>
+    <string name="pref_system_volume_on">Use the device volume</string>
+    <string name="pref_system_volume_off">Use UA Player volume</string>
+    <string name="pref_volume_boost">Maximum player boost</string>
+    <string name="pref_volume_boost_off">Up to 100% (off)</string>
+    <string name="pref_volume_gestures">Volume gestures</string>
+    <string name="pref_volume_gestures_summary">Adjust volume on the right side of the screen</string>
+    <string name="pref_brightness_gestures">Brightness gestures</string>
+    <string name="pref_brightness_gestures_summary">Adjust brightness on the left side of the screen</string>
     <string name="resolver_not_ready">The source did not prepare a playable stream. Please open it again.</string>
     <string name="live_stream_fallback">Trying alternate live-stream mode</string>
     <string name="playback_finishes_at">Finishes at %1$s</string>

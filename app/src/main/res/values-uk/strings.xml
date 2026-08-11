@@ -94,6 +94,15 @@
     <string name="resolver_preparing_retry">Потік готується. Повторюю спробу…</string>
     <string name="playback_recovery_retry">Відтворення перервано. Перепідключаюся…</string>
     <string name="error_local_media_corrupt">Локальний медіафайл неповний або пошкоджений.</string>
+    <string name="pref_system_volume">Керування гучністю</string>
+    <string name="pref_system_volume_on">Використовувати гучність пристрою</string>
+    <string name="pref_system_volume_off">Використовувати гучність UA Player</string>
+    <string name="pref_volume_boost">Максимальне підсилення плеєра</string>
+    <string name="pref_volume_boost_off">До 100% (вимкнено)</string>
+    <string name="pref_volume_gestures">Жести гучності</string>
+    <string name="pref_volume_gestures_summary">Змінювати гучність праворуч на екрані</string>
+    <string name="pref_brightness_gestures">Жести яскравості</string>
+    <string name="pref_brightness_gestures_summary">Змінювати яскравість ліворуч на екрані</string>
     <string name="resolver_not_ready">Джерело не підготувало потік. Відкрийте його повторно.</string>
     <string name="live_stream_fallback">Пробую альтернативний режим прямого потоку</string>
     <string name="update_available_title">Оновлення UA Player</string>

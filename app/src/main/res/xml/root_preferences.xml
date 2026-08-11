@@ -26,6 +26,33 @@
             app:useSimpleSummaryProvider="true" />
 
         <SwitchPreferenceCompat
+            app:key="systemVolume"
+            app:defaultValue="true"
+            app:summaryOn="@string/pref_system_volume_on"
+            app:summaryOff="@string/pref_system_volume_off"
+            app:title="@string/pref_system_volume" />
+
+        <ListPreference
+            app:key="volumeBoost"
+            app:defaultValue="0"
+            app:entries="@array/volume_boost_entries"
+            app:entryValues="@array/volume_boost_values"
+            app:title="@string/pref_volume_boost"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            app:key="volumeGesturesEnabled"
+            app:defaultValue="true"
+            app:summary="@string/pref_volume_gestures_summary"
+            app:title="@string/pref_volume_gestures" />
+
+        <SwitchPreferenceCompat
+            app:key="brightnessGesturesEnabled"
+            app:defaultValue="true"
+            app:summary="@string/pref_brightness_gestures_summary"
+            app:title="@string/pref_brightness_gestures" />
+
+        <SwitchPreferenceCompat
             app:key="frameRateMatching"
             app:defaultValue="false"
             app:summaryOn="@string/pref_framerate_matching_on"

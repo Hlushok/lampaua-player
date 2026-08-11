@@ -49,4 +49,18 @@
     <item>button</item>
     <item>auto</item>
   </string-array>
+
+  <string-array name="volume_boost_entries">
+    <item>@string/pref_volume_boost_off</item>
+    <item>125%</item>
+    <item>150%</item>
+    <item>200%</item>
+  </string-array>
+
+  <string-array name="volume_boost_values">
+    <item>0</item>
+    <item>25</item>
+    <item>50</item>
+    <item>100</item>
+  </string-array>
 </resources>
