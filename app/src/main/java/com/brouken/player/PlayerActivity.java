@@ -115,6 +115,9 @@ import androidx.media3.ui.TimeBar;
 
 import com.brouken.player.dtpv.DoubleTapPlayerView;
 import com.brouken.player.dtpv.youtube.YouTubeOverlay;
+import com.brouken.player.update.UpdateInfo;
+import com.brouken.player.update.UpdateUi;
+import com.brouken.player.update.Updater;
 import com.bumptech.glide.Glide;
 import com.getkeepsafe.taptargetview.TapTarget;
 import com.getkeepsafe.taptargetview.TapTargetView;
@@ -209,7 +212,9 @@ public class PlayerActivity extends Activity {
     private ImageButton buttonLock;
     private ImageButton buttonRotation;
     private ImageButton buttonTools;
+    private ImageButton buttonUpdate;
     private ImageButton buttonAppSettings;
+    private UpdateInfo pendingUpdate;
     private SwipeToUnlockView swipeToUnlock;
     private ImageButton exoSettings;
     private ImageButton exoPlayPause;
@@ -654,6 +659,12 @@ public class PlayerActivity extends Activity {
         buttonAppSettings.setContentDescription(getString(R.string.button_app_settings));
         buttonAppSettings.setOnClickListener(view -> openAppSettings());
 
+        buttonUpdate = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
+        buttonUpdate.setImageResource(R.drawable.ic_update_24dp);
+        buttonUpdate.setContentDescription(getString(R.string.button_update));
+        buttonUpdate.setVisibility(View.GONE);
+        buttonUpdate.setOnClickListener(view -> showPendingUpdate(true));
+
         buttonTools = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
         buttonTools.setImageResource(R.drawable.ic_more_vert_24dp);
         buttonTools.setContentDescription(getString(R.string.player_tools));
@@ -922,6 +933,7 @@ public class PlayerActivity extends Activity {
         }
         controls.addView(exoSettings);
         controls.addView(buttonTools);
+        controls.addView(buttonUpdate);
         controls.addView(buttonAppSettings);
 
         exoBasicControls.addView(horizontalScrollView);
@@ -1017,7 +1029,9 @@ public class PlayerActivity extends Activity {
                 Utils.scanMediaStorage(this);
             }
         }
-        UAPlayerUpdater.check(this);
+        pendingUpdate = Updater.pending(this);
+        updatePendingButton();
+        checkForUpdates(false);
     }
 
     @Override
@@ -2044,6 +2058,40 @@ public class PlayerActivity extends Activity {
                     languages.toArray(new String[0]));
         }
         startActivityForResult(intent, REQUEST_SETTINGS);
+    }
+
+    private void checkForUpdates(boolean manual) {
+        Updater.find(this, manual, info -> runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (info == null) {
+                if (manual) Toast.makeText(this, R.string.update_none, Toast.LENGTH_SHORT).show();
+                pendingUpdate = Updater.pending(this);
+                updatePendingButton();
+                return;
+            }
+            pendingUpdate = info;
+            updatePendingButton();
+            showPendingUpdate(manual);
+        }));
+    }
+
+    private void showPendingUpdate(boolean manual) {
+        if (pendingUpdate == null) {
+            if (manual) checkForUpdates(true);
+            return;
+        }
+        UpdateInfo shown = pendingUpdate;
+        UpdateUi.showAvailableDialog(this, shown, () -> {
+            Updater.skip(this, shown);
+            pendingUpdate = null;
+            updatePendingButton();
+        }, haveMedia);
+    }
+
+    private void updatePendingButton() {
+        if (buttonUpdate != null) {
+            buttonUpdate.setVisibility(pendingUpdate == null ? View.GONE : View.VISIBLE);
+        }
     }
 
     private void showPlayerTools() {

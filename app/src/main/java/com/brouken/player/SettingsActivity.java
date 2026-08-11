@@ -19,6 +19,9 @@ import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.SwitchPreferenceCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.brouken.player.update.UpdateUi;
+import com.brouken.player.update.Updater;
+
 import java.text.Collator;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -149,7 +152,14 @@ public class SettingsActivity extends AppCompatActivity {
                 checkUpdate.setOnPreferenceClickListener(preference -> {
                     if (getActivity() != null) {
                         Toast.makeText(getActivity(), R.string.update_checking, Toast.LENGTH_SHORT).show();
-                        UAPlayerUpdater.checkNow(getActivity(), true);
+                        Updater.find(getActivity(), true, info -> getActivity().runOnUiThread(() -> {
+                            if (info == null) {
+                                Toast.makeText(getActivity(), R.string.update_none, Toast.LENGTH_SHORT).show();
+                            } else {
+                                UpdateUi.showAvailableDialog(getActivity(), info,
+                                        () -> Updater.skip(getActivity(), info), false);
+                            }
+                        }));
                     }
                     return true;
                 });

@@ -126,4 +126,12 @@
     <string name="pref_brightness_gestures">Жесты яркости</string>
     <string name="pref_brightness_gestures_summary">Изменять яркость слева на экране</string>
     <string name="resolver_not_ready">Источник не подготовил поток. Откройте его повторно.</string>
+    <string name="update_available">Доступно обновление: %1$s → %2$s</string>
+    <string name="update_stops_playback">Установка обновления закроет текущее видео.</string>
+    <string name="update_now">Обновить</string>
+    <string name="update_skip">Пропустить эту версию</string>
+    <string name="update_downloading">Загрузка обновления</string>
+    <string name="update_download_failed">Не удалось загрузить или установить обновление.</string>
+    <string name="update_notes_empty">Список изменений не указан.</string>
+    <string name="button_update">Обновление UA Player</string>
 </resources>

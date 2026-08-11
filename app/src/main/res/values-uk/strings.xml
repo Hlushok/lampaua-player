@@ -162,4 +162,12 @@
     <string name="update_checking">Перевіряю оновлення…</string>
     <string name="update_none">У вас уже встановлена найновіша версія</string>
     <string name="error_playback_stalled">Відтворення зупинилося. Декодер пристрою може не підтримувати цей потік.</string>
+    <string name="update_available">Доступне оновлення: %1$s → %2$s</string>
+    <string name="update_stops_playback">Встановлення оновлення закриє поточне відео.</string>
+    <string name="update_now">Оновити</string>
+    <string name="update_skip">Пропустити цю версію</string>
+    <string name="update_downloading">Завантаження оновлення</string>
+    <string name="update_download_failed">Не вдалося завантажити або встановити оновлення.</string>
+    <string name="update_notes_empty">Список змін не вказано.</string>
+    <string name="button_update">Оновлення UA Player</string>
 </resources>
