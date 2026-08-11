@@ -205,8 +205,10 @@ public class PlayerActivity extends Activity {
     private ImageButton buttonQuality;
     private ImageButton buttonPiP;
     private ImageButton buttonAspectRatio;
+    private ImageButton buttonLock;
     private ImageButton buttonRotation;
     private ImageButton buttonAppSettings;
+    private SwipeToUnlockView swipeToUnlock;
     private ImageButton exoSettings;
     private ImageButton exoPlayPause;
     private ProgressBar loadingProgressBar;
@@ -597,25 +599,18 @@ public class PlayerActivity extends Activity {
         buttonAspectRatio.setContentDescription(getString(R.string.button_crop));
         updatebuttonAspectRatioIcon();
         buttonAspectRatio.setOnClickListener(view -> {
-            playerView.setScale(1.f);
-            if (playerView.getResizeMode() == AspectRatioFrameLayout.RESIZE_MODE_FIT) {
-                playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_ZOOM);
-                Utils.showText(playerView, getString(R.string.video_resize_crop));
-            } else {
-                // Default mode
-                playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
-                Utils.showText(playerView, getString(R.string.video_resize_fit));
-            }
-            updatebuttonAspectRatioIcon();
+            applyVideoScaleMode(VideoScaleMode.nextQuickMode(currentVideoScaleMode()));
             resetHideCallbacks();
         });
-        if (isTvBox && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            buttonAspectRatio.setOnLongClickListener(v -> {
-                scaleStart();
-                updatebuttonAspectRatioIcon();
-                return true;
-            });
-        }
+        buttonAspectRatio.setOnLongClickListener(v -> {
+            showVideoScaleModePicker();
+            return true;
+        });
+
+        buttonLock = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
+        buttonLock.setImageResource(R.drawable.ic_lock_24dp);
+        buttonLock.setContentDescription(getString(R.string.button_lock));
+        buttonLock.setOnClickListener(view -> playerView.toggleLock());
         buttonRotation = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
         buttonRotation.setContentDescription(getString(R.string.button_rotate));
         updateButtonRotation();
@@ -642,6 +637,20 @@ public class PlayerActivity extends Activity {
         titleView.setTextDirection(View.TEXT_DIRECTION_LOCALE);
         centerView.addView(titleView);
         setupLampaOverlay(centerView);
+
+        if (!isTvBox) {
+            swipeToUnlock = new SwipeToUnlockView(this);
+            swipeToUnlock.setVisibility(View.GONE);
+            swipeToUnlock.setOnUnlockListener(() -> {
+                locked = false;
+                onLockChanged();
+            });
+            CoordinatorLayout.LayoutParams swipeParams = new CoordinatorLayout.LayoutParams(
+                    Utils.dpToPx(310), ViewGroup.LayoutParams.WRAP_CONTENT);
+            swipeParams.gravity = Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM;
+            swipeParams.bottomMargin = Utils.dpToPx(70);
+            coordinatorLayout.addView(swipeToUnlock, swipeParams);
+        }
 
         exoPrevious = playerView.findViewById(R.id.lampaua_prev);
         exoNext = playerView.findViewById(R.id.lampaua_next);
@@ -821,6 +830,7 @@ public class PlayerActivity extends Activity {
         controls.addView(buttonQuality);
         controls.addView(exoSubtitle);
         controls.addView(buttonAspectRatio);
+        if (!isTvBox) controls.addView(buttonLock);
         if (Utils.isPiPSupported(this) && buttonPiP != null) {
             controls.addView(buttonPiP);
         }
@@ -3235,9 +3245,10 @@ public class PlayerActivity extends Activity {
                 timeBar.setBufferedColor(0x33FFFFFF);
             }
 
-            playerView.setResizeMode(mPrefs.resizeMode);
+            currentVideoScaleMode().apply(playerView);
 
-            if (mPrefs.resizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) {
+            if (mPrefs.aspectRatio == 0f
+                    && mPrefs.resizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) {
                 playerView.setScale(mPrefs.scale);
             } else {
                 playerView.setScale(1.f);
@@ -4698,6 +4709,7 @@ public class PlayerActivity extends Activity {
             Utils.setButtonEnabled(this, buttonPiP, enable);
         }
         Utils.setButtonEnabled(this, buttonAspectRatio, enable);
+        if (buttonLock != null) Utils.setButtonEnabled(this, buttonLock, enable);
         if (isTvBox) {
             Utils.setButtonEnabled(this, exoSettings, true);
         } else {
@@ -4742,8 +4754,80 @@ public class PlayerActivity extends Activity {
         updatebuttonAspectRatioIcon();
     }
 
+    private VideoScaleMode currentVideoScaleMode() {
+        return VideoScaleMode.from(mPrefs.resizeMode, mPrefs.aspectRatio);
+    }
+
+    private void applyVideoScaleMode(VideoScaleMode mode) {
+        if (mode == null) return;
+        mode.apply(playerView);
+        mPrefs.resizeMode = mode.resizeMode;
+        mPrefs.scale = 1f;
+        mPrefs.updateAspectRatio(mode.ratio);
+        Utils.showText(playerView, videoScaleLabel(mode));
+        updatebuttonAspectRatioIcon();
+    }
+
+    private String videoScaleLabel(VideoScaleMode mode) {
+        switch (mode) {
+            case FIT: return getString(R.string.video_resize_fit);
+            case CROP: return getString(R.string.video_resize_crop);
+            case FILL: return getString(R.string.video_resize_fill);
+            case RATIO_16_9: return "16:9";
+            case RATIO_4_3: return "4:3";
+            case RATIO_16_10: return "16:10";
+            case RATIO_2_1: return "2:1";
+            case RATIO_2_35_1: return "2.35:1";
+            case RATIO_2_39_1: return "2.39:1";
+            case RATIO_5_4: return "5:4";
+            default: return mode.name();
+        }
+    }
+
+    private void showVideoScaleModePicker() {
+        VideoScaleMode[] modes = VideoScaleMode.values();
+        String[] labels = new String[modes.length];
+        int checked = 0;
+        VideoScaleMode current = currentVideoScaleMode();
+        for (int i = 0; i < modes.length; i++) {
+            labels[i] = videoScaleLabel(modes[i]);
+            if (modes[i] == current) checked = i;
+        }
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.video_scale_title)
+                .setSingleChoiceItems(labels, checked, (selected, which) -> {
+                    applyVideoScaleMode(modes[which]);
+                    selected.dismiss();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> {
+            styleUaAlertDialog(dialog, false);
+            if (dialog.getListView() != null) {
+                dialog.getListView().setSelector(lampaBackground(
+                        Color.rgb(10, 39, 76), Color.rgb(240, 183, 38), 7));
+                dialog.getListView().requestFocus();
+            }
+        });
+        dialog.show();
+    }
+
+    void showSwipeToUnlock() {
+        if (swipeToUnlock != null && locked) swipeToUnlock.setVisibility(View.VISIBLE);
+    }
+
+    void onLockChanged() {
+        if (locked) {
+            playerView.hideController();
+            showSwipeToUnlock();
+        } else if (swipeToUnlock != null) {
+            swipeToUnlock.setVisibility(View.GONE);
+            playerView.showController();
+        }
+    }
+
     private void updatebuttonAspectRatioIcon() {
-        if (playerView.getResizeMode() == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) {
+        if (currentVideoScaleMode() == VideoScaleMode.CROP) {
             buttonAspectRatio.setImageResource(R.drawable.ic_fit_screen_24dp);
         } else {
             buttonAspectRatio.setImageResource(R.drawable.ic_aspect_ratio_24dp);

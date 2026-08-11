@@ -31,6 +31,7 @@ class Prefs {
     private static final String PREF_KEY_AUDIO_TRACK_ID = "audioTrackId";
     private static final String PREF_KEY_SUBTITLE_TRACK_ID = "subtitleTrackId";
     private static final String PREF_KEY_RESIZE_MODE = "resizeMode";
+    private static final String PREF_KEY_ASPECT_RATIO = "aspectRatio";
     private static final String PREF_KEY_ORIENTATION = "orientation";
     private static final String PREF_KEY_SCALE = "scale";
     private static final String PREF_KEY_SCOPE_URI = "scopeUri";
@@ -72,6 +73,7 @@ class Prefs {
     public Uri scopeUri;
     public String mediaType;
     public int resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT;
+    public float aspectRatio = 0f;
     public Utils.Orientation orientation = Utils.Orientation.UNSPECIFIED;
     public float scale = 1.f;
     public float speed = 1.f;
@@ -134,6 +136,7 @@ class Prefs {
             subtitleTrackId = mSharedPreferences.getString(PREF_KEY_SUBTITLE_TRACK_ID, subtitleTrackId);
         if (mSharedPreferences.contains(PREF_KEY_RESIZE_MODE))
             resizeMode = mSharedPreferences.getInt(PREF_KEY_RESIZE_MODE, resizeMode);
+        aspectRatio = mSharedPreferences.getFloat(PREF_KEY_ASPECT_RATIO, aspectRatio);
         orientation = Utils.Orientation.values()[mSharedPreferences.getInt(PREF_KEY_ORIENTATION, orientation.value)];
         scale = mSharedPreferences.getFloat(PREF_KEY_SCALE, scale);
         if (mSharedPreferences.contains(PREF_KEY_SCOPE_URI))
@@ -181,6 +184,7 @@ class Prefs {
         mediaType = type;
         updateSubtitle(null);
         updateMeta(null, null, AspectRatioFrameLayout.RESIZE_MODE_FIT, 1.f, 1.f);
+        updateAspectRatio(0f);
 
         if (mediaType != null && mediaType.endsWith("/*")) {
             mediaType = null;
@@ -372,6 +376,13 @@ class Prefs {
             sharedPreferencesEditor.putFloat(PREF_KEY_SCALE, scale);
             sharedPreferencesEditor.putFloat(PREF_KEY_SPEED, speed);
             sharedPreferencesEditor.apply();
+        }
+    }
+
+    public void updateAspectRatio(final float ratio) {
+        aspectRatio = Math.max(0f, ratio);
+        if (persistentMode) {
+            mSharedPreferences.edit().putFloat(PREF_KEY_ASPECT_RATIO, aspectRatio).apply();
         }
     }
 
