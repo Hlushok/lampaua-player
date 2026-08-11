@@ -2,6 +2,32 @@
 <resources>
     <string name="app_name" translatable="false">UA Player</string>
     <string name="video_resize_fit">Fit</string>
+    <string name="video_resize_fill">Fill</string>
+    <string name="video_scale_title">Video size</string>
+    <string name="button_lock">Lock controls</string>
+    <string name="swipe_unlock">Swipe right to unlock</string>
+    <string name="player_tools">Player tools</string>
+    <string name="sleep_timer_title">Sleep timer</string>
+    <string name="sleep_timer_off">Off</string>
+    <string name="sleep_timer_custom">Custom duration</string>
+    <string name="sleep_timer_end_of_item">At the end of the video</string>
+    <string name="sleep_timer_minutes">%1$d min</string>
+    <string name="sleep_timer_hours">%1$d h</string>
+    <string name="sleep_timer_hours_minutes">%1$d h %2$d min</string>
+    <string name="sleep_timer_minutes_hint">Minutes</string>
+    <string name="sleep_timer_set">Timer: %1$s</string>
+    <string name="sleep_timer_cancelled">Sleep timer is off</string>
+    <string name="sleep_timer_finished">Sleep timer finished</string>
+    <string name="playback_statistics_title">Playback statistics</string>
+    <string name="playback_stats_container">Container</string>
+    <string name="playback_stats_video">Video</string>
+    <string name="playback_stats_fps">FPS</string>
+    <string name="playback_stats_bitrate">Bitrate</string>
+    <string name="playback_stats_buffer">Buffer</string>
+    <string name="playback_stats_network">Network</string>
+    <string name="playback_stats_decoder">Decoder</string>
+    <string name="playback_stats_audio">Audio</string>
+    <string name="playback_stats_dropped_frames">Dropped frames</string>
     <string name="video_resize_crop">Crop</string>
     <string name="video_orientation_video">Video orientation</string>
     <string name="video_orientation_sensor">Auto-rotate</string>
@@ -55,6 +81,17 @@
     <string name="decoder_quality_fallback">The decoder cannot keep up. Trying a lower available quality</string>
     <string name="decoder_compatibility_retry">Decoder error. Retrying in compatibility mode</string>
     <string name="resolver_preparing_retry">The stream is being prepared. Retrying…</string>
+    <string name="playback_recovery_retry">Playback interrupted. Reconnecting…</string>
+    <string name="error_local_media_corrupt">The local media file is incomplete or damaged.</string>
+    <string name="pref_system_volume">Volume control</string>
+    <string name="pref_system_volume_on">Use the device volume</string>
+    <string name="pref_system_volume_off">Use UA Player volume</string>
+    <string name="pref_volume_boost">Maximum player boost</string>
+    <string name="pref_volume_boost_off">Up to 100% (off)</string>
+    <string name="pref_volume_gestures">Volume gestures</string>
+    <string name="pref_volume_gestures_summary">Adjust volume on the right side of the screen</string>
+    <string name="pref_brightness_gestures">Brightness gestures</string>
+    <string name="pref_brightness_gestures_summary">Adjust brightness on the left side of the screen</string>
     <string name="resolver_not_ready">The source did not prepare a playable stream. Please open it again.</string>
     <string name="live_stream_fallback">Trying alternate live-stream mode</string>
     <string name="playback_finishes_at">Finishes at %1$s</string>
@@ -66,6 +103,8 @@
     <string name="skip_credits">Skip credits</string>
     <string name="skip_preview">Skip preview</string>
     <string name="skip_available_in">Пропустити через %1$d</string>
+    <string name="skip_cancel_countdown">Cancel · %1$d</string>
+    <string name="skip_undo">Undo</string>
     <string name="button_crop">Resize</string>
     <string name="button_rotate">Rotate</string>
     <string name="button_pip">Picture-in-picture</string>
@@ -88,6 +127,11 @@
     <string name="pref_menu_opacity_high">High</string>
     <string name="pref_language_track_device">Device languages</string>
     <string name="pref_language_track_default">Default</string>
+    <string name="pref_language_audio_none">Not set — the first audio track will play</string>
+    <string name="pref_language_audio_add">Add language</string>
+    <string name="pref_language_audio_move_up">Move up</string>
+    <string name="pref_language_audio_move_down">Move down</string>
+    <string name="pref_language_audio_remove">Remove</string>
     <string name="pref_subtitle_header">Subtitle</string>
     <string name="pref_subtitle_style_embedded">Embedded styles</string>
     <string name="pref_subtitle_style_embedded_on">Apply embedded subtitle styles</string>
@@ -107,6 +151,8 @@
     <string name="pref_skip_mode">Intros and recaps</string>
     <string name="pref_skip_mode_credits">End credits</string>
     <string name="pref_skip_mode_button">Show the Skip button</string>
+    <string name="pref_skip_mode_brief">Show briefly</string>
+    <string name="pref_skip_mode_full">Show for the whole segment</string>
     <string name="pref_skip_mode_auto">Skip automatically</string>
     <string name="pref_skip_fetch">Find segments online</string>
     <string name="pref_skip_fetch_on">Ask the configured skip service when LAMPA provides no segments</string>
@@ -121,4 +167,12 @@
     <string name="update_checking">Checking for updates…</string>
     <string name="update_none">You already have the latest version</string>
     <string name="error_playback_stalled">Playback stalled. The device decoder may not support this stream.</string>
+    <string name="update_available">Update available: %1$s → %2$s</string>
+    <string name="update_stops_playback">Installing the update will close the current video.</string>
+    <string name="update_now">Update</string>
+    <string name="update_skip">Skip this version</string>
+    <string name="update_downloading">Downloading update</string>
+    <string name="update_download_failed">Could not download or install the update.</string>
+    <string name="update_notes_empty">No change list was provided.</string>
+    <string name="button_update">UA Player update</string>
 </resources>

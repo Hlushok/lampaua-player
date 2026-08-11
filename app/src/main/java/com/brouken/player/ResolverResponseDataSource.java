@@ -3,7 +3,6 @@ package com.brouken.player;
 import android.net.Uri;
 
 import androidx.media3.common.MimeTypes;
-import androidx.media3.common.ParserException;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DataSpec;
 import androidx.media3.datasource.TransferListener;
@@ -19,6 +18,12 @@ import java.util.Map;
  * learn the real manifest type of extensionless URLs after redirects.
  */
 final class ResolverResponseDataSource implements DataSource {
+    static final class ResolverNotReadyException extends IOException {
+        ResolverNotReadyException() {
+            super("Media endpoint returned a temporary JSON control response");
+        }
+    }
+
     interface Listener {
         void onResolverControlResponse(Uri requestedUri);
         void onManifestTypeDetected(Uri requestedUri, String mimeType);
@@ -42,8 +47,7 @@ final class ResolverResponseDataSource implements DataSource {
         if (contentType != null && contentType.contains("json")) {
             listener.onResolverControlResponse(dataSpec.uri);
             closeQuietly();
-            throw ParserException.createForMalformedManifest(
-                    "Media endpoint returned a temporary JSON control response", null);
+            throw new ResolverNotReadyException();
         }
 
         String manifestType = manifestMimeType(contentType, upstream.getUri());

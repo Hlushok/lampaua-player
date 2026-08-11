@@ -11,11 +11,9 @@
             app:title="@string/pref_file_access"
             app:useSimpleSummaryProvider="true" />
 
-        <ListPreference
+        <Preference
             app:key="languageAudio"
-            android:defaultValue="device"
-            app:title="@string/pref_language_audio"
-            app:useSimpleSummaryProvider="true" />
+            app:title="@string/pref_language_audio" />
 
         <ListPreference
             app:key="menuOpacity"
@@ -24,6 +22,33 @@
             app:entryValues="@array/menu_opacity_values"
             app:title="@string/pref_menu_opacity"
             app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            app:key="systemVolume"
+            app:defaultValue="true"
+            app:summaryOn="@string/pref_system_volume_on"
+            app:summaryOff="@string/pref_system_volume_off"
+            app:title="@string/pref_system_volume" />
+
+        <ListPreference
+            app:key="volumeBoost"
+            app:defaultValue="0"
+            app:entries="@array/volume_boost_entries"
+            app:entryValues="@array/volume_boost_values"
+            app:title="@string/pref_volume_boost"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            app:key="volumeGesturesEnabled"
+            app:defaultValue="true"
+            app:summary="@string/pref_volume_gestures_summary"
+            app:title="@string/pref_volume_gestures" />
+
+        <SwitchPreferenceCompat
+            app:key="brightnessGesturesEnabled"
+            app:defaultValue="true"
+            app:summary="@string/pref_brightness_gestures_summary"
+            app:title="@string/pref_brightness_gestures" />
 
         <SwitchPreferenceCompat
             app:key="frameRateMatching"
@@ -72,7 +97,7 @@
 
         <ListPreference
             app:key="skipMode"
-            app:defaultValue="button"
+            app:defaultValue="full"
             app:dependency="skipEnabled"
             app:entries="@array/skip_mode_entries"
             app:entryValues="@array/skip_mode_values"
@@ -81,7 +106,7 @@
 
         <ListPreference
             app:key="skipModeCredits"
-            app:defaultValue="button"
+            app:defaultValue="full"
             app:dependency="skipEnabled"
             app:entries="@array/skip_mode_entries"
             app:entryValues="@array/skip_mode_values"

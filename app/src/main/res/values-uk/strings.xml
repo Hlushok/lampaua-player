@@ -1,6 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="video_scale_title">Розмір відео</string>
+    <string name="button_lock">Заблокувати керування</string>
+    <string name="swipe_unlock">Проведіть праворуч, щоб розблокувати</string>
+    <string name="player_tools">Інструменти плеєра</string>
+    <string name="sleep_timer_title">Таймер сну</string>
+    <string name="sleep_timer_off">Вимкнено</string>
+    <string name="sleep_timer_custom">Своя тривалість</string>
+    <string name="sleep_timer_end_of_item">Наприкінці відео</string>
+    <string name="sleep_timer_minutes">%1$d хв</string>
+    <string name="sleep_timer_hours">%1$d год</string>
+    <string name="sleep_timer_hours_minutes">%1$d год %2$d хв</string>
+    <string name="sleep_timer_minutes_hint">Хвилини</string>
+    <string name="sleep_timer_set">Таймер: %1$s</string>
+    <string name="sleep_timer_cancelled">Таймер сну вимкнено</string>
+    <string name="sleep_timer_finished">Час відпочити</string>
+    <string name="playback_statistics_title">Статистика відтворення</string>
+    <string name="playback_stats_container">Контейнер</string>
+    <string name="playback_stats_video">Відео</string>
+    <string name="playback_stats_fps">Кадри/с</string>
+    <string name="playback_stats_bitrate">Бітрейт</string>
+    <string name="playback_stats_buffer">Буфер</string>
+    <string name="playback_stats_network">Мережа</string>
+    <string name="playback_stats_decoder">Декодер</string>
+    <string name="playback_stats_audio">Аудіо</string>
+    <string name="playback_stats_dropped_frames">Пропущені кадри</string>
     <string name="video_resize_fit">Підігнати</string>
+    <string name="video_resize_fill">Розтягнути</string>
     <string name="video_resize_crop">Обрізати</string>
     <string name="video_orientation_video">Орієнтація відео</string>
     <string name="video_orientation_sensor">Автоповорот</string>
@@ -58,6 +84,11 @@
     <string name="pref_menu_opacity_high">Висока</string>
     <string name="pref_language_track_device">Мова пристрою</string>
     <string name="pref_language_track_default">За замовчуванням</string>
+    <string name="pref_language_audio_none">Не задано — відтворюватиметься перша аудіодоріжка</string>
+    <string name="pref_language_audio_add">Додати мову</string>
+    <string name="pref_language_audio_move_up">Підняти вище</string>
+    <string name="pref_language_audio_move_down">Опустити нижче</string>
+    <string name="pref_language_audio_remove">Видалити</string>
     <string name="pref_subtitle_header">Субтитри</string>
     <string name="pref_subtitle_style_embedded">Вбудовані стилі</string>
     <string name="pref_subtitle_style_embedded_on">Застосувати вбудовані стилі субтитрів</string>
@@ -74,6 +105,8 @@
     <string name="skip_credits">Пропустити титри</string>
     <string name="skip_preview">Пропустити анонс</string>
     <string name="skip_available_in">Пропуск через %1$d</string>
+    <string name="skip_cancel_countdown">Скасувати · %1$d</string>
+    <string name="skip_undo">Повернутися</string>
     <string name="button_quality">Якість відео</string>
     <string name="button_playback_options">Швидкість та аудіо</string>
     <string name="button_app_settings">Налаштування UA Player</string>
@@ -92,6 +125,17 @@
     <string name="decoder_quality_fallback">Декодер не встигає. Вмикаю нижчу доступну якість</string>
     <string name="decoder_compatibility_retry">Помилка декодера. Повторюю в режимі сумісності</string>
     <string name="resolver_preparing_retry">Потік готується. Повторюю спробу…</string>
+    <string name="playback_recovery_retry">Відтворення перервано. Перепідключаюся…</string>
+    <string name="error_local_media_corrupt">Локальний медіафайл неповний або пошкоджений.</string>
+    <string name="pref_system_volume">Керування гучністю</string>
+    <string name="pref_system_volume_on">Використовувати гучність пристрою</string>
+    <string name="pref_system_volume_off">Використовувати гучність UA Player</string>
+    <string name="pref_volume_boost">Максимальне підсилення плеєра</string>
+    <string name="pref_volume_boost_off">До 100% (вимкнено)</string>
+    <string name="pref_volume_gestures">Жести гучності</string>
+    <string name="pref_volume_gestures_summary">Змінювати гучність праворуч на екрані</string>
+    <string name="pref_brightness_gestures">Жести яскравості</string>
+    <string name="pref_brightness_gestures_summary">Змінювати яскравість ліворуч на екрані</string>
     <string name="resolver_not_ready">Джерело не підготувало потік. Відкрийте його повторно.</string>
     <string name="live_stream_fallback">Пробую альтернативний режим прямого потоку</string>
     <string name="update_available_title">Оновлення UA Player</string>
@@ -106,6 +150,8 @@
     <string name="pref_skip_mode">Заставки та повтори</string>
     <string name="pref_skip_mode_credits">Фінальні титри</string>
     <string name="pref_skip_mode_button">Показувати кнопку «Пропустити»</string>
+    <string name="pref_skip_mode_brief">Показувати коротко</string>
+    <string name="pref_skip_mode_full">Показувати до кінця сегмента</string>
     <string name="pref_skip_mode_auto">Пропускати автоматично</string>
     <string name="pref_skip_fetch">Шукати сегменти онлайн</string>
     <string name="pref_skip_fetch_on">Запитувати налаштований сервіс, якщо LAMPA не передала сегменти</string>
@@ -120,4 +166,12 @@
     <string name="update_checking">Перевіряю оновлення…</string>
     <string name="update_none">У вас уже встановлена найновіша версія</string>
     <string name="error_playback_stalled">Відтворення зупинилося. Декодер пристрою може не підтримувати цей потік.</string>
+    <string name="update_available">Доступне оновлення: %1$s → %2$s</string>
+    <string name="update_stops_playback">Встановлення оновлення закриє поточне відео.</string>
+    <string name="update_now">Оновити</string>
+    <string name="update_skip">Пропустити цю версію</string>
+    <string name="update_downloading">Завантаження оновлення</string>
+    <string name="update_download_failed">Не вдалося завантажити або встановити оновлення.</string>
+    <string name="update_notes_empty">Список змін не вказано.</string>
+    <string name="button_update">Оновлення UA Player</string>
 </resources>

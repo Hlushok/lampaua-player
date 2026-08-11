@@ -49,6 +49,8 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
     private boolean restorePlayState;
     private boolean canScale = true;
     private boolean isHandledLongPress = false;
+    private boolean speedBoostActive;
+    private float speedBeforeBoost = 1f;
     public long keySeekStart = -1;
     public int volumeUpsInRow = 0;
 
@@ -126,6 +128,13 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
                 break;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
+                if (speedBoostActive) {
+                    speedBoostActive = false;
+                    if (PlayerActivity.player != null) {
+                        PlayerActivity.player.setPlaybackSpeed(speedBeforeBoost);
+                    }
+                    setCustomErrorMessage(null);
+                }
                 if (handleTouch) {
                     if (gestureOrientation == Orientation.HORIZONTAL) {
                         setCustomErrorMessage(null);
@@ -180,8 +189,9 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
 
     public boolean tap() {
         if (PlayerActivity.locked) {
-            Utils.showText(this, "", MESSAGE_TIMEOUT_LONG);
-            setIconLock(true);
+            if (getContext() instanceof PlayerActivity) {
+                ((PlayerActivity) getContext()).showSwipeToUnlock();
+            }
             return true;
         }
 
@@ -277,9 +287,11 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
                 }
                 gestureOrientation = Orientation.VERTICAL;
 
-                if (motionEvent.getX() < (float)(getWidth() / 2)) {
+                if (motionEvent.getX() < (float)(getWidth() / 2)
+                        && PlayerActivity.brightnessGesturesEnabled) {
                     brightnessControl.changeBrightness(this, gestureScrollY > 0, canSetAutoBrightness);
-                } else {
+                } else if (motionEvent.getX() >= (float)(getWidth() / 2)
+                        && PlayerActivity.volumeGesturesEnabled) {
                     Utils.adjustVolume(getContext(), mAudioManager, this, gestureScrollY > 0, canBoostVolume, false);
                 }
 
@@ -292,15 +304,23 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
 
     @Override
     public void onLongPress(MotionEvent motionEvent) {
-        if (PlayerActivity.locked || (getPlayer() != null && getPlayer().isPlaying())) {
-            PlayerActivity.locked = !PlayerActivity.locked;
-            isHandledLongPress = true;
-            Utils.showText(this, "", MESSAGE_TIMEOUT_LONG);
-            setIconLock(PlayerActivity.locked);
+        if (PlayerActivity.locked || mScaleDetector.isInProgress()
+                || gestureOrientation != Orientation.UNKNOWN) return;
+        if (!PlayerActivity.haveMedia || getPlayer() == null || !getPlayer().isPlaying()) return;
+        speedBeforeBoost = getPlayer().getPlaybackParameters().speed;
+        speedBoostActive = true;
+        isHandledLongPress = true;
+        getPlayer().setPlaybackSpeed(2f);
+        hideController();
+        clearIcon();
+        setCustomErrorMessage("2\u00D7");
+    }
 
-            if (PlayerActivity.locked && PlayerActivity.controllerVisible) {
-                hideController();
-            }
+    public void toggleLock() {
+        PlayerActivity.locked = !PlayerActivity.locked;
+        if (PlayerActivity.locked && PlayerActivity.controllerVisible) hideController();
+        if (getContext() instanceof PlayerActivity) {
+            ((PlayerActivity) getContext()).onLockChanged();
         }
     }
 
@@ -378,6 +398,22 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
     public float getScaleFit() {
         return Math.min((float)getHeight() / (float)getVideoSurfaceView().getHeight(),
                 (float)getWidth() / (float)getVideoSurfaceView().getWidth());
+    }
+
+    public void applyAspectMode(int resizeMode, float forcedRatio) {
+        setScale(1f);
+        setResizeMode(resizeMode);
+        AspectRatioFrameLayout frame = findViewById(R.id.exo_content_frame);
+        float ratio = forcedRatio > 0 ? forcedRatio : naturalVideoAspectRatio();
+        if (frame != null && ratio > 0) frame.setAspectRatio(ratio);
+    }
+
+    private float naturalVideoAspectRatio() {
+        if (PlayerActivity.player == null) return 0f;
+        androidx.media3.common.Format format = PlayerActivity.player.getVideoFormat();
+        if (format == null || format.width <= 0 || format.height <= 0) return 0f;
+        float pixelRatio = format.pixelWidthHeightRatio > 0 ? format.pixelWidthHeightRatio : 1f;
+        return format.width * pixelRatio / format.height;
     }
 
     private enum Orientation {

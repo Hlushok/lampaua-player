@@ -1,5 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="video_scale_title">Размер видео</string>
+    <string name="button_lock">Заблокировать управление</string>
+    <string name="swipe_unlock">Проведите вправо, чтобы разблокировать</string>
+    <string name="player_tools">Инструменты плеера</string>
+    <string name="sleep_timer_title">Таймер сна</string>
+    <string name="sleep_timer_off">Выключено</string>
+    <string name="sleep_timer_custom">Своя длительность</string>
+    <string name="sleep_timer_end_of_item">В конце видео</string>
+    <string name="sleep_timer_minutes">%1$d мин</string>
+    <string name="sleep_timer_hours">%1$d ч</string>
+    <string name="sleep_timer_hours_minutes">%1$d ч %2$d мин</string>
+    <string name="sleep_timer_minutes_hint">Минуты</string>
+    <string name="sleep_timer_set">Таймер: %1$s</string>
+    <string name="sleep_timer_cancelled">Таймер сна выключен</string>
+    <string name="sleep_timer_finished">Время отдохнуть</string>
+    <string name="playback_statistics_title">Статистика воспроизведения</string>
+    <string name="playback_stats_container">Контейнер</string>
+    <string name="playback_stats_video">Видео</string>
+    <string name="playback_stats_fps">Кадры/с</string>
+    <string name="playback_stats_bitrate">Битрейт</string>
+    <string name="playback_stats_buffer">Буфер</string>
+    <string name="playback_stats_network">Сеть</string>
+    <string name="playback_stats_decoder">Декодер</string>
+    <string name="playback_stats_audio">Аудио</string>
+    <string name="playback_stats_dropped_frames">Пропущенные кадры</string>
     <string name="error_files_missing">Приложение \"Файлы\" отключено или отсутствует</string>
     <string name="error_details">Подробности</string>
     <string name="open_subtitles">Загрузить субтитры</string>
@@ -9,6 +34,7 @@
     <string name="video_orientation_video">Ориентация видео</string>
     <string name="video_resize_crop">Обрезать</string>
     <string name="video_resize_fit">Подогнать</string>
+    <string name="video_resize_fill">Растянуть</string>
     <string name="delete_confirmation">Удалить</string>
     <string name="delete_query">Удалить этот файл\?</string>
     <string name="request_scope">Чтобы автоматически загружать внешние субтитры или переходить к следующему файлу в каталоге, предоставьте %s доступ к самой верхней папке, содержащей ваши видео (например, Movies).</string>
@@ -52,6 +78,11 @@
     <string name="pref_language_audio">Звуковая дорожка по умолчанию</string>
     <string name="pref_language_track_device">Языки устройства</string>
     <string name="pref_language_track_default">По умолчанию</string>
+    <string name="pref_language_audio_none">Не задано — будет воспроизводиться первая аудиодорожка</string>
+    <string name="pref_language_audio_add">Добавить язык</string>
+    <string name="pref_language_audio_move_up">Поднять выше</string>
+    <string name="pref_language_audio_move_down">Опустить ниже</string>
+    <string name="pref_language_audio_remove">Удалить</string>
     <string name="pref_map_dv7_on">Использовать совместимый слой HDR10, если устройство не поддерживает Dolby Vision Profile 7</string>
     <string name="pref_subtitle_header">Субтитры</string>
     <string name="pref_subtitle_style_embedded">Встроенные стили</string>
@@ -67,7 +98,11 @@
     <string name="pref_skip_mode">Заставки и повторы</string>
     <string name="pref_skip_mode_credits">Финальные титры</string>
     <string name="pref_skip_mode_button">Показывать кнопку «Пропустить»</string>
+    <string name="pref_skip_mode_brief">Показывать кратко</string>
+    <string name="pref_skip_mode_full">Показывать до конца сегмента</string>
     <string name="pref_skip_mode_auto">Пропускать автоматически</string>
+    <string name="skip_cancel_countdown">Отменить · %1$d</string>
+    <string name="skip_undo">Вернуться</string>
     <string name="pref_skip_fetch">Искать сегменты онлайн</string>
     <string name="pref_skip_fetch_on">Запрашивать настроенный сервис, если LAMPA не передала сегменты</string>
     <string name="pref_skip_fetch_off">Использовать только сегменты, переданные LAMPA</string>
@@ -83,5 +118,24 @@
     <string name="error_playback_stalled">Воспроизведение остановилось. Декодер устройства может не поддерживать этот поток.</string>
     <string name="decoder_compatibility_retry">Ошибка декодера. Повторяю в режиме совместимости</string>
     <string name="resolver_preparing_retry">Поток подготавливается. Повторяю попытку…</string>
+    <string name="playback_recovery_retry">Воспроизведение прервано. Переподключаюсь…</string>
+    <string name="error_local_media_corrupt">Локальный медиафайл неполный или повреждён.</string>
+    <string name="pref_system_volume">Управление громкостью</string>
+    <string name="pref_system_volume_on">Использовать громкость устройства</string>
+    <string name="pref_system_volume_off">Использовать громкость UA Player</string>
+    <string name="pref_volume_boost">Максимальное усиление плеера</string>
+    <string name="pref_volume_boost_off">До 100% (выключено)</string>
+    <string name="pref_volume_gestures">Жесты громкости</string>
+    <string name="pref_volume_gestures_summary">Изменять громкость справа на экране</string>
+    <string name="pref_brightness_gestures">Жесты яркости</string>
+    <string name="pref_brightness_gestures_summary">Изменять яркость слева на экране</string>
     <string name="resolver_not_ready">Источник не подготовил поток. Откройте его повторно.</string>
+    <string name="update_available">Доступно обновление: %1$s → %2$s</string>
+    <string name="update_stops_playback">Установка обновления закроет текущее видео.</string>
+    <string name="update_now">Обновить</string>
+    <string name="update_skip">Пропустить эту версию</string>
+    <string name="update_downloading">Загрузка обновления</string>
+    <string name="update_download_failed">Не удалось загрузить или установить обновление.</string>
+    <string name="update_notes_empty">Список изменений не указан.</string>
+    <string name="button_update">Обновление UA Player</string>
 </resources>

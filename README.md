@@ -3,7 +3,7 @@
 Open-source Android video player for Lampa and LampaUA, based on [Just Player](https://github.com/moneytoo/Player).
 
 - Android application ID: `com.lampaua.player`
-- Current version: `1.6.0` (`versionCode 18`)
+- Current version: `1.6.1` (`versionCode 19`)
 - Android 6.0+ and Android TV
 - Media3/ExoPlayer playback engine
 
@@ -11,16 +11,21 @@ Open-source Android video player for Lampa and LampaUA, based on [Just Player](h
 
 - HLS, DASH, RTMP, RTSP and regular HTTP media streams;
 - video quality, audio track and subtitle selection;
+- ordered preferred audio languages and richer MKV/MP4 track names;
 - episode playlists with titles, thumbnails and remote-control navigation;
 - automatic playback of the next episode;
-- configurable intro/recap and end-credit skipping, with timeline markers and the **Пропустити** action;
+- configurable intro/recap and end-credit skipping, with timeline markers, cancellable automatic skipping and a short undo action;
 - Ukrainian interface and a dark blue/yellow TV layout;
 - playback position/result reporting back to Lampa;
 - AV1/dav1d and FFmpeg extension decoders;
 - 4K-oriented buffering, decoder fallback and dropped-frame fallback;
 - bounded retry and request coalescing for deferred Lampac stream resolution;
 - compatibility recovery after renderer failures and manifest detection for extensionless streams;
-- independent update discovery through public GitHub Releases.
+- TV-focused D-pad navigation, accelerated seeking and input locking;
+- fit, crop, stretch and 2× viewing modes;
+- sleep timer, transfer speed and playback diagnostics;
+- optional player-volume boost up to 200% with safe passthrough fallback;
+- independent update discovery with formatted notes from public GitHub Releases.
 
 ## LAMPA integration
 
@@ -79,7 +84,7 @@ The JSON playlist can contain direct `url` values or short-lived `resolver_url` 
 
 Requirements:
 
-- JDK 17
+- JDK 21
 - Android SDK 36
 - Android SDK build-tools
 
@@ -87,6 +92,12 @@ Build a universal APK:
 
 ```bash
 ./gradlew :app:assembleLatestUniversalDebug
+```
+
+On Windows, create a clean test APK and validate its resources and signature:
+
+```powershell
+.\scripts\build_test_apk.ps1
 ```
 
 Build the unsigned release APK:
