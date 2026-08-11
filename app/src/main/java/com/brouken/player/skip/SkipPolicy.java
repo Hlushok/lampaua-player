@@ -21,7 +21,12 @@ public final class SkipPolicy {
             valid.add(new SkipSegment(segment.startMs, end, segment.kind,
                     segment.source, segment.wholeContentAd));
         }
-        valid.sort(Comparator.comparingLong(value -> value.startMs));
+        Collections.sort(valid, new Comparator<SkipSegment>() {
+            @Override
+            public int compare(SkipSegment left, SkipSegment right) {
+                return Long.compare(left.startMs, right.startMs);
+            }
+        });
         List<SkipSegment> merged = new ArrayList<>();
         for (SkipSegment segment : valid) {
             if (!merged.isEmpty()) {

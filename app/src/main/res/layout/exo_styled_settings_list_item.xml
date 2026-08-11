@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:minWidth="320dp"
@@ -16,7 +17,7 @@
         android:layout_width="36dp"
         android:layout_height="36dp"
         android:layout_marginEnd="12dp"
-        android:tint="#F0B726" />
+        app:tint="#F0B726" />
 
     <LinearLayout
         android:layout_width="0dp"

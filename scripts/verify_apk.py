@@ -12,7 +12,7 @@ from pathlib import Path
 
 PLAYER_CLASS = "com.brouken.player.PlayerActivity"
 SKIP_METHODS = (
-    "segmentButtonText(Lcom/brouken/player/LampaPlaylist$Segment;Z)Ljava/lang/String;",
+    "segmentButtonText(Lcom/brouken/player/skip/SkipSegment;J)Ljava/lang/String;",
     "updateLampaSkipUi()V",
 )
 
@@ -53,12 +53,18 @@ def verify_resources(aapt2: Path, apk: Path) -> None:
     resources = run([str(aapt2), "dump", "resources", str(apk)])
     skip_action = resource_block(resources, "skip_action")
     countdown = resource_block(resources, "skip_available_in")
+    cancel = resource_block(resources, "skip_cancel_countdown")
+    undo = resource_block(resources, "skip_undo")
 
     if "Пропустити" not in skip_action:
         fail("string/skip_action does not contain the Ukrainian label 'Пропустити'")
     if "Пропуск через %1$d" not in countdown:
         fail("string/skip_available_in does not contain the Ukrainian countdown label")
-    if "SideSheetBehavior" in skip_action or "SideSheetBehavior" in countdown:
+    if "Скасувати · %1$d" not in cancel:
+        fail("string/skip_cancel_countdown does not contain the Ukrainian cancel label")
+    if "Повернутися" not in undo:
+        fail("string/skip_undo does not contain the Ukrainian undo label")
+    if any("SideSheetBehavior" in block for block in (skip_action, countdown, cancel, undo)):
         fail("a skip label resolves to Material SideSheetBehavior")
 
 
