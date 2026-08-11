@@ -330,6 +330,7 @@ public class PlayerActivity extends Activity {
     private boolean audioRestartInFlight;
     private int audioRestartRetries;
     private final Runnable audioRestartRunnable = this::restartPassthroughAudio;
+    private final TvSeekController tvSeekController = new TvSeekController();
     private final ResolverResponseDataSource.Listener resolverResponseListener =
             new ResolverResponseDataSource.Listener() {
                 @Override
@@ -503,6 +504,8 @@ public class PlayerActivity extends Activity {
         ((DoubleTapPlayerView)playerView).setDoubleTapEnabled(false);
 
         timeBar = playerView.findViewById(R.id.exo_progress);
+        timeBar.setFocusable(true);
+        timeBar.setFocusableInTouchMode(true);
         timeBar.addListener(new TimeBar.OnScrubListener() {
             @Override
             public void onScrubStart(TimeBar timeBar, long position) {
@@ -1161,42 +1164,20 @@ public class PlayerActivity extends Activity {
             case KeyEvent.KEYCODE_BUTTON_L2:
             case KeyEvent.KEYCODE_MEDIA_REWIND:
                 if (!controllerVisibleFully || keyCode == KeyEvent.KEYCODE_MEDIA_REWIND) {
-                    if (player == null)
-                        break;
-                    playerView.removeCallbacks(playerView.textClearRunnable);
-                    long pos = player.getCurrentPosition();
-                    if (playerView.keySeekStart == -1) {
-                        playerView.keySeekStart = pos;
-                    }
-                    long seekTo = pos - 10_000;
-                    if (seekTo < 0)
-                        seekTo = 0;
-                    player.setSeekParameters(SeekParameters.PREVIOUS_SYNC);
-                    player.seekTo(seekTo);
-                    final String message = Utils.formatMilisSign(seekTo - playerView.keySeekStart) + "\n" + Utils.formatMilis(seekTo);
-                    playerView.setCustomErrorMessage(message);
-                    return true;
+                    return previewTvSeek(TvSeekController.BACKWARD, event);
                 }
                 break;
             case KeyEvent.KEYCODE_DPAD_RIGHT:
             case KeyEvent.KEYCODE_BUTTON_R2:
             case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
                 if (!controllerVisibleFully || keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) {
-                    if (player == null)
-                        break;
-                    playerView.removeCallbacks(playerView.textClearRunnable);
-                    long pos = player.getCurrentPosition();
-                    if (playerView.keySeekStart == -1) {
-                        playerView.keySeekStart = pos;
-                    }
-                    long seekTo = pos + 10_000;
-                    long seekMax = player.getDuration();
-                    if (seekMax != C.TIME_UNSET && seekTo > seekMax)
-                        seekTo = seekMax;
-                    PlayerActivity.player.setSeekParameters(SeekParameters.NEXT_SYNC);
-                    player.seekTo(seekTo);
-                    final String message = Utils.formatMilisSign(seekTo - playerView.keySeekStart) + "\n" + Utils.formatMilis(seekTo);
-                    playerView.setCustomErrorMessage(message);
+                    return previewTvSeek(TvSeekController.FORWARD, event);
+                }
+                break;
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                if (isTvBox && !controllerVisibleFully) {
+                    playerView.showController();
+                    playerView.post(timeBar::requestFocus);
                     return true;
                 }
                 break;
@@ -1235,12 +1216,39 @@ public class PlayerActivity extends Activity {
             case KeyEvent.KEYCODE_DPAD_RIGHT:
             case KeyEvent.KEYCODE_BUTTON_R2:
             case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
-                if (!isScrubbing) {
-                    playerView.postDelayed(playerView.textClearRunnable, 1000);
+                if (tvSeekController.isArmed()) {
+                    commitTvSeek();
+                    return true;
                 }
                 break;
         }
         return super.onKeyUp(keyCode, event);
+    }
+
+    private boolean previewTvSeek(int direction, KeyEvent event) {
+        if (player == null || !player.isCurrentMediaItemSeekable()) return false;
+        playerView.removeCallbacks(playerView.textClearRunnable);
+        long eventTime = event == null ? SystemClock.uptimeMillis() : event.getEventTime();
+        if (event != null && event.getRepeatCount() > 0) {
+            tvSeekController.hold(direction, eventTime);
+        } else {
+            tvSeekController.press(direction, eventTime);
+        }
+        long current = player.getCurrentPosition();
+        long target = tvSeekController.previewTarget(current, player.getDuration());
+        playerView.setCustomErrorMessage(Utils.formatMilisSign(target - current)
+                + "\n" + Utils.formatMilis(target));
+        return true;
+    }
+
+    private void commitTvSeek() {
+        if (player == null || !tvSeekController.isArmed()) return;
+        long current = player.getCurrentPosition();
+        long target = tvSeekController.consumeTarget(current, player.getDuration());
+        player.setSeekParameters(target < current
+                ? SeekParameters.PREVIOUS_SYNC : SeekParameters.NEXT_SYNC);
+        player.seekTo(target);
+        playerView.postDelayed(playerView.textClearRunnable, 1000);
     }
 
     @Override
@@ -1287,6 +1295,12 @@ public class PlayerActivity extends Activity {
                         }
                 }
             }
+            return true;
+        }
+
+        if (isTvBox && controllerVisibleFully && event.getAction() == KeyEvent.ACTION_DOWN
+                && event.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP) {
+            playerView.hideController();
             return true;
         }
 
