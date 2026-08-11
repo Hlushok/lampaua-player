@@ -119,4 +119,5 @@ dependencies {
     implementation project(path: ':doubletapplayerview')
     implementation project(path: ':android-file-chooser')
     implementation fileTree(dir: "libs", include: ["lib-*.aar"])
+    testImplementation 'junit:junit:4.13.2'
 }
