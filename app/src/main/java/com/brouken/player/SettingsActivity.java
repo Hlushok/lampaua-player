@@ -4,6 +4,7 @@ import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.TextUtils;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.Toast;
@@ -27,6 +28,7 @@ import java.util.Locale;
 import java.util.MissingResourceException;
 
 public class SettingsActivity extends AppCompatActivity {
+    public static final String EXTRA_MEDIA_LANGUAGES = "mediaLanguages";
 
     static RecyclerView recyclerView;
 
@@ -122,14 +124,20 @@ public class SettingsActivity extends AppCompatActivity {
                 listPreferenceFileAccess.setEntryValues(values.toArray(new String[0]));
             }
 
-            ListPreference listPreferenceLanguageAudio = findPreference("languageAudio");
-            if (listPreferenceLanguageAudio != null) {
-                LinkedHashMap<String, String> entries = new LinkedHashMap<>();
-                entries.put(Prefs.TRACK_DEFAULT, getString(R.string.pref_language_track_default));
-                entries.put(Prefs.TRACK_DEVICE, getString(R.string.pref_language_track_device));
-                entries.putAll(getLanguages());
-                listPreferenceLanguageAudio.setEntries(entries.values().toArray(new String[0]));
-                listPreferenceLanguageAudio.setEntryValues(entries.keySet().toArray(new String[0]));
+            Preference preferenceLanguageAudio = findPreference("languageAudio");
+            if (preferenceLanguageAudio != null) {
+                LinkedHashMap<String, String> languages = getLanguages();
+                updateLanguageSummary(preferenceLanguageAudio, languages);
+                preferenceLanguageAudio.setOnPreferenceClickListener(preference -> {
+                    AudioLanguagePriorityDialog.show(requireContext(),
+                            AudioLanguagePriority.parse(Prefs.getLanguageAudio(requireContext())),
+                            languages, pinnedLanguages(), picked -> {
+                                Prefs.setLanguageAudio(requireContext(),
+                                        AudioLanguagePriority.serialize(picked));
+                                updateLanguageSummary(preference, languages);
+                            });
+                    return true;
+                });
             }
 
             Preference currentVersion = findPreference("currentVersion");
@@ -171,12 +179,41 @@ public class SettingsActivity extends AppCompatActivity {
                     });
         }
 
+        private void updateLanguageSummary(Preference preference,
+                                           LinkedHashMap<String, String> languages) {
+            List<String> selected = AudioLanguagePriority.parse(Prefs.getLanguageAudio(requireContext()));
+            if (selected.isEmpty()) {
+                preference.setSummary(R.string.pref_language_audio_none);
+                return;
+            }
+            List<String> labels = new ArrayList<>();
+            for (String code : selected) {
+                String label = languages.get(code);
+                labels.add(label == null ? code : label);
+            }
+            preference.setSummary(TextUtils.join(", ", labels));
+        }
+
+        private List<String> pinnedLanguages() {
+            List<String> pinned = new ArrayList<>(Arrays.asList(Utils.getDeviceLanguages()));
+            String[] media = requireActivity().getIntent()
+                    .getStringArrayExtra(EXTRA_MEDIA_LANGUAGES);
+            if (media != null) {
+                for (String value : media) {
+                    String language = AudioLanguagePriority.normalize(value);
+                    if (language != null && !pinned.contains(language)) pinned.add(language);
+                }
+            }
+            return pinned;
+        }
+
         LinkedHashMap<String, String> getLanguages() {
             LinkedHashMap<String, String> languages = new LinkedHashMap<>();
             for (Locale locale : Locale.getAvailableLocales()) {
                 try {
                     // MissingResourceException: Couldn't find 3-letter language code for zz
-                    String key = locale.getISO3Language();
+                    String key = AudioLanguagePriority.normalize(locale.toLanguageTag());
+                    if (key == null || languages.containsKey(key)) continue;
                     String language = locale.getDisplayLanguage();
                     int length = language.offsetByCodePoints(0, 1);
                     if (!language.isEmpty()) {

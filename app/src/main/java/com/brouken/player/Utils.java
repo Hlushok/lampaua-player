@@ -723,13 +723,18 @@ class Utils {
         if (Build.VERSION.SDK_INT >= 24) {
             final LocaleList localeList = Resources.getSystem().getConfiguration().getLocales();
             for (int i = 0; i < localeList.size(); i++) {
-                locales.add(localeList.get(i).getISO3Language());
+                addDeviceLanguage(locales, localeList.get(i));
             }
         } else {
             final Locale locale = Resources.getSystem().getConfiguration().locale;
-            locales.add(locale.getISO3Language());
+            addDeviceLanguage(locales, locale);
         }
         return locales.toArray(new String[0]);
+    }
+
+    private static void addDeviceLanguage(List<String> languages, Locale locale) {
+        String language = AudioLanguagePriority.normalize(locale == null ? null : locale.toLanguageTag());
+        if (language != null && !languages.contains(language)) languages.add(language);
     }
 
     public static ComponentName getSystemComponent(Context context, Intent intent) {

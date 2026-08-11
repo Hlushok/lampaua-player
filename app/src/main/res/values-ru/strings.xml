@@ -78,6 +78,11 @@
     <string name="pref_language_audio">Звуковая дорожка по умолчанию</string>
     <string name="pref_language_track_device">Языки устройства</string>
     <string name="pref_language_track_default">По умолчанию</string>
+    <string name="pref_language_audio_none">Не задано — будет воспроизводиться первая аудиодорожка</string>
+    <string name="pref_language_audio_add">Добавить язык</string>
+    <string name="pref_language_audio_move_up">Поднять выше</string>
+    <string name="pref_language_audio_move_down">Опустить ниже</string>
+    <string name="pref_language_audio_remove">Удалить</string>
     <string name="pref_map_dv7_on">Использовать совместимый слой HDR10, если устройство не поддерживает Dolby Vision Profile 7</string>
     <string name="pref_subtitle_header">Субтитры</string>
     <string name="pref_subtitle_style_embedded">Встроенные стили</string>

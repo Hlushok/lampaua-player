@@ -84,6 +84,11 @@
     <string name="pref_menu_opacity_high">Висока</string>
     <string name="pref_language_track_device">Мова пристрою</string>
     <string name="pref_language_track_default">За замовчуванням</string>
+    <string name="pref_language_audio_none">Не задано — відтворюватиметься перша аудіодоріжка</string>
+    <string name="pref_language_audio_add">Додати мову</string>
+    <string name="pref_language_audio_move_up">Підняти вище</string>
+    <string name="pref_language_audio_move_down">Опустити нижче</string>
+    <string name="pref_language_audio_remove">Видалити</string>
     <string name="pref_subtitle_header">Субтитри</string>
     <string name="pref_subtitle_style_embedded">Вбудовані стилі</string>
     <string name="pref_subtitle_style_embedded_on">Застосувати вбудовані стилі субтитрів</string>

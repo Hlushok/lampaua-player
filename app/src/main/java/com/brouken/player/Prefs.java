@@ -94,7 +94,7 @@ class Prefs {
     public String fileAccess = "auto";
     public int decoderPriority = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON;
     public boolean mapDV7ToHevc = false;
-    public String languageAudio = TRACK_DEVICE;
+    public String languageAudio = "";
     public boolean subtitleStyleEmbedded = true;
     public boolean subtitleStyleBold = false;
     public boolean skipEnabled = true;
@@ -156,7 +156,7 @@ class Prefs {
         fileAccess = mSharedPreferences.getString(PREF_KEY_FILE_ACCESS, fileAccess);
         decoderPriority = Integer.parseInt(mSharedPreferences.getString(PREF_KEY_DECODER_PRIORITY, String.valueOf(decoderPriority)));
         mapDV7ToHevc = mSharedPreferences.getBoolean(PREF_KEY_MAP_DV7, mapDV7ToHevc);
-        languageAudio = mSharedPreferences.getString(PREF_KEY_LANGUAGE_AUDIO, languageAudio);
+        languageAudio = getLanguageAudio(mContext);
         subtitleStyleEmbedded = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_STYLE_EMBEDDED, subtitleStyleEmbedded);
         subtitleStyleBold = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_STYLE_BOLD, subtitleStyleBold);
         skipEnabled = mSharedPreferences.getBoolean(PREF_KEY_SKIP_ENABLED, skipEnabled);
@@ -176,6 +176,33 @@ class Prefs {
                 PREF_KEY_VOLUME_GESTURES, volumeGesturesEnabled);
         brightnessGesturesEnabled = mSharedPreferences.getBoolean(
                 PREF_KEY_BRIGHTNESS_GESTURES, brightnessGesturesEnabled);
+    }
+
+    public void setLanguageAudio(String languages) {
+        languageAudio = AudioLanguagePriority.serialize(AudioLanguagePriority.parse(languages));
+        setLanguageAudio(mContext, languageAudio);
+    }
+
+    public static String getLanguageAudio(Context context) {
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        String stored = preferences.getString(PREF_KEY_LANGUAGE_AUDIO, null);
+        if (stored != null && !TRACK_DEFAULT.equals(stored) && !TRACK_DEVICE.equals(stored)) {
+            String normalized = AudioLanguagePriority.serialize(AudioLanguagePriority.parse(stored));
+            if (!normalized.equals(stored)) {
+                preferences.edit().putString(PREF_KEY_LANGUAGE_AUDIO, normalized).apply();
+            }
+            return normalized;
+        }
+        String migrated = TRACK_DEFAULT.equals(stored)
+                ? "" : AudioLanguagePriority.serialize(java.util.Arrays.asList(Utils.getDeviceLanguages()));
+        preferences.edit().putString(PREF_KEY_LANGUAGE_AUDIO, migrated).apply();
+        return migrated;
+    }
+
+    public static void setLanguageAudio(Context context, String languages) {
+        String normalized = AudioLanguagePriority.serialize(AudioLanguagePriority.parse(languages));
+        PreferenceManager.getDefaultSharedPreferences(context).edit()
+                .putString(PREF_KEY_LANGUAGE_AUDIO, normalized).apply();
     }
 
     public void updateMedia(final Context context, final Uri uri, final String type) {

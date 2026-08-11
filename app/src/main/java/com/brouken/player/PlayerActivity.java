@@ -135,6 +135,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
@@ -273,9 +274,15 @@ public class PlayerActivity extends Activity {
     private int selectedVideoQualityMode = VideoQualityChoice.MODE_AUTO;
     private TrackGroup selectedVideoTrackGroup;
     private int selectedVideoTrackIndex = -1;
+    private CustomDefaultTrackNameProvider trackNameProvider;
+    private final List<TrackMetadata> containerTracks = new ArrayList<>();
+    private final Map<String, String> resolvedTrackNames = new HashMap<>();
     private int av1DroppedFrames;
     private int totalDroppedFrames;
     private long bandwidthBitrate;
+    private long sampledTransferBitrate;
+    private long transferSampleBytes;
+    private long transferSampleAt;
     private String videoDecoderName;
     private String audioDecoderName;
     private String forcedStreamMimeType;
@@ -364,6 +371,25 @@ public class PlayerActivity extends Activity {
                 public void onManifestTypeDetected(Uri requestedUri, String mimeType) {
                     detectedManifestUri = requestedUri == null ? null : requestedUri.toString();
                     detectedManifestType = mimeType;
+                }
+            };
+    private final TrackNameParsingDataSource.Listener trackNameListener =
+            new TrackNameParsingDataSource.Listener() {
+                @Override public void onMetadataParsed(List<TrackMetadata> tracks) {
+                    runOnUiThread(() -> onContainerMetadata(tracks));
+                }
+
+                @Override public boolean isMetadataParsed() {
+                    return !containerTracks.isEmpty();
+                }
+
+                @Override public void onMediaTypeResolved(Uri requestedUri, String mimeType) {
+                    detectedManifestUri = requestedUri == null ? null : requestedUri.toString();
+                    detectedManifestType = mimeType;
+                }
+
+                @Override public void onResolverNotReady(Uri requestedUri) {
+                    resolverControlUri = requestedUri == null ? null : requestedUri.toString();
                 }
             };
     private final Handler lampaUiHandler = new Handler(Looper.getMainLooper());
@@ -818,10 +844,10 @@ public class PlayerActivity extends Activity {
         timeBar.setBufferedColor(Color.rgb(42, 78, 121));
 
         try {
-            CustomDefaultTrackNameProvider customDefaultTrackNameProvider = new CustomDefaultTrackNameProvider(getResources());
+            trackNameProvider = new CustomDefaultTrackNameProvider(getResources());
             final Field field = PlayerControlView.class.getDeclaredField("trackNameProvider");
             field.setAccessible(true);
-            field.set(controlView, customDefaultTrackNameProvider);
+            field.set(controlView, trackNameProvider);
         } catch (NoSuchFieldException | IllegalAccessException e) {
             e.printStackTrace();
         }
@@ -2002,6 +2028,21 @@ public class PlayerActivity extends Activity {
 
     private void openAppSettings() {
         Intent intent = new Intent(this, SettingsActivity.class);
+        ArrayList<String> languages = new ArrayList<>();
+        if (player != null) {
+            for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+                if (group.getType() != C.TRACK_TYPE_AUDIO) continue;
+                for (int index = 0; index < group.length; index++) {
+                    String language = AudioLanguagePriority.normalize(
+                            group.getTrackFormat(index).language);
+                    if (language != null && !languages.contains(language)) languages.add(language);
+                }
+            }
+        }
+        if (!languages.isEmpty()) {
+            intent.putExtra(SettingsActivity.EXTRA_MEDIA_LANGUAGES,
+                    languages.toArray(new String[0]));
+        }
         startActivityForResult(intent, REQUEST_SETTINGS);
     }
 
@@ -2111,7 +2152,7 @@ public class PlayerActivity extends Activity {
                 audio == null ? audioDecoderName : shortCodec(audio.sampleMimeType)
                         + (audio.channelCount > 0 ? " \u00B7 " + audio.channelCount + " ch" : "")
                         + (audioDecoderName == null ? "" : " \u00B7 " + audioDecoderName),
-                bandwidthBitrate,
+                currentTransferBitrate(),
                 totalDroppedFrames);
         PlaybackStatistics.Labels labels = new PlaybackStatistics.Labels(
                 getString(R.string.playback_stats_container),
@@ -2205,23 +2246,62 @@ public class PlayerActivity extends Activity {
         else if (path.contains(".mkv")) parts.add("MKV");
         else parts.add("VIDEO");
         if (video != null) {
-            if (video.width > 0 && video.height > 0) {
-                int longSide = Math.max(video.width, video.height);
-                int shortSide = Math.min(video.width, video.height);
-                parts.add(longSide + " × " + shortSide);
-            }
-            String codec = shortCodec(video.sampleMimeType);
-            if (codec != null) parts.add(codec);
-            if (video.frameRate > 0) parts.add(Math.round(video.frameRate) + " fps");
-            if (video.bitrate > 0) {
-                parts.add(getString(R.string.quality_bitrate, video.bitrate / 1_000_000f));
-            }
+            parts.addAll(MediaFormatLabel.videoParts(video));
         }
         if (audio != null) {
             String codec = shortCodec(audio.sampleMimeType);
             if (codec != null) parts.add("[" + codec + "]");
         }
         lampaTopDetails.setText(TextUtils.join(" · ", parts));
+    }
+
+    private void onContainerMetadata(List<TrackMetadata> tracks) {
+        containerTracks.clear();
+        containerTracks.addAll(tracks);
+        resolveTrackNames();
+        updateLampaTrackDetails();
+    }
+
+    private void resolveTrackNames() {
+        resolvedTrackNames.clear();
+        if (player == null || containerTracks.isEmpty()) {
+            if (trackNameProvider != null) trackNameProvider.setTrackNames(resolvedTrackNames);
+            return;
+        }
+        resolveTrackNames(C.TRACK_TYPE_AUDIO, TrackMetadata.Type.AUDIO);
+        resolveTrackNames(C.TRACK_TYPE_TEXT, TrackMetadata.Type.SUBTITLE);
+        if (trackNameProvider != null) trackNameProvider.setTrackNames(resolvedTrackNames);
+    }
+
+    private void resolveTrackNames(int mediaTrackType, TrackMetadata.Type metadataType) {
+        ArrayList<TrackMetadata> candidates = new ArrayList<>();
+        for (TrackMetadata metadata : containerTracks) {
+            if (metadata.type == metadataType && metadata.name != null
+                    && !metadata.name.trim().isEmpty()) candidates.add(metadata);
+        }
+        Collections.sort(candidates, (left, right) -> Integer.compare(left.trackId, right.trackId));
+        int ordinal = 0;
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != mediaTrackType) continue;
+            for (int index = 0; index < group.length; index++, ordinal++) {
+                Format format = group.getTrackFormat(index);
+                TrackMetadata match = null;
+                Integer id = parseTrackId(format.id);
+                if (id != null) {
+                    for (TrackMetadata candidate : candidates) {
+                        if (candidate.trackId == id) { match = candidate; break; }
+                    }
+                }
+                if (match == null && ordinal < candidates.size()) match = candidates.get(ordinal);
+                if (match != null && format.id != null) resolvedTrackNames.put(format.id, match.name);
+            }
+        }
+    }
+
+    private static Integer parseTrackId(String id) {
+        if (id == null) return null;
+        try { return Integer.parseInt(id); }
+        catch (NumberFormatException ignored) { return null; }
     }
 
     private String shortCodec(String mimeType) {
@@ -2260,15 +2340,36 @@ public class PlayerActivity extends Activity {
         if (loadingRateView == null) return;
         boolean loading = loadingProgressBar != null
                 && loadingProgressBar.getVisibility() == View.VISIBLE;
-        if (!loading || bandwidthBitrate <= 0) {
+        long now = SystemClock.elapsedRealtime();
+        long bytes = TrackNameParsingDataSource.bytesRead.get();
+        if (!loading) {
+            transferSampleAt = now;
+            transferSampleBytes = bytes;
             loadingRateView.setVisibility(View.GONE);
             return;
         }
-        String value = bandwidthBitrate >= 1_000_000
-                ? String.format(Locale.US, "%.1f Mbps", bandwidthBitrate / 1_000_000f)
-                : String.format(Locale.US, "%.0f Kbps", bandwidthBitrate / 1_000f);
+        long elapsed = now - transferSampleAt;
+        if (transferSampleAt == 0 || elapsed >= 500) {
+            if (transferSampleAt > 0 && bytes >= transferSampleBytes && elapsed > 0) {
+                sampledTransferBitrate = (bytes - transferSampleBytes) * 8000L / elapsed;
+            }
+            transferSampleAt = now;
+            transferSampleBytes = bytes;
+        }
+        long bitrate = currentTransferBitrate();
+        if (bitrate <= 0) {
+            loadingRateView.setVisibility(View.GONE);
+            return;
+        }
+        String value = bitrate >= 1_000_000
+                ? String.format(Locale.US, "%.1f Mbps", bitrate / 1_000_000f)
+                : String.format(Locale.US, "%.0f Kbps", bitrate / 1_000f);
         loadingRateView.setText(value);
         loadingRateView.setVisibility(View.VISIBLE);
+    }
+
+    private long currentTransferBitrate() {
+        return sampledTransferBitrate > 0 ? sampledTransferBitrate : bandwidthBitrate;
     }
 
     private void updateLampaSkipUi() {
@@ -2528,19 +2629,15 @@ public class PlayerActivity extends Activity {
                 if (!group.isTrackSupported(index)) continue;
                 Format format = group.getTrackFormat(index);
                 int longSide = Math.max(format.width, format.height);
-                int shortSide = Math.min(format.width, format.height);
                 if (longSide <= 0) continue;
+                int bitrateValue = format.averageBitrate > 0
+                        ? format.averageBitrate : format.peakBitrate;
                 VideoQualityChoice previous = renditions.get(longSide);
-                if (previous == null || format.bitrate > previous.bitrate) {
-                    String codec = shortCodec(format.sampleMimeType);
-                    String dimensions = shortSide > 0
-                            ? longSide + " × " + shortSide : String.valueOf(longSide);
-                    String details = codec == null ? dimensions : dimensions + "  •  " + codec;
-                    String bitrate = format.bitrate > 0
-                            ? getString(R.string.quality_bitrate, format.bitrate / 1_000_000f) : "";
+                if (previous == null || bitrateValue > previous.bitrate) {
+                    String details = MediaFormatLabel.videoDetails(format);
                     renditions.put(longSide, VideoQualityChoice.track(
-                            longSide + "p", details, bitrate,
-                            group.getMediaTrackGroup(), index, format.bitrate));
+                            MediaFormatLabel.qualityLabel(format), details, "",
+                            group.getMediaTrackGroup(), index, bitrateValue));
                 }
             }
         }
@@ -3282,8 +3379,14 @@ public class PlayerActivity extends Activity {
         av1DroppedFrames = 0;
         totalDroppedFrames = 0;
         bandwidthBitrate = 0;
+        sampledTransferBitrate = 0;
+        transferSampleBytes = TrackNameParsingDataSource.bytesRead.get();
+        transferSampleAt = SystemClock.elapsedRealtime();
         videoDecoderName = null;
         audioDecoderName = null;
+        containerTracks.clear();
+        resolvedTrackNames.clear();
+        if (trackNameProvider != null) trackNameProvider.setTrackNames(resolvedTrackNames);
 
         String mediaUri = mPrefs.mediaUri == null ? null : mPrefs.mediaUri.toString();
         ensurePlaybackRecoveryKey(mediaUri);
@@ -3316,18 +3419,10 @@ public class PlayerActivity extends Activity {
                     .setTunnelingEnabled(true)
             );
         }
-        switch (mPrefs.languageAudio) {
-            case Prefs.TRACK_DEFAULT:
-                break;
-            case Prefs.TRACK_DEVICE:
-                trackSelector.setParameters(trackSelector.buildUponParameters()
-                        .setPreferredAudioLanguages(Utils.getDeviceLanguages())
-                );
-                break;
-            default:
-                trackSelector.setParameters(trackSelector.buildUponParameters()
-                        .setPreferredAudioLanguages(mPrefs.languageAudio)
-                );
+        List<String> preferredAudioLanguages = AudioLanguagePriority.parse(mPrefs.languageAudio);
+        if (!preferredAudioLanguages.isEmpty()) {
+            trackSelector.setParameters(trackSelector.buildUponParameters()
+                    .setPreferredAudioLanguages(preferredAudioLanguages.toArray(new String[0])));
         }
         final CaptioningManager captioningManager = (CaptioningManager) getSystemService(Context.CAPTIONING_SERVICE);
         if (!captioningManager.isEnabled()) {
@@ -3408,8 +3503,10 @@ public class PlayerActivity extends Activity {
                 if (!headers.isEmpty()) defaultHttpDataSourceFactory.setDefaultRequestProperties(headers);
                 DataSource.Factory inspectedDataSource = new ResolverResponseDataSource.Factory(
                         defaultHttpDataSourceFactory, resolverResponseListener);
+                DataSource.Factory metadataDataSource = new TrackNameParsingDataSource.Factory(
+                        inspectedDataSource, trackNameListener);
                 playerBuilder.setMediaSourceFactory(new DefaultMediaSourceFactory(
-                        inspectedDataSource, extractorsFactory));
+                        metadataDataSource, extractorsFactory));
             }
         }
 
@@ -3923,6 +4020,7 @@ public class PlayerActivity extends Activity {
                 }
                 return;
             }
+            resolveTrackNames();
             updateLampaTrackDetails();
         }
 

@@ -11,11 +11,9 @@
             app:title="@string/pref_file_access"
             app:useSimpleSummaryProvider="true" />
 
-        <ListPreference
+        <Preference
             app:key="languageAudio"
-            android:defaultValue="device"
-            app:title="@string/pref_language_audio"
-            app:useSimpleSummaryProvider="true" />
+            app:title="@string/pref_language_audio" />
 
         <ListPreference
             app:key="menuOpacity"
