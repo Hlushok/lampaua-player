@@ -207,11 +207,13 @@ public class PlayerActivity extends Activity {
     private ImageButton buttonAspectRatio;
     private ImageButton buttonLock;
     private ImageButton buttonRotation;
+    private ImageButton buttonTools;
     private ImageButton buttonAppSettings;
     private SwipeToUnlockView swipeToUnlock;
     private ImageButton exoSettings;
     private ImageButton exoPlayPause;
     private ProgressBar loadingProgressBar;
+    private TextView loadingRateView;
     private PlayerControlView controlView;
     private CustomDefaultTimeBar timeBar;
 
@@ -272,6 +274,10 @@ public class PlayerActivity extends Activity {
     private TrackGroup selectedVideoTrackGroup;
     private int selectedVideoTrackIndex = -1;
     private int av1DroppedFrames;
+    private int totalDroppedFrames;
+    private long bandwidthBitrate;
+    private String videoDecoderName;
+    private String audioDecoderName;
     private String forcedStreamMimeType;
     private volatile String resolverControlUri;
     private volatile String detectedManifestUri;
@@ -333,6 +339,20 @@ public class PlayerActivity extends Activity {
     private int audioRestartRetries;
     private final Runnable audioRestartRunnable = this::restartPassthroughAudio;
     private final TvSeekController tvSeekController = new TvSeekController();
+    private final SleepTimerController sleepTimer = new SleepTimerController(SystemClock::elapsedRealtime);
+    private final Runnable sleepTimerRunnable = new Runnable() {
+        @Override public void run() {
+            SleepTimerController.Tick tick = sleepTimer.tick(false);
+            if (tick.fire) {
+                fireSleepTimer();
+                return;
+            }
+            if (player != null) player.setVolume(basePlayerVolume() * tick.volumeFactor);
+            if (sleepTimer.isArmed()) {
+                playerView.postDelayed(this, tick.remainingMs <= 30_000 ? 250 : 1000);
+            }
+        }
+    };
     private final ResolverResponseDataSource.Listener resolverResponseListener =
             new ResolverResponseDataSource.Listener() {
                 @Override
@@ -372,7 +392,26 @@ public class PlayerActivity extends Activity {
     };
     private final AnalyticsListener lampaPerformanceListener = new AnalyticsListener() {
         @Override
+        public void onVideoDecoderInitialized(EventTime eventTime, String decoderName,
+                                              long initializedTimestampMs, long initializationDurationMs) {
+            videoDecoderName = decoderName;
+        }
+
+        @Override
+        public void onAudioDecoderInitialized(EventTime eventTime, String decoderName,
+                                              long initializedTimestampMs, long initializationDurationMs) {
+            audioDecoderName = decoderName;
+        }
+
+        @Override
+        public void onBandwidthEstimate(EventTime eventTime, int totalLoadTimeMs,
+                                        long totalBytesLoaded, long bitrateEstimate) {
+            bandwidthBitrate = Math.max(0, bitrateEstimate);
+        }
+
+        @Override
         public void onDroppedVideoFrames(EventTime eventTime, int droppedFrames, long elapsedMs) {
+            totalDroppedFrames += Math.max(0, droppedFrames);
             if (player == null || decoderQualityFallbackTried || droppedFrames <= 0) return;
             Format format = player.getVideoFormat();
             if (format == null || format.height < 2000
@@ -492,6 +531,16 @@ public class PlayerActivity extends Activity {
         playerView = findViewById(R.id.video_view);
         exoPlayPause = findViewById(R.id.exo_play_pause);
         loadingProgressBar = findViewById(R.id.loading);
+        loadingRateView = new TextView(this);
+        loadingRateView.setTextColor(Color.WHITE);
+        loadingRateView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        loadingRateView.setGravity(Gravity.CENTER);
+        loadingRateView.setVisibility(View.GONE);
+        FrameLayout.LayoutParams rateParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER);
+        rateParams.topMargin = Utils.dpToPx(58);
+        playerView.addView(loadingRateView, rateParams);
 
         playerView.setShowNextButton(false);
         playerView.setShowPreviousButton(false);
@@ -578,6 +627,11 @@ public class PlayerActivity extends Activity {
         buttonAppSettings.setImageResource(R.drawable.ic_settings_24dp);
         buttonAppSettings.setContentDescription(getString(R.string.button_app_settings));
         buttonAppSettings.setOnClickListener(view -> openAppSettings());
+
+        buttonTools = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
+        buttonTools.setImageResource(R.drawable.ic_more_vert_24dp);
+        buttonTools.setContentDescription(getString(R.string.player_tools));
+        buttonTools.setOnClickListener(view -> showPlayerTools());
 
         if (Utils.isPiPSupported(this)) {
             // TODO: Android 12 improvements:
@@ -841,6 +895,7 @@ public class PlayerActivity extends Activity {
             controls.addView(buttonRotation);
         }
         controls.addView(exoSettings);
+        controls.addView(buttonTools);
         controls.addView(buttonAppSettings);
 
         exoBasicControls.addView(horizontalScrollView);
@@ -955,6 +1010,10 @@ public class PlayerActivity extends Activity {
         updateButtonRotation();
         lampaUiHandler.removeCallbacks(lampaUiTicker);
         lampaUiHandler.post(lampaUiTicker);
+        if (sleepTimer.isArmed() && !sleepTimer.isAtMediaEnd()) {
+            playerView.removeCallbacks(sleepTimerRunnable);
+            playerView.post(sleepTimerRunnable);
+        }
     }
 
     @Override
@@ -986,6 +1045,7 @@ public class PlayerActivity extends Activity {
             playerView.removeCallbacks(barsHider);
         }
         playerView.setCustomErrorMessage(null);
+        playerView.removeCallbacks(sleepTimerRunnable);
         lampaUiHandler.removeCallbacks(lampaUiTicker);
         unregisterAudioOutputReceiver();
         releasePlayer(false);
@@ -1945,6 +2005,145 @@ public class PlayerActivity extends Activity {
         startActivityForResult(intent, REQUEST_SETTINGS);
     }
 
+    private void showPlayerTools() {
+        String timerSummary = sleepTimer.isAtMediaEnd()
+                ? getString(R.string.sleep_timer_end_of_item)
+                : sleepTimer.remainingMs() > 0 ? Utils.formatMilis(sleepTimer.remainingMs()) : null;
+        String[] items = {
+                getString(R.string.sleep_timer_title)
+                        + (timerSummary == null ? "" : "  \u00B7  " + timerSummary),
+                getString(R.string.playback_statistics_title)
+        };
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.player_tools)
+                .setItems(items, (selected, which) -> {
+                    selected.dismiss();
+                    if (which == 0) showSleepTimerMenu();
+                    else showPlaybackStatistics();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+        dialog.show();
+    }
+
+    private void showSleepTimerMenu() {
+        final int[] minutes = {0, 15, 30, 45, 60, 90, -1, -2};
+        String[] labels = {
+                getString(R.string.sleep_timer_off),
+                getString(R.string.sleep_timer_minutes, 15),
+                getString(R.string.sleep_timer_minutes, 30),
+                getString(R.string.sleep_timer_minutes, 45),
+                getString(R.string.sleep_timer_hours, 1),
+                getString(R.string.sleep_timer_hours_minutes, 1, 30),
+                getString(R.string.sleep_timer_end_of_item),
+                getString(R.string.sleep_timer_custom)
+        };
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.sleep_timer_title)
+                .setItems(labels, (selected, which) -> {
+                    int value = minutes[which];
+                    selected.dismiss();
+                    if (value == -2) showCustomSleepTimer();
+                    else if (value == -1) armSleepAtMediaEnd();
+                    else armSleepAfterMinutes(value);
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+        dialog.show();
+    }
+
+    private void showCustomSleepTimer() {
+        AlertDialog dialog = DurationPanel.create(this, this::armSleepAfterMinutes);
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, true));
+        dialog.show();
+    }
+
+    private void armSleepAfterMinutes(int minutes) {
+        playerView.removeCallbacks(sleepTimerRunnable);
+        if (minutes <= 0) {
+            sleepTimer.cancel();
+            if (player != null) player.setVolume(basePlayerVolume());
+            Utils.showText(playerView, getString(R.string.sleep_timer_cancelled));
+            return;
+        }
+        sleepTimer.armAfter(minutes * 60_000L);
+        playerView.post(sleepTimerRunnable);
+        Utils.showText(playerView, getString(R.string.sleep_timer_set,
+                getString(R.string.sleep_timer_minutes, minutes)));
+    }
+
+    private void armSleepAtMediaEnd() {
+        playerView.removeCallbacks(sleepTimerRunnable);
+        sleepTimer.armAtMediaEnd();
+        Utils.showText(playerView, getString(R.string.sleep_timer_set,
+                getString(R.string.sleep_timer_end_of_item)));
+    }
+
+    private void fireSleepTimer() {
+        playerView.removeCallbacks(sleepTimerRunnable);
+        sleepTimer.cancel();
+        if (player != null) {
+            player.pause();
+            player.setVolume(basePlayerVolume());
+        }
+        Utils.showText(playerView, getString(R.string.sleep_timer_finished), 3500);
+    }
+
+    private float basePlayerVolume() {
+        return systemVolume ? 1f : Math.max(0f, Math.min(1f, playerVolume / 100f));
+    }
+
+    private void showPlaybackStatistics() {
+        if (player == null) return;
+        Format video = player.getVideoFormat();
+        Format audio = player.getAudioFormat();
+        PlaybackStatistics.Snapshot snapshot = new PlaybackStatistics.Snapshot(
+                mediaContainerLabel(),
+                video == null ? 0 : video.width,
+                video == null ? 0 : video.height,
+                video == null ? null : shortCodec(video.sampleMimeType),
+                video == null ? 0 : video.frameRate,
+                video == null ? 0 : video.bitrate,
+                player.getTotalBufferedDuration(),
+                videoDecoderName,
+                audio == null ? audioDecoderName : shortCodec(audio.sampleMimeType)
+                        + (audio.channelCount > 0 ? " \u00B7 " + audio.channelCount + " ch" : "")
+                        + (audioDecoderName == null ? "" : " \u00B7 " + audioDecoderName),
+                bandwidthBitrate,
+                totalDroppedFrames);
+        PlaybackStatistics.Labels labels = new PlaybackStatistics.Labels(
+                getString(R.string.playback_stats_container),
+                getString(R.string.playback_stats_video),
+                getString(R.string.playback_stats_fps),
+                getString(R.string.playback_stats_bitrate),
+                getString(R.string.playback_stats_buffer),
+                getString(R.string.playback_stats_network),
+                getString(R.string.playback_stats_decoder),
+                getString(R.string.playback_stats_audio),
+                getString(R.string.playback_stats_dropped_frames));
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.playback_statistics_title)
+                .setMessage(snapshot.render(labels))
+                .setPositiveButton(android.R.string.ok, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, true));
+        dialog.show();
+    }
+
+    private String mediaContainerLabel() {
+        Uri uri = mPrefs == null ? null : mPrefs.mediaUri;
+        String value = uri == null ? "" : uri.toString().toLowerCase(Locale.US);
+        if (lampaIptv) return "LIVE";
+        if (value.contains(".m3u8")) return "HLS";
+        if (value.contains(".mpd") || value.contains("/ytdl/manifest?")) return "DASH";
+        if (value.contains(".mkv")) return "MKV";
+        if (value.contains(".ts")) return "TS";
+        if (value.contains(".mp4")) return "MP4";
+        return "VIDEO";
+    }
+
     private void updateLampaTopPanel() {
         if (lampaTopPanel == null) return;
         LampaPlaylist.Item item = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
@@ -2054,6 +2253,22 @@ public class PlayerActivity extends Activity {
             lampaFinishTime.setText(finish);
         }
         updateLampaSkipUi();
+        updateTransferRateUi();
+    }
+
+    private void updateTransferRateUi() {
+        if (loadingRateView == null) return;
+        boolean loading = loadingProgressBar != null
+                && loadingProgressBar.getVisibility() == View.VISIBLE;
+        if (!loading || bandwidthBitrate <= 0) {
+            loadingRateView.setVisibility(View.GONE);
+            return;
+        }
+        String value = bandwidthBitrate >= 1_000_000
+                ? String.format(Locale.US, "%.1f Mbps", bandwidthBitrate / 1_000_000f)
+                : String.format(Locale.US, "%.0f Kbps", bandwidthBitrate / 1_000f);
+        loadingRateView.setText(value);
+        loadingRateView.setVisibility(View.VISIBLE);
     }
 
     private void updateLampaSkipUi() {
@@ -3065,6 +3280,10 @@ public class PlayerActivity extends Activity {
         boolean isNetworkUri = Utils.isSupportedNetworkUri(mPrefs.mediaUri);
         haveMedia = mPrefs.mediaUri != null;
         av1DroppedFrames = 0;
+        totalDroppedFrames = 0;
+        bandwidthBitrate = 0;
+        videoDecoderName = null;
+        audioDecoderName = null;
 
         String mediaUri = mPrefs.mediaUri == null ? null : mPrefs.mediaUri.toString();
         ensurePlaybackRecoveryKey(mediaUri);
@@ -3677,6 +3896,10 @@ public class PlayerActivity extends Activity {
                 playerView.postDelayed(loadTimeoutRunnable, VIDEO_LOAD_TIMEOUT_MS);
             } else if (state == Player.STATE_ENDED) {
                 cancelPlaybackWatchdogs();
+                if (sleepTimer.isAtMediaEnd()) {
+                    fireSleepTimer();
+                    return;
+                }
                 if (lampaPlaylist != null && playlistPlaybackEverReady
                         && lampaPlaylist.hasNext() && lampaPlaylist.isAutoNext()) {
                     playPlaylistIndex(lampaPlaylist.getCurrentIndex() + 1, true);
@@ -4527,8 +4750,10 @@ public class PlayerActivity extends Activity {
         if (enableLoading) {
             exoPlayPause.setVisibility(View.GONE);
             loadingProgressBar.setVisibility(View.VISIBLE);
+            updateTransferRateUi();
         } else {
             loadingProgressBar.setVisibility(View.GONE);
+            if (loadingRateView != null) loadingRateView.setVisibility(View.GONE);
             exoPlayPause.setVisibility(View.VISIBLE);
             if (focusPlay) {
                 focusPlay = false;
