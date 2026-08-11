@@ -132,7 +132,8 @@
     <string name="resolver_not_ready">Источник не подготовил поток. Откройте его повторно.</string>
     <string name="update_available">Доступно обновление: %1$s → %2$s</string>
     <string name="update_stops_playback">Установка обновления закроет текущее видео.</string>
-    <string name="update_now">Обновить</string>
+    <string name="update_now">Скачать и установить</string>
+    <string name="press_back_again">Нажмите «Назад» ещё раз для выхода</string>
     <string name="update_skip">Пропустить эту версию</string>
     <string name="update_downloading">Загрузка обновления</string>
     <string name="update_download_failed">Не удалось загрузить или установить обновление.</string>

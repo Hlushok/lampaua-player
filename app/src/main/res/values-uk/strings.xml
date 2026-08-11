@@ -168,7 +168,8 @@
     <string name="error_playback_stalled">Відтворення зупинилося. Декодер пристрою може не підтримувати цей потік.</string>
     <string name="update_available">Доступне оновлення: %1$s → %2$s</string>
     <string name="update_stops_playback">Встановлення оновлення закриє поточне відео.</string>
-    <string name="update_now">Оновити</string>
+    <string name="update_now">Завантажити й установити</string>
+    <string name="press_back_again">Натисніть «Назад» ще раз для виходу</string>
     <string name="update_skip">Пропустити цю версію</string>
     <string name="update_downloading">Завантаження оновлення</string>
     <string name="update_download_failed">Не вдалося завантажити або встановити оновлення.</string>

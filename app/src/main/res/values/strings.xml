@@ -169,7 +169,8 @@
     <string name="error_playback_stalled">Playback stalled. The device decoder may not support this stream.</string>
     <string name="update_available">Update available: %1$s → %2$s</string>
     <string name="update_stops_playback">Installing the update will close the current video.</string>
-    <string name="update_now">Update</string>
+    <string name="update_now">Download and install</string>
+    <string name="press_back_again">Press Back again to exit</string>
     <string name="update_skip">Skip this version</string>
     <string name="update_downloading">Downloading update</string>
     <string name="update_download_failed">Could not download or install the update.</string>
