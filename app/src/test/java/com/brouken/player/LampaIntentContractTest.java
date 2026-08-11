@@ -33,6 +33,10 @@ public class LampaIntentContractTest {
         assertTrue(source.contains("\"quality_urls\""));
         assertTrue(source.contains("\"video_list.quality_levels.\" + i"));
         assertTrue(source.contains("\"video_list.quality_urls.\" + i"));
+        assertTrue(source.contains("getParcelableArrayExtra(\"video_list\")"));
+        assertTrue(source.contains("getStringArrayExtra(\"video_list\")"));
+        assertTrue(source.contains("bundle.getStringArray(API_HEADERS)"));
+        assertTrue(source.contains("bundle.getStringArrayList(API_HEADERS)"));
     }
 
     @Test public void returnsMxCompatiblePlaybackResultToLampa() throws Exception {
@@ -45,6 +49,7 @@ public class LampaIntentContractTest {
         assertTrue(source.contains("intent.setData(Uri.parse(current.url))"));
         assertTrue(source.contains("setResult(Activity.RESULT_OK, intent)"));
         assertTrue(source.contains("LampaPlaylist.EXTRA_PLAYBACK_RESULTS"));
+        assertTrue(source.contains("bundle.getBoolean(API_RETURN_RESULT)"));
     }
 
     @Test public void packageAndManifestRemainDiscoverableByAndroidLampa() throws Exception {
@@ -53,7 +58,9 @@ public class LampaIntentContractTest {
 
         assertTrue(gradle.contains("applicationId \"com.lampaua.player\""));
         assertTrue(manifest.contains("android.intent.action.VIEW"));
+        assertTrue(manifest.contains("android.intent.category.BROWSABLE"));
         assertTrue(manifest.contains("android:mimeType=\"video/*\""));
+        assertTrue(manifest.contains("android.intent.category.LEANBACK_LAUNCHER"));
         assertTrue(manifest.contains("android:exported=\"true\""));
     }
 }

@@ -3,6 +3,7 @@ package com.brouken.player;
 import static android.content.pm.PackageManager.FEATURE_EXPANDED_PICTURE_IN_PICTURE;
 
 import android.animation.Animator;
+import android.animation.AnimatorInflater;
 import android.animation.AnimatorListenerAdapter;
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
@@ -56,6 +57,7 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.accessibility.CaptioningManager;
+import android.window.OnBackInvokedDispatcher;
 import android.widget.FrameLayout;
 import android.widget.BaseAdapter;
 import android.widget.Button;
@@ -354,6 +356,7 @@ public class PlayerActivity extends Activity {
     private int audioRestartRetries;
     private final Runnable audioRestartRunnable = this::restartPassthroughAudio;
     private final TvSeekController tvSeekController = new TvSeekController();
+    private final BackExitGuard backExitGuard = new BackExitGuard(2_000L);
     private final SleepTimerController sleepTimer = new SleepTimerController(SystemClock::elapsedRealtime);
     private final Runnable sleepTimerRunnable = new Runnable() {
         @Override public void run() {
@@ -503,6 +506,11 @@ public class PlayerActivity extends Activity {
         }
 
         isTvBox = Utils.isTvBox(this);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::onBackPressed);
+        }
 
         if (isTvBox) {
             AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
@@ -942,6 +950,7 @@ public class PlayerActivity extends Activity {
         controls.addView(buttonTools);
         controls.addView(buttonUpdate);
         controls.addView(buttonAppSettings);
+        styleTvBottomControls(controls);
 
         exoBasicControls.addView(horizontalScrollView);
 
@@ -1128,6 +1137,32 @@ public class PlayerActivity extends Activity {
     @SuppressLint("GestureBackNavigation")
     @Override
     public void onBackPressed() {
+        if (locked) {
+            if (!backExitGuard.shouldExit(SystemClock.elapsedRealtime())) {
+                showSwipeToUnlock();
+                Utils.showText(playerView, getString(R.string.press_back_again), 2_000);
+                return;
+            }
+        } else if (isTvBox && haveMedia) {
+            if (tvSeekController.isArmed()) {
+                tvSeekController.reset();
+                backExitGuard.reset();
+                if (playerView != null) {
+                    playerView.removeCallbacks(playerView.textClearRunnable);
+                    playerView.textClearRunnable.run();
+                }
+                return;
+            }
+            if (controllerVisible) {
+                backExitGuard.reset();
+                playerView.hideController();
+                return;
+            }
+            if (!backExitGuard.shouldExit(SystemClock.elapsedRealtime())) {
+                Utils.showText(playerView, getString(R.string.press_back_again), 2_000);
+                return;
+            }
+        }
         restorePlayStateAllowed = false;
         super.onBackPressed();
     }
@@ -1173,6 +1208,7 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        backExitGuard.reset();
 
         if (intent != null) {
             final String action = intent.getAction();
@@ -1299,14 +1335,7 @@ public class PlayerActivity extends Activity {
                 }
                 break;
             case KeyEvent.KEYCODE_BACK:
-                if (isTvBox) {
-                    if (controllerVisible && player != null && player.isPlaying()) {
-                        playerView.hideController();
-                        return true;
-                    } else {
-                        onBackPressed();
-                    }
-                }
+                // Let Activity/OnBackInvokedDispatcher route Back through onBackPressed().
                 break;
             case KeyEvent.KEYCODE_UNKNOWN:
                 return super.onKeyDown(keyCode, event);
@@ -1420,7 +1449,8 @@ public class PlayerActivity extends Activity {
             return true;
         }
 
-        if (isTvBox && !controllerVisibleFully) {
+        if (isTvBox && !controllerVisibleFully
+                && event.getKeyCode() != KeyEvent.KEYCODE_BACK) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 onKeyDown(event.getKeyCode(), event);
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
@@ -2596,6 +2626,21 @@ public class PlayerActivity extends Activity {
         if (!isTvBox || playerView == null) return;
         playerView.removeCallbacks(primaryTvFocusRunnable);
         playerView.post(primaryTvFocusRunnable);
+    }
+
+    private void styleTvBottomControls(ViewGroup controls) {
+        if (!isTvBox || controls == null) return;
+        controls.setClipChildren(false);
+        controls.setClipToPadding(false);
+        for (int i = 0; i < controls.getChildCount(); i++) {
+            View child = controls.getChildAt(i);
+            if (!(child instanceof ImageButton)) continue;
+            child.setBackgroundResource(R.drawable.ua_tv_control_background);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                child.setStateListAnimator(AnimatorInflater.loadStateListAnimator(
+                        this, R.animator.ua_tv_control_focus));
+            }
+        }
     }
 
     private void requestPrimaryTvFocus() {

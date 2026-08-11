@@ -86,13 +86,23 @@ public class ResourceContractTest {
                 "src/main/java/com/brouken/player/update/Updater.java");
         String updateUi = readProjectFile(
                 "src/main/java/com/brouken/player/update/UpdateUi.java");
+        String ukrainian = readProjectFile("src/main/res/values-uk/strings.xml");
 
         assertTrue(updater.contains("CLIENT.newCall(request).execute()"));
         assertTrue(updater.contains("context.getCacheDir()"));
         assertTrue(updater.contains("FileProvider.getUriForFile"));
         assertTrue(updater.contains("FLAG_GRANT_READ_URI_PERMISSION"));
         assertTrue(updateUi.contains("Updater.downloadApk"));
+        assertTrue(ukrainian.contains(">Завантажити й установити</string>"));
         assertFalse(updater.contains("Intent.createChooser"));
         assertFalse(updateUi.contains("startActivity(new Intent(Intent.ACTION_VIEW"));
+    }
+
+    @Test
+    public void tvBackHintStaysLocalized() throws Exception {
+        String ukrainian = readProjectFile("src/main/res/values-uk/strings.xml");
+
+        assertTrue(ukrainian.contains(
+                "name=\"press_back_again\">Натисніть «Назад» ще раз для виходу</string>"));
     }
 }
