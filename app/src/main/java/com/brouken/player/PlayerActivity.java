@@ -205,6 +205,7 @@ public class PlayerActivity extends Activity {
     private static final long STALL_TIMEOUT_MS = 10_000L;
     private static final long STABLE_PLAYBACK_MS = 15_000L;
     private static final long SWIPE_UNLOCK_TIMEOUT_MS = 3_000L;
+    private static final long FRAME_RATE_SWITCH_TIMEOUT_MS = 1_500L;
 
     private CoordinatorLayout coordinatorLayout;
     private TextView titleView;
@@ -313,6 +314,7 @@ public class PlayerActivity extends Activity {
     private long loadWatchdogBytes;
     private final Runnable loadTimeoutRunnable = this::reportLoadWatchdog;
     private final Runnable swipeHider = this::hideSwipeToUnlock;
+    private final Runnable frameRateGiveUpRunnable = this::frameRateSettled;
     private final Runnable stallWatchdogRunnable = new Runnable() {
         @Override public void run() {
             if (player == null || !player.isPlaying()) return;
@@ -2236,7 +2238,7 @@ public class PlayerActivity extends Activity {
                 video == null ? 0 : video.width,
                 video == null ? 0 : video.height,
                 video == null ? null : shortCodec(video.sampleMimeType),
-                video == null ? 0 : video.frameRate,
+                videoFrameRate(),
                 video == null ? 0 : video.bitrate,
                 player.getTotalBufferedDuration(),
                 videoDecoderName,
@@ -2262,6 +2264,11 @@ public class PlayerActivity extends Activity {
                 .create();
         dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, true));
         dialog.show();
+    }
+
+    private float videoFrameRate() {
+        Format format = player == null ? null : player.getVideoFormat();
+        return format != null && format.frameRate > 0f ? format.frameRate : 0f;
     }
 
     private String mediaContainerLabel() {
@@ -3593,6 +3600,8 @@ public class PlayerActivity extends Activity {
     }
 
     public void initializePlayer() {
+        cancelFrameRateSwitchWait();
+        play = false;
         boolean isNetworkUri = Utils.isSupportedNetworkUri(mPrefs.mediaUri);
         haveMedia = mPrefs.mediaUri != null;
         av1DroppedFrames = 0;
@@ -3908,6 +3917,8 @@ public class PlayerActivity extends Activity {
     }
 
     public void releasePlayer(boolean save) {
+        cancelFrameRateSwitchWait();
+        play = false;
         cancelPlaybackWatchdogs();
         hideSwipeToUnlock();
         if (playerView != null) {
@@ -4177,32 +4188,23 @@ public class PlayerActivity extends Activity {
 
                                     @Override
                                     public void onDisplayChanged(int displayId) {
-                                        if (play) {
-                                            play = false;
-                                            displayManager.unregisterDisplayListener(this);
-                                            if (player != null) {
-                                                player.play();
-                                            }
-                                            if (playerView != null) {
-                                                playerView.hideController();
-                                            }
-                                        }
+                                        frameRateSettled();
                                     }
                                 };
                             }
                             displayManager.registerDisplayListener(displayListener, null);
                         }
-                        switched = Utils.switchFrameRate(PlayerActivity.this, mPrefs.mediaUri, play);
+                        float rate = videoFrameRate();
+                        switched = rate > 0f
+                                ? Utils.handleFrameRate(PlayerActivity.this, rate)
+                                : Utils.switchFrameRate(PlayerActivity.this, mPrefs.mediaUri);
                     }
-                    if (!switched) {
-                        if (displayManager != null) {
-                            displayManager.unregisterDisplayListener(displayListener);
-                        }
-                        if (play) {
-                            play = false;
-                            player.play();
-                            playerView.hideController();
-                        }
+                    if (switched) {
+                        playerView.removeCallbacks(frameRateGiveUpRunnable);
+                        playerView.postDelayed(frameRateGiveUpRunnable,
+                                FRAME_RATE_SWITCH_TIMEOUT_MS);
+                    } else if (!mPrefs.frameRateMatching) {
+                        frameRateSettled();
                     }
 
                     updateLoading(false);
@@ -5153,6 +5155,31 @@ public class PlayerActivity extends Activity {
     private void parkFocusOnLoadingRing() {
         loadingProgressBar.setFocusable(true);
         loadingProgressBar.requestFocus();
+    }
+
+    void frameRateSettled() {
+        cancelFrameRateSwitchWait();
+        playIfCan();
+    }
+
+    private void cancelFrameRateSwitchWait() {
+        if (playerView != null) playerView.removeCallbacks(frameRateGiveUpRunnable);
+        if (displayManager != null && displayListener != null) {
+            try {
+                displayManager.unregisterDisplayListener(displayListener);
+            } catch (IllegalArgumentException ignored) { }
+        }
+        if (frameRateSwitchThread != null) {
+            frameRateSwitchThread.interrupt();
+            frameRateSwitchThread = null;
+        }
+    }
+
+    private void playIfCan() {
+        if (!play) return;
+        play = false;
+        if (player != null) player.play();
+        if (playerView != null) playerView.hideController();
     }
 
     @RequiresApi(api = Build.VERSION_CODES.O)

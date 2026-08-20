@@ -138,4 +138,17 @@ public class ResourceContractTest {
         assertTrue(manifest.contains("android:launchMode=\"singleTask\""));
         assertTrue(activity.contains("com.mxtech.intent.result.VIEW"));
     }
+
+    @Test
+    public void frameRateSwitchCannotHoldPlaybackForever() throws Exception {
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+        String utils = readProjectFile("src/main/java/com/brouken/player/Utils.java");
+
+        assertTrue(activity.contains("FRAME_RATE_SWITCH_TIMEOUT_MS = 1_500L"));
+        assertTrue(activity.contains(
+                "postDelayed(frameRateGiveUpRunnable,"));
+        assertTrue(activity.contains("videoFrameRate()"));
+        assertTrue(utils.contains("FrameRatePolicy.bestRate"));
+    }
 }
