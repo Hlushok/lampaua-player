@@ -151,4 +151,36 @@ public class ResourceContractTest {
         assertTrue(activity.contains("videoFrameRate()"));
         assertTrue(utils.contains("FrameRatePolicy.bestRate"));
     }
+
+    @Test
+    public void watchTogetherUiKeepsPrivacyAndLocalQrContracts() throws Exception {
+        String ukrainian = readProjectFile("src/main/res/values-uk/strings.xml");
+        String build = readProjectFile("build.gradle");
+        String manifest = readProjectFile("src/main/AndroidManifest.xml");
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+
+        assertTrue(ukrainian.contains(
+                "name=\"together_title\">Дивитися разом</string>"));
+        assertTrue(ukrainian.contains("name=\"together_create\""));
+        assertTrue(ukrainian.contains("name=\"together_join\""));
+        assertTrue(ukrainian.contains("name=\"together_share\""));
+        assertTrue(ukrainian.contains("name=\"together_leave\""));
+        assertTrue(ukrainian.contains("name=\"together_public_needs_password\""));
+        assertTrue(ukrainian.contains("name=\"pref_together_relay_summary\""));
+        assertTrue(ukrainian.contains("name=\"together_qr_hint\""));
+        assertTrue(build.contains("com.google.zxing:core:3.5.3"));
+        assertTrue(manifest.contains("android.intent.action.SEND"));
+        assertTrue(activity.contains("QRCodeWriter"));
+        assertTrue(activity.contains("extras.remove(API_RETURN_RESULT)"));
+        assertTrue(activity.contains("extras.remove(LampaPlaylist.EXTRA_PLAYBACK_RESULTS)"));
+        assertTrue(activity.contains("SessionCodec.toJson(extras)"));
+        assertTrue(activity.contains("SessionCodec.toBundle(encodedExtras)"));
+        assertTrue(activity.contains("together.suspend()"));
+        assertTrue(activity.contains("together.resume()"));
+        assertTrue(activity.contains("syncRoomPlaylistStep(outgoingEnded)"));
+        assertFalse(build.contains("io.sentry"));
+        assertFalse(activity.contains("termbin.com"));
+        assertFalse(activity.contains("api.qrserver.com"));
+    }
 }

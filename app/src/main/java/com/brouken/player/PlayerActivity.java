@@ -23,6 +23,7 @@ import android.content.IntentFilter;
 import android.content.UriPermission;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
@@ -41,6 +42,9 @@ import android.os.Parcelable;
 import android.os.SystemClock;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
 import android.text.TextUtils;
 import android.util.Base64;
 import android.util.DisplayMetrics;
@@ -61,6 +65,8 @@ import android.window.OnBackInvokedDispatcher;
 import android.widget.FrameLayout;
 import android.widget.BaseAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.EditText;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageButton;
 import android.widget.ImageView;
@@ -123,10 +129,18 @@ import com.brouken.player.update.Updater;
 import com.brouken.player.skip.SkipController;
 import com.brouken.player.skip.SkipPolicy;
 import com.brouken.player.skip.SkipSegment;
+import com.brouken.player.together.Relay;
+import com.brouken.player.together.Room;
+import com.brouken.player.together.RoomAction;
+import com.brouken.player.together.SessionCodec;
+import com.brouken.player.together.TogetherManager;
 import com.bumptech.glide.Glide;
 import com.getkeepsafe.taptargetview.TapTarget;
 import com.getkeepsafe.taptargetview.TapTargetView;
 import com.google.android.material.snackbar.Snackbar;
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.qrcode.QRCodeWriter;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -217,6 +231,7 @@ public class PlayerActivity extends Activity {
     private ImageButton buttonLock;
     private ImageButton buttonRotation;
     private ImageButton buttonTools;
+    private ImageButton buttonTogether;
     private ImageButton buttonUpdate;
     private ImageButton buttonAppSettings;
     private UpdateInfo pendingUpdate;
@@ -274,6 +289,11 @@ public class PlayerActivity extends Activity {
     private String playlistPlaybackKey;
     private boolean playlistPlaybackEverReady;
     private boolean lampaIptv;
+    private TextView roomPill;
+    private TextView roomMessage;
+    private TogetherManager together;
+    private boolean applyingRoomMedia;
+    private boolean awaitingRoomMedia;
     private boolean alternateStreamTypeTried;
     private boolean decoderQualityFallbackTried;
     private boolean decoderCompatibilityMode;
@@ -513,9 +533,13 @@ public class PlayerActivity extends Activity {
         final Intent launchIntent = getIntent();
         final String action = launchIntent.getAction();
         final String type = launchIntent.getType();
+        final Room.Invite launchRoomInvite = roomInviteFromIntent(launchIntent);
+        awaitingRoomMedia = launchRoomInvite != null;
 
         if ("com.lampaua.player.action.SHORTCUT_VIDEOS".equals(action)) {
             openFile(Utils.getMoviesFolderUri());
+        } else if (launchRoomInvite != null) {
+            // The room sends its media session after the relay connection is established.
         } else if (Intent.ACTION_SEND.equals(action) && "text/plain".equals(type)) {
             String text = launchIntent.getStringExtra(Intent.EXTRA_TEXT);
             if (text != null) {
@@ -564,7 +588,9 @@ public class PlayerActivity extends Activity {
             focusPlay = true;
         }
 
-        readLampaPlaylist(launchIntent);
+        if (launchRoomInvite == null) {
+            readLampaPlaylist(launchIntent);
+        }
 
         coordinatorLayout = findViewById(R.id.coordinatorLayout);
         mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
@@ -682,6 +708,12 @@ public class PlayerActivity extends Activity {
         buttonTools.setContentDescription(getString(R.string.player_tools));
         buttonTools.setOnClickListener(view -> showPlayerTools());
 
+        buttonTogether = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
+        buttonTogether.setImageResource(R.drawable.ic_together_24dp);
+        buttonTogether.setContentDescription(getString(R.string.together_title));
+        buttonTogether.setVisibility(View.GONE);
+        buttonTogether.setOnClickListener(view -> showTogetherMenu());
+
         if (Utils.isPiPSupported(this)) {
             // TODO: Android 12 improvements:
             // https://developer.android.com/about/versions/12/features/pip-improvements
@@ -740,6 +772,7 @@ public class PlayerActivity extends Activity {
         titleView.setTextDirection(View.TEXT_DIRECTION_LOCALE);
         centerView.addView(titleView);
         setupLampaOverlay(centerView);
+        setupTogetherOverlay();
 
         if (!isTvBox) {
             swipeToUnlock = new SwipeToUnlockView(this);
@@ -947,6 +980,7 @@ public class PlayerActivity extends Activity {
             controls.addView(buttonRotation);
         }
         controls.addView(exoSettings);
+        controls.addView(buttonTogether);
         controls.addView(buttonTools);
         controls.addView(buttonUpdate);
         controls.addView(buttonAppSettings);
@@ -966,6 +1000,7 @@ public class PlayerActivity extends Activity {
                 if (lampaTopPanel != null) {
                     lampaTopPanel.setVisibility(controllerVisible ? View.VISIBLE : View.GONE);
                 }
+                updateRoomBadge();
 
                 if (PlayerActivity.restoreControllerTimeout) {
                     restoreControllerTimeout = false;
@@ -1042,6 +1077,9 @@ public class PlayerActivity extends Activity {
         pendingUpdate = Updater.pending(this);
         updatePendingButton();
         checkForUpdates(false);
+        if (launchRoomInvite != null) {
+            joinRoom(launchRoomInvite.code, launchRoomInvite.password);
+        }
     }
 
     @Override
@@ -1055,7 +1093,13 @@ public class PlayerActivity extends Activity {
             playerView.removeCallbacks(barsHider);
             Utils.toggleSystemUi(this, playerView, true);
         }
-        initializePlayer();
+        if (!awaitingRoomMedia) {
+            initializePlayer();
+        }
+        if (together != null) {
+            together.resume();
+        }
+        updateRoomBadge();
         registerAudioOutputReceiver();
         updateButtonRotation();
         lampaUiHandler.removeCallbacks(lampaUiTicker);
@@ -1098,6 +1142,9 @@ public class PlayerActivity extends Activity {
     public void onStop() {
         super.onStop();
         alive = false;
+        if (together != null) {
+            together.suspend();
+        }
         if (Build.VERSION.SDK_INT >= 31) {
             playerView.removeCallbacks(barsHider);
         }
@@ -1111,6 +1158,9 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onDestroy() {
         hideSwipeToUnlock();
+        if (together != null) {
+            together.leave();
+        }
         super.onDestroy();
     }
 
@@ -1175,6 +1225,9 @@ public class PlayerActivity extends Activity {
 
     @Override
     public void finish() {
+        if (together != null) {
+            together.leave();
+        }
         if (intentReturnResult) {
             Intent intent = new Intent("com.mxtech.intent.result.VIEW");
             intent.putExtra(API_END_BY, playbackFinished ? "playback_completion" : "user");
@@ -1215,54 +1268,23 @@ public class PlayerActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         backExitGuard.reset();
-
-        if (intent != null) {
-            final String action = intent.getAction();
-            final String type = intent.getType();
-            final Uri uri = intent.getData();
-
-            if (Intent.ACTION_VIEW.equals(action) && uri != null) {
-                if (SubtitleUtils.isSubtitle(uri, type)) {
-                    handleSubtitles(uri);
-                } else {
-                    lampaPlaylist = null;
-                    if (buttonPlaylist != null) buttonPlaylist.setVisibility(View.GONE);
-                    resetApiAccess();
-                    final Bundle bundle = intent.getExtras();
-                    if (bundle != null) {
-                        apiAccess = bundle.containsKey(API_POSITION) || bundle.containsKey(API_RETURN_RESULT)
-                                || bundle.containsKey(API_SUBS) || bundle.containsKey(API_SUBS_ENABLE)
-                                || bundle.containsKey(API_HEADERS);
-                        if (apiAccess) {
-                            mPrefs.setPersistent(false);
-                        } else if (bundle.containsKey(API_TITLE)) {
-                            apiAccessPartial = true;
-                        }
-                        apiTitle = bundle.getString(API_TITLE);
-                        intentReturnResult = bundle.getBoolean(API_RETURN_RESULT);
-                        readApiHeaders(bundle);
-                        readApiSubtitles(bundle);
-                    }
-                    mPrefs.updateMedia(this, uri, type);
-                    if (bundle != null && bundle.containsKey(API_POSITION)) {
-                        mPrefs.updatePosition((long) bundle.getInt(API_POSITION));
-                    }
-                    if (apiSubs.isEmpty()) {
-                        searchSubtitles();
-                    }
-                    readLampaPlaylist(intent);
-                }
-                focusPlay = true;
-                initializePlayer();
-            } else if (Intent.ACTION_SEND.equals(action) && "text/plain".equals(type)) {
-                String text = intent.getStringExtra(Intent.EXTRA_TEXT);
-                if (text != null) {
-                    final Uri parsedUri = Uri.parse(text);
-                    if (parsedUri.isAbsolute()) {
-                        mPrefs.updateMedia(this, parsedUri, null);
-                        focusPlay = true;
-                        initializePlayer();
-                    }
+        if (intent == null) {
+            return;
+        }
+        if (handleRoomIntent(intent)) {
+            return;
+        }
+        final String action = intent.getAction();
+        if (Intent.ACTION_VIEW.equals(action) && intent.getData() != null) {
+            applyViewIntent(intent, true);
+        } else if (Intent.ACTION_SEND.equals(action)
+                && "text/plain".equals(intent.getType())) {
+            final String text = intent.getStringExtra(Intent.EXTRA_TEXT);
+            if (text != null) {
+                final Uri parsedUri = Uri.parse(text.trim());
+                if (parsedUri.isAbsolute()) {
+                    final Intent view = new Intent(Intent.ACTION_VIEW).setData(parsedUri);
+                    applyViewIntent(view, true);
                 }
             }
         }
@@ -1540,6 +1562,61 @@ public class PlayerActivity extends Activity {
                     playerView.showController();
             }
             if (locked) showSwipeToUnlock();
+        }
+        updateRoomBadge();
+    }
+
+    private void applyViewIntent(final Intent intent, final boolean initialize) {
+        final Uri uri = intent == null ? null : intent.getData();
+        if (uri == null) {
+            return;
+        }
+        final String type = intent.getType();
+        if (SubtitleUtils.isSubtitle(uri, type)) {
+            handleSubtitles(uri);
+            focusPlay = true;
+            if (initialize) {
+                initializePlayer();
+            }
+            return;
+        }
+        if (!applyingRoomMedia && together != null && together.isActive()) {
+            together.leave();
+        }
+        awaitingRoomMedia = false;
+        setIntent(intent);
+        lampaPlaylist = null;
+        if (buttonPlaylist != null) {
+            buttonPlaylist.setVisibility(View.GONE);
+        }
+        resetApiAccess();
+        final Bundle bundle = intent.getExtras();
+        if (bundle != null) {
+            apiAccess = bundle.containsKey(API_POSITION) || bundle.containsKey(API_RETURN_RESULT)
+                    || bundle.containsKey(API_SUBS) || bundle.containsKey(API_SUBS_ENABLE)
+                    || bundle.containsKey(API_HEADERS);
+            if (apiAccess) {
+                mPrefs.setPersistent(false);
+            } else if (bundle.containsKey(API_TITLE)) {
+                apiAccessPartial = true;
+            }
+            apiTitle = bundle.getString(API_TITLE);
+            intentReturnResult = bundle.getBoolean(API_RETURN_RESULT);
+            readApiHeaders(bundle);
+            readApiSubtitles(bundle);
+        }
+        mPrefs.updateMedia(this, uri, type);
+        if (bundle != null && bundle.containsKey(API_POSITION)) {
+            mPrefs.updatePosition((long) bundle.getInt(API_POSITION));
+        }
+        if (apiSubs.isEmpty()) {
+            searchSubtitles();
+        }
+        readLampaPlaylist(intent);
+        focusPlay = true;
+        updateRoomBadge();
+        if (initialize) {
+            initializePlayer();
         }
     }
 
@@ -2143,22 +2220,731 @@ public class PlayerActivity extends Activity {
         String timerSummary = sleepTimer.isAtMediaEnd()
                 ? getString(R.string.sleep_timer_end_of_item)
                 : sleepTimer.remainingMs() > 0 ? Utils.formatMilis(sleepTimer.remainingMs()) : null;
-        String[] items = {
-                getString(R.string.sleep_timer_title)
-                        + (timerSummary == null ? "" : "  \u00B7  " + timerSummary),
-                getString(R.string.playback_statistics_title)
-        };
+        final List<String> items = new ArrayList<>();
+        final List<Runnable> actions = new ArrayList<>();
+        items.add(getString(R.string.sleep_timer_title)
+                + (timerSummary == null ? "" : "  \u00B7  " + timerSummary));
+        actions.add(this::showSleepTimerMenu);
+        items.add(getString(R.string.playback_statistics_title));
+        actions.add(this::showPlaybackStatistics);
+        if (togetherAvailable()) {
+            final String summary = togetherSummary();
+            items.add(getString(R.string.together_title)
+                    + (summary == null ? "" : "  \u00B7  " + summary));
+            actions.add(this::showTogetherMenu);
+        }
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle(R.string.player_tools)
-                .setItems(items, (selected, which) -> {
+                .setItems(items.toArray(new String[0]), (selected, which) -> {
                     selected.dismiss();
-                    if (which == 0) showSleepTimerMenu();
-                    else showPlaybackStatistics();
+                    actions.get(which).run();
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .create();
         dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
         dialog.show();
+    }
+
+    private void setupTogetherOverlay() {
+        final int gold = Color.rgb(240, 183, 38);
+        roomPill = new TextView(this);
+        roomPill.setTextColor(Color.WHITE);
+        roomPill.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        roomPill.setGravity(Gravity.CENTER_VERTICAL);
+        roomPill.setCompoundDrawablesWithIntrinsicBounds(
+                R.drawable.ic_together_24dp, 0, 0, 0);
+        roomPill.setCompoundDrawablePadding(Utils.dpToPx(7));
+        roomPill.setPadding(Utils.dpToPx(12), Utils.dpToPx(6),
+                Utils.dpToPx(12), Utils.dpToPx(6));
+        roomPill.setBackground(lampaBackground(Color.argb(225, 4, 18, 40), gold, 9));
+        roomPill.setVisibility(View.GONE);
+        final FrameLayout.LayoutParams pillParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.START | Gravity.BOTTOM);
+        pillParams.setMargins(Utils.dpToPx(22), 0, 0, Utils.dpToPx(88));
+        playerView.addView(roomPill, pillParams);
+
+        roomMessage = new TextView(this);
+        roomMessage.setTextColor(Color.WHITE);
+        roomMessage.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        roomMessage.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        roomMessage.setGravity(Gravity.CENTER);
+        roomMessage.setPadding(Utils.dpToPx(16), Utils.dpToPx(8),
+                Utils.dpToPx(16), Utils.dpToPx(8));
+        roomMessage.setBackground(lampaBackground(Color.argb(225, 4, 18, 40), gold, 9));
+        roomMessage.setVisibility(View.GONE);
+        final FrameLayout.LayoutParams messageParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM);
+        messageParams.bottomMargin = Utils.dpToPx(132);
+        playerView.addView(roomMessage, messageParams);
+    }
+
+    private Uri currentPlayingUri() {
+        if (player != null) {
+            final MediaItem item = player.getCurrentMediaItem();
+            if (item != null && item.localConfiguration != null) {
+                return item.localConfiguration.uri;
+            }
+        }
+        return mPrefs == null ? null : mPrefs.mediaUri;
+    }
+
+    private boolean togetherAvailable() {
+        if (together != null && together.isActive()) {
+            return true;
+        }
+        return Utils.isSupportedNetworkUri(currentPlayingUri());
+    }
+
+    private String togetherSummary() {
+        if (together == null || !together.isActive()) {
+            return null;
+        }
+        final String name = together.roomName();
+        final String defaultName = getString(R.string.together_room_default_name, together.code());
+        return TextUtils.isEmpty(name) || defaultName.equals(name)
+                ? getString(R.string.together_badge, together.code(), together.peers())
+                : getString(R.string.together_badge_named,
+                        name, together.code(), together.peers());
+    }
+
+    private void showTogetherMenu() {
+        final List<String> labels = new ArrayList<>();
+        final List<Runnable> actions = new ArrayList<>();
+        if (together != null && together.isActive()) {
+            labels.add(getString(R.string.together_share));
+            actions.add(this::shareInvite);
+            labels.add(getString(R.string.together_leave));
+            actions.add(this::leaveRoom);
+        } else {
+            if (Utils.isSupportedNetworkUri(currentPlayingUri())) {
+                labels.add(getString(R.string.together_create));
+                actions.add(this::createRoom);
+            }
+            labels.add(getString(R.string.together_find));
+            actions.add(this::findRooms);
+            labels.add(getString(R.string.together_enter_code));
+            actions.add(this::askRoomCode);
+        }
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.together_title)
+                .setItems(labels.toArray(new String[0]), (selected, which) -> {
+                    selected.dismiss();
+                    actions.get(which).run();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+        dialog.show();
+    }
+
+    private void findRooms() {
+        Relay.setBase(mPrefs.togetherRelay);
+        Toast.makeText(this, R.string.together_searching, Toast.LENGTH_SHORT).show();
+        TogetherManager.discover(rooms -> {
+            if (isFinishing() || isDestroyed()) {
+                return;
+            }
+            if (rooms.isEmpty()) {
+                showSnack(getString(R.string.together_none_found), null);
+                return;
+            }
+            final String[] labels = new String[rooms.size()];
+            for (int i = 0; i < rooms.size(); i++) {
+                final JSONObject room = rooms.get(i);
+                final String title = room.optString("title", "").isEmpty()
+                        ? room.optString("name", room.optString("id"))
+                        : room.optString("title");
+                labels[i] = title + "\n" + getString(R.string.together_room_summary,
+                        room.optString("owner", ""), room.optInt("members", 1));
+            }
+            final AlertDialog dialog = new AlertDialog.Builder(this)
+                    .setTitle(R.string.together_find)
+                    .setItems(labels, (selected, which) -> {
+                        final JSONObject room = rooms.get(which);
+                        final String code = room.optString("id");
+                        if (room.optInt("pwd") == 1) {
+                            askRoomPassword(code);
+                        } else {
+                            joinRoom(code, "");
+                        }
+                    })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .create();
+            dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+            dialog.show();
+        });
+    }
+
+    private void askRoomPassword(final String code) {
+        final EditText password = roomPasswordField();
+        password.setText(mPrefs.togetherPassword);
+        password.setSelection(password.length());
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(code)
+                .setView(password)
+                .setPositiveButton(android.R.string.ok,
+                        (selected, which) -> joinRoom(code, password.getText().toString()))
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, true));
+        dialog.show();
+    }
+
+    private EditText roomPasswordField() {
+        final EditText password = new EditText(this);
+        password.setSingleLine(true);
+        password.setHint(R.string.together_password_hint);
+        password.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        return password;
+    }
+
+    private void createRoom() {
+        final JSONObject session = sessionDescription();
+        if (session == null) {
+            return;
+        }
+        final String code = Room.newCode();
+        final JSONObject card = roomCard();
+        final String suggested = card == null || card.optString("title", "").isEmpty()
+                ? getString(R.string.together_room_default_name, code)
+                : card.optString("title");
+
+        final EditText name = new EditText(this);
+        name.setSingleLine(true);
+        name.setHint(R.string.together_room_name_hint);
+        name.setText(suggested);
+        name.setSelection(name.length());
+        final EditText password = roomPasswordField();
+        password.setText(mPrefs.togetherPassword);
+        final CheckBox listed = new CheckBox(this);
+        listed.setText(R.string.together_public);
+        listed.setChecked(mPrefs.togetherPublic);
+        final TextView warning = new TextView(this);
+        warning.setText(R.string.together_public_needs_password);
+        warning.setTextColor(Color.rgb(240, 183, 38));
+        warning.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        warning.setVisibility(View.GONE);
+
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        final int padding = Utils.dpToPx(18);
+        fields.setPadding(padding, 0, padding, 0);
+        fields.addView(name);
+        fields.addView(password);
+        fields.addView(listed);
+        fields.addView(warning);
+
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.together_create_title, code))
+                .setView(fields)
+                .setPositiveButton(android.R.string.ok, (selected, which) -> {
+                    mPrefs.updateTogetherPublic(listed.isChecked());
+                    openRoom(code, name.getText().toString().trim(),
+                            password.getText().toString(), session);
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> {
+            styleUaAlertDialog(dialog, true);
+            final Runnable validate = () -> {
+                final boolean invalid = listed.isChecked() && password.length() == 0;
+                warning.setVisibility(invalid ? View.VISIBLE : View.GONE);
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(!invalid);
+            };
+            listed.setOnCheckedChangeListener((button, checked) -> validate.run());
+            password.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence value, int start,
+                                                        int count, int after) { }
+                @Override public void onTextChanged(CharSequence value, int start,
+                                                     int before, int count) { }
+                @Override public void afterTextChanged(Editable value) {
+                    validate.run();
+                }
+            });
+            validate.run();
+        });
+        dialog.show();
+    }
+
+    private void openRoom(final String code, final String name, final String password,
+                          final JSONObject session) {
+        ensureTogether();
+        together.create(code, password, mPrefs.togetherPublic,
+                name.isEmpty() ? getString(R.string.together_room_default_name, code) : name,
+                session, roomNick());
+        copyToClipboard(together.invite());
+        if (isTvBox) {
+            showInviteQr(together.invite());
+        } else {
+            showSnack(getString(R.string.together_created, together.code()), null);
+        }
+    }
+
+    private void askRoomCode() {
+        final EditText code = new EditText(this);
+        code.setSingleLine(true);
+        code.setHint("ABC234");
+        code.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        final EditText password = roomPasswordField();
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        final int padding = Utils.dpToPx(18);
+        fields.setPadding(padding, 0, padding, 0);
+        fields.addView(code);
+        fields.addView(password);
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.together_join)
+                .setView(fields)
+                .setPositiveButton(android.R.string.ok, (selected, which) -> {
+                    final String entered = code.getText().toString().trim()
+                            .toUpperCase(Locale.US);
+                    if (Room.isCode(entered)) {
+                        joinRoom(entered, password.getText().toString());
+                    } else {
+                        showSnack(getString(R.string.together_code_invalid), null);
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, true));
+        dialog.show();
+    }
+
+    private void joinRoom(final String code, final String password) {
+        ensureTogether();
+        together.join(code, password, roomNick());
+    }
+
+    private String roomNick() {
+        return TextUtils.isEmpty(mPrefs.togetherNick) ? Build.MODEL : mPrefs.togetherNick;
+    }
+
+    private void leaveRoom() {
+        if (together != null) {
+            together.leave();
+        }
+    }
+
+    private Room.Invite roomInviteFromIntent(final Intent intent) {
+        if (intent == null) {
+            return null;
+        }
+        Room.Invite invite = Room.inviteFrom(intent.getData());
+        if (invite != null) {
+            return invite;
+        }
+        if (!Intent.ACTION_SEND.equals(intent.getAction())
+                || !"text/plain".equals(intent.getType())) {
+            return null;
+        }
+        final String text = intent.getStringExtra(Intent.EXTRA_TEXT);
+        if (TextUtils.isEmpty(text)) {
+            return null;
+        }
+        try {
+            invite = Room.inviteFrom(Uri.parse(text.trim()));
+        } catch (RuntimeException ignored) {
+            // A plain code or encoded invite is handled below.
+        }
+        return invite != null ? invite : Room.inviteFrom(text.trim());
+    }
+
+    private boolean handleRoomIntent(final Intent intent) {
+        final Room.Invite invite = roomInviteFromIntent(intent);
+        if (invite == null) {
+            return false;
+        }
+        awaitingRoomMedia = player == null || !haveMedia;
+        joinRoom(invite.code, invite.password);
+        return true;
+    }
+
+    private JSONObject sessionDescription() {
+        final Uri uri = currentPlayingUri();
+        if (!Utils.isSupportedNetworkUri(uri)) {
+            return null;
+        }
+        try {
+            final JSONObject session = new JSONObject().put("uri", uri.toString());
+            if (!TextUtils.isEmpty(mPrefs.mediaType)) {
+                session.put("type", mPrefs.mediaType);
+            }
+            final Intent current = getIntent();
+            if (current != null && current.getExtras() != null) {
+                final Bundle extras = new Bundle(current.getExtras());
+                extras.remove(API_RETURN_RESULT);
+                extras.remove(API_END_BY);
+                extras.remove(API_DURATION);
+                extras.remove(LampaPlaylist.EXTRA_PLAYBACK_RESULTS);
+                if (extras.containsKey(API_POSITION) && player != null
+                        && player.isCurrentMediaItemSeekable()) {
+                    extras.putInt(API_POSITION,
+                            (int) Math.max(0, player.getCurrentPosition()));
+                }
+                if (lampaPlaylist != null && !lampaPlaylist.isEmpty()) {
+                    extras.putInt(LampaPlaylist.EXTRA_PLAYLIST_INDEX,
+                            lampaPlaylist.getCurrentIndex());
+                    extras.putString(LampaPlaylist.EXTRA_CURRENT_URL, uri.toString());
+                }
+                session.put("extras", SessionCodec.toJson(extras));
+            }
+            final JSONObject card = roomCard();
+            if (card != null) {
+                session.put("title", card.optString("title", ""));
+                session.put("poster", card.optString("poster", ""));
+            }
+            return session;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private JSONObject roomCard() {
+        final Uri uri = currentPlayingUri();
+        if (!Utils.isSupportedNetworkUri(uri)) {
+            return null;
+        }
+        final LampaPlaylist.Item item = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
+        String title = item == null ? apiTitle : item.displayTitle(lampaPlaylist.getCurrentIndex());
+        if (TextUtils.isEmpty(title)) {
+            title = Utils.getFileName(this, uri);
+        }
+        String poster = item == null ? null : item.thumbnail;
+        if (TextUtils.isEmpty(poster) && getIntent() != null) {
+            poster = getIntent().getStringExtra("thumbnail");
+        }
+        if (!TextUtils.isEmpty(poster)) {
+            try {
+                if (!Utils.isSupportedNetworkUri(Uri.parse(poster))) {
+                    poster = "";
+                }
+            } catch (RuntimeException ignored) {
+                poster = "";
+            }
+        }
+        final int tmdb = item == null ? getIntent().getIntExtra("tmdb_id", -1) : item.tmdbId;
+        final String mediaType = item == null
+                ? getIntent().getStringExtra("media_type") : item.mediaType;
+        final boolean series = item != null && item.season > 0
+                || mediaType != null && !"movie".equalsIgnoreCase(mediaType);
+        try {
+            return new JSONObject()
+                    .put("url", uri.toString())
+                    .put("title", title == null ? "" : title)
+                    .put("poster", poster == null ? "" : poster)
+                    .put("tmdb", Math.max(0, tmdb))
+                    .put("source", "tmdb")
+                    .put("type", series ? "tv" : "movie");
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private void openSession(final JSONObject session) {
+        final String uriText = session == null ? null : session.optString("uri", null);
+        if (TextUtils.isEmpty(uriText)) {
+            return;
+        }
+        final Uri uri = Uri.parse(uriText);
+        if (!Utils.isSupportedNetworkUri(uri)) {
+            return;
+        }
+        final Intent intent = new Intent(Intent.ACTION_VIEW).setData(uri);
+        final String type = session.optString("type", null);
+        if (!TextUtils.isEmpty(type)) {
+            intent.setType(type);
+        }
+        final JSONObject encodedExtras = session.optJSONObject("extras");
+        if (encodedExtras != null) {
+            final Bundle extras = SessionCodec.toBundle(encodedExtras);
+            extras.remove(API_RETURN_RESULT);
+            extras.remove(LampaPlaylist.EXTRA_PLAYBACK_RESULTS);
+            intent.putExtras(extras);
+        } else {
+            final String title = session.optString("title", null);
+            final String poster = session.optString("poster", null);
+            if (!TextUtils.isEmpty(title)) {
+                intent.putExtra(API_TITLE, title);
+            }
+            if (!TextUtils.isEmpty(poster)) {
+                intent.putExtra("thumbnail", poster);
+            }
+        }
+        applyingRoomMedia = true;
+        awaitingRoomMedia = false;
+        try {
+            applyViewIntent(intent, false);
+            final long roomPosition = together == null ? -1L : together.roomPositionMs();
+            if (roomPosition >= 0L) {
+                mPrefs.updatePosition(roomPosition);
+            }
+            if (alive) {
+                initializePlayer();
+            }
+        } finally {
+            applyingRoomMedia = false;
+        }
+    }
+
+    private void syncRoomPlaylistStep(final boolean automatic) {
+        if (applyingRoomMedia || together == null || !together.isActive()) {
+            return;
+        }
+        final JSONObject session = sessionDescription();
+        if (session == null) {
+            together.leave();
+        } else if (together.isOwner()) {
+            together.changeMedia(session);
+        } else if (automatic) {
+            together.mediaStepped(session);
+        } else {
+            together.leave();
+        }
+    }
+
+    private void shareInvite() {
+        final String invite = together == null ? null : together.invite();
+        if (invite == null) {
+            return;
+        }
+        copyToClipboard(invite);
+        final Intent share = new Intent(Intent.ACTION_SEND)
+                .setType("text/plain")
+                .putExtra(Intent.EXTRA_TEXT, invite);
+        if (isTvBox || getPackageManager().queryIntentActivities(share, 0).isEmpty()) {
+            showInviteQr(invite);
+            return;
+        }
+        try {
+            startActivity(Intent.createChooser(share, getString(R.string.together_share)));
+        } catch (RuntimeException ignored) {
+            showInviteQr(invite);
+        }
+    }
+
+    private void showInviteQr(final String invite) {
+        copyToClipboard(invite);
+        final DisplayMetrics metrics = getResources().getDisplayMetrics();
+        final int size = Math.max(Utils.dpToPx(220), Math.min(Utils.dpToPx(620),
+                Math.round(Math.min(metrics.widthPixels, metrics.heightPixels) * 0.58f)));
+        final Bitmap qr = createQrBitmap(invite, size);
+        if (qr == null) {
+            showSnack(getString(R.string.together_created,
+                    together == null ? "" : together.code()), null);
+            return;
+        }
+        final ImageView image = new ImageView(this);
+        image.setImageBitmap(qr);
+        image.setAdjustViewBounds(true);
+        image.setBackgroundColor(Color.WHITE);
+        final int padding = Utils.dpToPx(14);
+        image.setPadding(padding, padding, padding, padding);
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.together_qr_title,
+                        together == null ? "" : together.code()))
+                .setMessage(R.string.together_qr_hint)
+                .setView(image)
+                .setPositiveButton(android.R.string.ok, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, true));
+        dialog.show();
+    }
+
+    private Bitmap createQrBitmap(final String value, final int size) {
+        try {
+            final BitMatrix matrix = new QRCodeWriter().encode(
+                    value, BarcodeFormat.QR_CODE, size, size);
+            final int[] pixels = new int[size * size];
+            for (int y = 0; y < size; y++) {
+                final int offset = y * size;
+                for (int x = 0; x < size; x++) {
+                    pixels[offset + x] = matrix.get(x, y) ? Color.BLACK : Color.WHITE;
+                }
+            }
+            return Bitmap.createBitmap(pixels, size, size, Bitmap.Config.ARGB_8888);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private void copyToClipboard(final String value) {
+        final android.content.ClipboardManager clipboard =
+                (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboard != null && value != null) {
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", value));
+        }
+    }
+
+    private void ensureTogether() {
+        Relay.setBase(mPrefs.togetherRelay);
+        Room.setInvitePage(mPrefs.togetherInvitePage);
+        if (together == null) {
+            together = new TogetherManager(togetherHost());
+        }
+    }
+
+    private void updateRoomBadge() {
+        final boolean active = together != null && together.isActive();
+        if (buttonTogether != null) {
+            buttonTogether.setVisibility(togetherAvailable() ? View.VISIBLE : View.GONE);
+        }
+        if (roomPill != null) {
+            final boolean visible = active && controllerVisible && !inPip && !locked;
+            if (visible) {
+                roomPill.setText(together.connected()
+                        ? getString(R.string.together_badge, together.code(), together.peers())
+                        : getString(together.everConnected()
+                                ? R.string.together_offline : R.string.together_connecting,
+                                together.code()));
+                roomPill.setTextColor(together.connected()
+                        ? Color.WHITE : Color.rgb(240, 183, 38));
+            }
+            roomPill.setVisibility(visible ? View.VISIBLE : View.GONE);
+        }
+        if (roomMessage != null) {
+            final String waiting = active ? together.waitingFor() : null;
+            final boolean visible = active && !inPip && !locked
+                    && (together.holding() || waiting != null);
+            if (visible) {
+                roomMessage.setText(together.holding()
+                        ? getString(R.string.together_hold)
+                        : getString(R.string.together_waiting,
+                                TextUtils.isEmpty(waiting)
+                                        ? getString(R.string.together_act_somebody) : waiting));
+            }
+            roomMessage.setVisibility(visible ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void announceRoomAction(final String nick, final RoomAction action) {
+        if (playerView == null || inPip || locked) {
+            return;
+        }
+        final int message;
+        switch (action) {
+            case PAUSED:
+                message = R.string.together_act_paused;
+                break;
+            case RESUMED:
+                message = R.string.together_act_resumed;
+                break;
+            case LEFT:
+                message = R.string.together_act_left;
+                break;
+            default:
+                message = R.string.together_act_seeked;
+                break;
+        }
+        Utils.showText(playerView, getString(message,
+                TextUtils.isEmpty(nick) ? getString(R.string.together_act_somebody) : nick),
+                3_500L);
+    }
+
+    private TogetherManager.Host togetherHost() {
+        return new TogetherManager.Host() {
+            @Override public boolean ready() {
+                return player != null && haveMedia;
+            }
+
+            @Override public boolean scrubbing() {
+                return isScrubbing;
+            }
+
+            @Override public long positionMs() {
+                return player == null ? 0L : Math.max(0L, player.getCurrentPosition());
+            }
+
+            @Override public boolean playWhenReady() {
+                return player != null && player.getPlayWhenReady()
+                        && player.getPlaybackState() != Player.STATE_ENDED;
+            }
+
+            @Override public float speed() {
+                return player == null ? 1f : player.getPlaybackParameters().speed;
+            }
+
+            @Override public boolean buffering() {
+                return player != null && player.getPlaybackState() == Player.STATE_BUFFERING;
+            }
+
+            @Override public boolean ended() {
+                return player != null && player.getPlaybackState() == Player.STATE_ENDED;
+            }
+
+            @Override public long durationMs() {
+                if (player == null || player.getDuration() == C.TIME_UNSET) {
+                    return 0L;
+                }
+                return Math.max(0L, player.getDuration());
+            }
+
+            @Override public String playingUri() {
+                final Uri uri = currentPlayingUri();
+                return uri == null ? null : uri.toString();
+            }
+
+            @Override public long bufferedAheadMs() {
+                return player == null ? 0L : Math.max(0L, player.getTotalBufferedDuration());
+            }
+
+            @Override public void applyPlay(final boolean play) {
+                if (player != null) {
+                    player.setPlayWhenReady(play);
+                }
+            }
+
+            @Override public void applySeek(final long positionMs) {
+                if (player != null) {
+                    player.setSeekParameters(SeekParameters.EXACT);
+                    player.seekTo(positionMs);
+                }
+            }
+
+            @Override public void applySpeed(final float speed) {
+                if (player != null) {
+                    player.setPlaybackSpeed(speed);
+                }
+            }
+
+            @Override public void onRoomChanged() {
+                updateRoomBadge();
+            }
+
+            @Override public void onRoomAction(final String nick, final RoomAction action) {
+                announceRoomAction(nick, action);
+            }
+
+            @Override public JSONObject sessionDescription() {
+                return PlayerActivity.this.sessionDescription();
+            }
+
+            @Override public JSONObject roomCard() {
+                return PlayerActivity.this.roomCard();
+            }
+
+            @Override public void openSession(final JSONObject session) {
+                PlayerActivity.this.openSession(session);
+            }
+
+            @Override public void onJoinFailed() {
+                final boolean resumeRememberedMedia = awaitingRoomMedia;
+                awaitingRoomMedia = false;
+                showSnack(getString(R.string.together_no_room), null);
+                if (resumeRememberedMedia && alive && player == null) {
+                    initializePlayer();
+                }
+            }
+
+            @Override public void onHoldLifted() {
+                if (playerView != null && !inPip && !locked) {
+                    Utils.showText(playerView, getString(R.string.together_go), 3_500L);
+                }
+            }
+        };
     }
 
     private void showSleepTimerMenu() {
@@ -2698,7 +3484,7 @@ public class PlayerActivity extends Activity {
                 if (lampaPlaylist != null && lampaPlaylist.hasNext()) {
                     skipUndoPlaylistIndex = lampaPlaylist.getCurrentIndex();
                     skipPlaylistAdvance = true;
-                    playRelativeEpisode(1);
+                    playRelativeEpisode(1, true);
                 }
                 break;
             case RESTORE_POSITION:
@@ -2723,10 +3509,14 @@ public class PlayerActivity extends Activity {
     }
 
     private void playRelativeEpisode(int offset) {
+        playRelativeEpisode(offset, false);
+    }
+
+    private void playRelativeEpisode(int offset, boolean automatic) {
         if (lampaPlaylist == null) return;
         int target = lampaPlaylist.getCurrentIndex() + offset;
         if (target >= 0 && target < lampaPlaylist.size()) {
-            playPlaylistIndex(target, offset > 0);
+            playPlaylistIndex(target, automatic);
         }
     }
 
@@ -3404,6 +4194,7 @@ public class PlayerActivity extends Activity {
                 skipPlaylistAdvance = false;
                 switchingPlaylistItem = false;
                 initializePlayer();
+                syncRoomPlaylistStep(outgoingEnded);
                 lampaPlaylist.preResolveNext();
             }
 
@@ -3907,7 +4698,9 @@ public class PlayerActivity extends Activity {
                         getSelectedTrack(C.TRACK_TYPE_TEXT),
                         playerView.getResizeMode(),
                         playerView.getVideoSurfaceView().getScaleX(),
-                        player.getPlaybackParameters().speed);
+                        together != null && together.isActive()
+                                ? together.userSpeed()
+                                : player.getPlaybackParameters().speed);
             }
         }
     }
@@ -5482,6 +6275,7 @@ public class PlayerActivity extends Activity {
             hideSwipeToUnlock();
             playerView.showController();
         }
+        updateRoomBadge();
     }
 
     private void updatebuttonAspectRatioIcon() {

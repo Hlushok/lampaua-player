@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertFalse;
 
 public class SessionCodecContractTest {
     private static String readProjectFile(final String relativePath) throws Exception {
@@ -36,6 +37,9 @@ public class SessionCodecContractTest {
         assertTrue(combined.contains("id"));
         assertTrue(combined.contains("quality_levels"));
         assertTrue(combined.contains("quality_urls"));
+        assertTrue(codec.contains("\"bl\""));
+        assertTrue(codec.contains("\"ul\""));
+        assertTrue(codec.contains("putParcelableArrayList"));
     }
 
     @Test
@@ -50,5 +54,14 @@ public class SessionCodecContractTest {
         assertTrue(rich > method);
         assertTrue(thin > rich);
         assertTrue(manager.contains("applyRichSession"));
+    }
+
+    @Test
+    public void roomDiscoveryRemainsCompatibleWithAndroidSix() throws Exception {
+        final String lobby = readProjectFile(
+                "src/main/java/com/brouken/player/together/Lobby.java");
+
+        assertFalse(lobby.contains("rooms.sort("));
+        assertTrue(lobby.contains("Collections.sort(rooms"));
     }
 }

@@ -106,11 +106,7 @@ public final class SessionCodec {
                 return entry("la", values);
             }
             if (value instanceof ArrayList) {
-                final JSONArray values = new JSONArray();
-                for (Object item : (ArrayList<?>) value) {
-                    values.put(item == null ? JSONObject.NULL : String.valueOf(item));
-                }
-                return entry("sl", values);
+                return encodeList((ArrayList<?>) value, depth);
             }
             if (value instanceof Parcelable[]) {
                 final JSONArray values = new JSONArray();
@@ -156,6 +152,13 @@ public final class SessionCodec {
                 case "sl":
                     output.putStringArray(key, stringArray(entry.optJSONArray(VALUE)));
                     break;
+                case "ul":
+                    output.putParcelableArrayList(key, uriList(entry.optJSONArray(VALUE)));
+                    break;
+                case "bl":
+                    output.putParcelableArrayList(key,
+                            bundleList(entry.optJSONArray(VALUE), depth));
+                    break;
                 case "ia":
                     output.putIntArray(key, intArray(entry.optJSONArray(VALUE)));
                     break;
@@ -181,10 +184,65 @@ public final class SessionCodec {
         return values;
     }
 
+    private static JSONObject encodeList(final ArrayList<?> items, final int depth)
+            throws Exception {
+        boolean bundles = !items.isEmpty();
+        boolean uris = !items.isEmpty();
+        boolean strings = true;
+        boolean typed = false;
+        for (Object item : items) {
+            if (item == null) {
+                continue;
+            }
+            typed = true;
+            bundles &= item instanceof Bundle;
+            uris &= item instanceof Uri;
+            strings &= item instanceof String || item instanceof CharSequence;
+        }
+        final JSONArray values = new JSONArray();
+        if (typed && bundles) {
+            for (Object item : items) {
+                values.put(item == null ? JSONObject.NULL
+                        : toJson((Bundle) item, depth + 1));
+            }
+            return entry("bl", values);
+        }
+        if (typed && uris) {
+            for (Object item : items) {
+                values.put(item == null ? JSONObject.NULL : item.toString());
+            }
+            return entry("ul", values);
+        }
+        if (strings) {
+            for (Object item : items) {
+                values.put(item == null ? JSONObject.NULL : item.toString());
+            }
+            return entry("sl", values);
+        }
+        return null;
+    }
+
     private static String[] stringArray(final JSONArray values) {
         final String[] items = new String[values == null ? 0 : values.length()];
         for (int i = 0; i < items.length; i++) {
             items[i] = values.isNull(i) ? null : values.optString(i);
+        }
+        return items;
+    }
+
+    private static ArrayList<Uri> uriList(final JSONArray values) {
+        final ArrayList<Uri> items = new ArrayList<>();
+        for (int i = 0; values != null && i < values.length(); i++) {
+            items.add(values.isNull(i) ? null : Uri.parse(values.optString(i)));
+        }
+        return items;
+    }
+
+    private static ArrayList<Bundle> bundleList(final JSONArray values, final int depth) {
+        final ArrayList<Bundle> items = new ArrayList<>();
+        for (int i = 0; values != null && i < values.length(); i++) {
+            items.add(values.isNull(i) ? null
+                    : toBundle(values.optJSONObject(i), depth + 1));
         }
         return items;
     }

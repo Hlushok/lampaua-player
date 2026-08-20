@@ -10,6 +10,10 @@ import android.provider.DocumentsContract;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.ui.AspectRatioFrameLayout;
 
+import com.brouken.player.together.AliasGenerator;
+import com.brouken.player.together.Relay;
+import com.brouken.player.together.Room;
+
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.ObjectInputStream;
@@ -58,6 +62,11 @@ class Prefs {
     private static final String PREF_KEY_VOLUME_BOOST = "volumeBoost";
     private static final String PREF_KEY_VOLUME_GESTURES = "volumeGesturesEnabled";
     private static final String PREF_KEY_BRIGHTNESS_GESTURES = "brightnessGesturesEnabled";
+    private static final String PREF_KEY_TOGETHER_NICK = "togetherNick";
+    private static final String PREF_KEY_TOGETHER_PASSWORD = "togetherPassword";
+    private static final String PREF_KEY_TOGETHER_PUBLIC = "togetherPublic";
+    private static final String PREF_KEY_TOGETHER_RELAY = "togetherRelay";
+    private static final String PREF_KEY_TOGETHER_INVITE_PAGE = "togetherInvitePage";
 
     public static final String SKIP_MODE_BRIEF = "brief";
     public static final String SKIP_MODE_FULL = "full";
@@ -108,6 +117,11 @@ class Prefs {
     public int volumeBoost = 0;
     public boolean volumeGesturesEnabled = true;
     public boolean brightnessGesturesEnabled = true;
+    public String togetherNick = "";
+    public String togetherPassword = "";
+    public boolean togetherPublic = false;
+    public String togetherRelay = "";
+    public String togetherInvitePage = "";
 
     private LinkedHashMap positions;
     private final LinkedHashMap<String, Long> sessionPositions = new LinkedHashMap<>();
@@ -180,6 +194,24 @@ class Prefs {
                 PREF_KEY_VOLUME_GESTURES, volumeGesturesEnabled);
         brightnessGesturesEnabled = mSharedPreferences.getBoolean(
                 PREF_KEY_BRIGHTNESS_GESTURES, brightnessGesturesEnabled);
+        togetherPassword = mSharedPreferences.getString(
+                PREF_KEY_TOGETHER_PASSWORD, togetherPassword);
+        togetherPublic = mSharedPreferences.getBoolean(
+                PREF_KEY_TOGETHER_PUBLIC, togetherPublic);
+        togetherRelay = mSharedPreferences.getString(
+                PREF_KEY_TOGETHER_RELAY, togetherRelay);
+        togetherInvitePage = mSharedPreferences.getString(
+                PREF_KEY_TOGETHER_INVITE_PAGE, togetherInvitePage);
+        togetherNick = mSharedPreferences.getString(PREF_KEY_TOGETHER_NICK, "");
+        if (togetherNick == null || togetherNick.trim().isEmpty()) {
+            togetherNick = AliasGenerator.random();
+            mSharedPreferences.edit().putString(PREF_KEY_TOGETHER_NICK, togetherNick).apply();
+        }
+        if (togetherPublic && (togetherPassword == null || togetherPassword.isEmpty())) {
+            updateTogetherPublic(false);
+        }
+        Relay.setBase(togetherRelay);
+        Room.setInvitePage(togetherInvitePage);
     }
 
     public void setLanguageAudio(String languages) {
@@ -284,6 +316,11 @@ class Prefs {
     public void updatePlayerVolume(final int volume) {
         playerVolume = Math.max(0, Math.min(100, volume));
         mSharedPreferences.edit().putInt(PREF_KEY_PLAYER_VOLUME, playerVolume).apply();
+    }
+
+    public void updateTogetherPublic(final boolean value) {
+        togetherPublic = value;
+        mSharedPreferences.edit().putBoolean(PREF_KEY_TOGETHER_PUBLIC, value).apply();
     }
 
     public void markFirstRun() {

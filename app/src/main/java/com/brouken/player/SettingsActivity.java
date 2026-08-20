@@ -2,8 +2,10 @@ package com.brouken.player;
 
 import android.content.res.Configuration;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.InputType;
 import android.text.TextUtils;
 import android.view.View;
 import android.widget.LinearLayout;
@@ -13,13 +15,18 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.preference.EditTextPreference;
 import androidx.preference.ListPreference;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
+import androidx.preference.PreferenceScreen;
 import androidx.preference.SwitchPreferenceCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.brouken.player.together.AliasGenerator;
+import com.brouken.player.together.Relay;
+import com.brouken.player.together.Room;
 import com.brouken.player.update.UpdateUi;
 import com.brouken.player.update.Updater;
 
@@ -31,7 +38,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.MissingResourceException;
 
-public class SettingsActivity extends AppCompatActivity {
+public class SettingsActivity extends AppCompatActivity
+        implements PreferenceFragmentCompat.OnPreferenceStartScreenCallback {
     public static final String EXTRA_MEDIA_LANGUAGES = "mediaLanguages";
 
     static RecyclerView recyclerView;
@@ -69,6 +77,9 @@ public class SettingsActivity extends AppCompatActivity {
         if (actionBar != null) {
             actionBar.setDisplayHomeAsUpEnabled(true);
         }
+        getSupportFragmentManager().addOnBackStackChangedListener(() ->
+                setTitle(getSupportFragmentManager().getBackStackEntryCount() > 0
+                        ? R.string.together_title : R.string.pref_title));
 
         if (Build.VERSION.SDK_INT >= 29) {
             LinearLayout layout = findViewById(R.id.settings_layout);
@@ -84,6 +95,31 @@ public class SettingsActivity extends AppCompatActivity {
                 return windowInsets;
             });
         }
+    }
+
+    @Override
+    public boolean onPreferenceStartScreen(@NonNull final PreferenceFragmentCompat caller,
+                                           @NonNull final PreferenceScreen preferenceScreen) {
+        final SettingsFragment fragment = new SettingsFragment();
+        final Bundle arguments = new Bundle();
+        arguments.putString(PreferenceFragmentCompat.ARG_PREFERENCE_ROOT,
+                preferenceScreen.getKey());
+        fragment.setArguments(arguments);
+        getSupportFragmentManager().beginTransaction()
+                .replace(R.id.settings, fragment)
+                .addToBackStack(preferenceScreen.getKey())
+                .commit();
+        return true;
+    }
+
+    @Override
+    public boolean onSupportNavigateUp() {
+        if (getSupportFragmentManager().getBackStackEntryCount() > 0) {
+            getSupportFragmentManager().popBackStack();
+        } else {
+            finish();
+        }
+        return true;
     }
 
     public static class SettingsFragment extends PreferenceFragmentCompat {
@@ -120,6 +156,101 @@ public class SettingsActivity extends AppCompatActivity {
                 if (!hadAllowSystemFrameRateKey) {
                     preferenceAllowSystemFrameRate.setChecked(!Utils.isTvBox(getContext()));
                 }
+            }
+
+            final EditTextPreference preferenceNick = findPreference("togetherNick");
+            final Preference preferenceNickRandom = findPreference("togetherNickRandom");
+            if (preferenceNick != null) {
+                if (TextUtils.isEmpty(preferenceNick.getText())) {
+                    preferenceNick.setText(AliasGenerator.random());
+                }
+                preferenceNick.setOnPreferenceChangeListener((preference, value) -> {
+                    if (value == null || value.toString().trim().isEmpty()) {
+                        preferenceNick.setText(AliasGenerator.random());
+                        return false;
+                    }
+                    return true;
+                });
+            }
+            if (preferenceNick != null && preferenceNickRandom != null) {
+                preferenceNickRandom.setOnPreferenceClickListener(preference -> {
+                    preferenceNick.setText(AliasGenerator.random());
+                    return true;
+                });
+            }
+
+            final EditTextPreference preferencePassword = findPreference("togetherPassword");
+            final SwitchPreferenceCompat preferencePublic = findPreference("togetherPublic");
+            if (preferencePassword != null) {
+                preferencePassword.setOnBindEditTextListener(editText ->
+                        editText.setInputType(InputType.TYPE_CLASS_TEXT
+                                | InputType.TYPE_TEXT_VARIATION_PASSWORD));
+                preferencePassword.setSummaryProvider(preference -> {
+                    final String value = preferencePassword.getText();
+                    return TextUtils.isEmpty(value)
+                            ? getString(R.string.pref_together_password_none) : "••••••";
+                });
+                preferencePassword.setOnPreferenceChangeListener((preference, value) -> {
+                    if ((value == null || value.toString().isEmpty())
+                            && preferencePublic != null && preferencePublic.isChecked()) {
+                        preferencePublic.setChecked(false);
+                    }
+                    return true;
+                });
+            }
+            if (preferencePublic != null) {
+                if (preferencePublic.isChecked() && (preferencePassword == null
+                        || TextUtils.isEmpty(preferencePassword.getText()))) {
+                    preferencePublic.setChecked(false);
+                }
+                preferencePublic.setOnPreferenceChangeListener((preference, value) -> {
+                    if (Boolean.TRUE.equals(value) && (preferencePassword == null
+                            || TextUtils.isEmpty(preferencePassword.getText()))) {
+                        Toast.makeText(requireContext(), R.string.together_public_needs_password,
+                                Toast.LENGTH_SHORT).show();
+                        return false;
+                    }
+                    return true;
+                });
+            }
+
+            final EditTextPreference preferenceRelay = findPreference("togetherRelay");
+            if (preferenceRelay != null) {
+                preferenceRelay.setSummaryProvider(preference -> {
+                    final String value = preferenceRelay.getText();
+                    return TextUtils.isEmpty(value == null ? null : value.trim())
+                            ? getString(R.string.pref_together_relay_default, Relay.DEFAULT_BASE)
+                            : value.trim();
+                });
+                preferenceRelay.setOnPreferenceChangeListener((preference, value) -> {
+                    final String address = value == null ? "" : value.toString().trim();
+                    if (!validAddress(address, "ws", "wss")) {
+                        showAddressError("ws://, wss://");
+                        return false;
+                    }
+                    Relay.setBase(address);
+                    return true;
+                });
+            }
+
+            final EditTextPreference preferenceInvite = findPreference("togetherInvitePage");
+            if (preferenceInvite != null) {
+                preferenceInvite.setSummaryProvider(preference -> {
+                    final String value = preferenceInvite.getText();
+                    return TextUtils.isEmpty(value == null ? null : value.trim())
+                            ? getString(R.string.pref_together_relay_default,
+                                    Room.DEFAULT_INVITE_PAGE)
+                            : value.trim();
+                });
+                preferenceInvite.setOnPreferenceChangeListener((preference, value) -> {
+                    final String address = value == null ? "" : value.toString().trim();
+                    if (!validAddress(address, "http", "https")) {
+                        showAddressError("http://, https://");
+                        return false;
+                    }
+                    Room.setInvitePage(address);
+                    return true;
+                });
             }
             ListPreference listPreferenceFileAccess = findPreference("fileAccess");
             if (listPreferenceFileAccess != null) {
@@ -214,6 +345,32 @@ public class SettingsActivity extends AppCompatActivity {
                 labels.add(label == null ? code : label);
             }
             preference.setSummary(TextUtils.join(", ", labels));
+        }
+
+        private boolean validAddress(final String value, final String... schemes) {
+            if (value.isEmpty()) {
+                return true;
+            }
+            try {
+                final Uri uri = Uri.parse(value);
+                if (TextUtils.isEmpty(uri.getHost())) {
+                    return false;
+                }
+                for (String scheme : schemes) {
+                    if (scheme.equalsIgnoreCase(uri.getScheme())) {
+                        return true;
+                    }
+                }
+            } catch (RuntimeException ignored) {
+                // The preference stays unchanged when parsing fails.
+            }
+            return false;
+        }
+
+        private void showAddressError(final String schemes) {
+            Toast.makeText(requireContext(),
+                    getString(R.string.pref_together_address_invalid, schemes),
+                    Toast.LENGTH_SHORT).show();
         }
 
         private List<String> pinnedLanguages() {

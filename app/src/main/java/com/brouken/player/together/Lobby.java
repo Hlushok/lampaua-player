@@ -7,6 +7,7 @@ import org.json.JSONObject;
 
 import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -59,7 +60,8 @@ final class Lobby {
             synchronized (found) {
                 rooms = new ArrayList<>(found.values());
             }
-            rooms.sort((a, b) -> b.optInt("members") - a.optInt("members"));
+            Collections.sort(rooms,
+                    (a, b) -> Integer.compare(b.optInt("members"), a.optInt("members")));
             callback.onRooms(rooms);
         }, COLLECT_MS);
     }
