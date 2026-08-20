@@ -204,6 +204,7 @@ public class PlayerActivity extends Activity {
     private static final long STALL_CHECK_INTERVAL_MS = 1_500L;
     private static final long STALL_TIMEOUT_MS = 10_000L;
     private static final long STABLE_PLAYBACK_MS = 15_000L;
+    private static final long SWIPE_UNLOCK_TIMEOUT_MS = 3_000L;
 
     private CoordinatorLayout coordinatorLayout;
     private TextView titleView;
@@ -267,6 +268,7 @@ public class PlayerActivity extends Activity {
     final HashMap<String, String> apiHeaders = new HashMap<>();
     private LampaPlaylist lampaPlaylist;
     private boolean switchingPlaylistItem;
+    private boolean inPip;
     private boolean playlistCurrentRecorded;
     private String playlistPlaybackKey;
     private boolean playlistPlaybackEverReady;
@@ -310,6 +312,7 @@ public class PlayerActivity extends Activity {
     private boolean playbackEverReady;
     private long loadWatchdogBytes;
     private final Runnable loadTimeoutRunnable = this::reportLoadWatchdog;
+    private final Runnable swipeHider = this::hideSwipeToUnlock;
     private final Runnable stallWatchdogRunnable = new Runnable() {
         @Override public void run() {
             if (player == null || !player.isPlaying()) return;
@@ -740,6 +743,9 @@ public class PlayerActivity extends Activity {
                 locked = false;
                 onLockChanged();
             });
+            swipeToUnlock.setOnStartTouchingListener(() ->
+                    playerView.removeCallbacks(swipeHider));
+            swipeToUnlock.setOnStopTouchingListener(this::rescheduleSwipeHide);
             CoordinatorLayout.LayoutParams swipeParams = new CoordinatorLayout.LayoutParams(
                     Utils.dpToPx(310), ViewGroup.LayoutParams.WRAP_CONTENT);
             swipeParams.gravity = Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM;
@@ -1095,6 +1101,12 @@ public class PlayerActivity extends Activity {
         lampaUiHandler.removeCallbacks(lampaUiTicker);
         unregisterAudioOutputReceiver();
         releasePlayer(false);
+    }
+
+    @Override
+    protected void onDestroy() {
+        hideSwipeToUnlock();
+        super.onDestroy();
     }
 
     private void registerAudioOutputReceiver() {
@@ -1480,10 +1492,12 @@ public class PlayerActivity extends Activity {
     @Override
     public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, Configuration newConfig) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        inPip = isInPictureInPictureMode;
 
         if (isInPictureInPictureMode) {
             // On Android TV it is required to hide controller in this PIP change callback
             playerView.hideController();
+            hideSwipeToUnlock();
             setSubtitleTextSizePiP();
             playerView.setScale(1.f);
             mReceiver = new BroadcastReceiver() {
@@ -1517,9 +1531,10 @@ public class PlayerActivity extends Activity {
             if (player != null) {
                 if (player.isPlaying())
                     Utils.toggleSystemUi(this, playerView, false);
-                else
+                else if (!locked)
                     playerView.showController();
             }
+            if (locked) showSwipeToUnlock();
         }
     }
 
@@ -3750,6 +3765,7 @@ public class PlayerActivity extends Activity {
         playerView.setControllerShowTimeoutMs(-1);
 
         locked = false;
+        hideSwipeToUnlock();
 
         if (haveMedia) {
             if (isNetworkUri) {
@@ -3887,6 +3903,7 @@ public class PlayerActivity extends Activity {
 
     public void releasePlayer(boolean save) {
         cancelPlaybackWatchdogs();
+        hideSwipeToUnlock();
         if (playerView != null) {
             playerView.removeCallbacks(audioRestartRunnable);
         }
@@ -4039,6 +4056,7 @@ public class PlayerActivity extends Activity {
 
             if (!isPlaying) {
                 PlayerActivity.locked = false;
+                hideSwipeToUnlock();
                 playerView.removeCallbacks(stallWatchdogRunnable);
             } else {
                 audioRecoveryState.onResume();
@@ -4190,6 +4208,8 @@ public class PlayerActivity extends Activity {
                 armLoadWatchdog();
             } else if (state == Player.STATE_ENDED) {
                 cancelPlaybackWatchdogs();
+                locked = false;
+                hideSwipeToUnlock();
                 if (sleepTimer.isAtMediaEnd()) {
                     fireSleepTimer();
                     return;
@@ -5391,15 +5411,28 @@ public class PlayerActivity extends Activity {
     }
 
     void showSwipeToUnlock() {
-        if (swipeToUnlock != null && locked) swipeToUnlock.setVisibility(View.VISIBLE);
+        if (swipeToUnlock == null || !locked || inPip) return;
+        swipeToUnlock.setVisibility(View.VISIBLE);
+        rescheduleSwipeHide();
+    }
+
+    private void rescheduleSwipeHide() {
+        if (playerView == null) return;
+        playerView.removeCallbacks(swipeHider);
+        playerView.postDelayed(swipeHider, SWIPE_UNLOCK_TIMEOUT_MS);
+    }
+
+    void hideSwipeToUnlock() {
+        if (playerView != null) playerView.removeCallbacks(swipeHider);
+        if (swipeToUnlock != null) swipeToUnlock.setVisibility(View.GONE);
     }
 
     void onLockChanged() {
         if (locked) {
             playerView.hideController();
             showSwipeToUnlock();
-        } else if (swipeToUnlock != null) {
-            swipeToUnlock.setVisibility(View.GONE);
+        } else {
+            hideSwipeToUnlock();
             playerView.showController();
         }
     }

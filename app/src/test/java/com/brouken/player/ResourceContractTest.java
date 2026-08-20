@@ -105,4 +105,15 @@ public class ResourceContractTest {
         assertTrue(ukrainian.contains(
                 "name=\"press_back_again\">Натисніть «Назад» ще раз для виходу</string>"));
     }
+
+    @Test
+    public void lockHintAutoHidesAfterThreeSeconds() throws Exception {
+        String activity = readProjectFile("src/main/java/com/brouken/player/PlayerActivity.java");
+        String swipe = readProjectFile("src/main/java/com/brouken/player/SwipeToUnlockView.java");
+
+        assertTrue(activity.contains("SWIPE_UNLOCK_TIMEOUT_MS = 3_000L"));
+        assertTrue(activity.contains("postDelayed(swipeHider, SWIPE_UNLOCK_TIMEOUT_MS)"));
+        assertTrue(swipe.contains("setOnStartTouchingListener"));
+        assertTrue(swipe.contains("setOnStopTouchingListener"));
+    }
 }
