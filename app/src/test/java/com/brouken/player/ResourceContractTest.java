@@ -183,4 +183,28 @@ public class ResourceContractTest {
         assertFalse(activity.contains("termbin.com"));
         assertFalse(activity.contains("api.qrserver.com"));
     }
+
+    @Test
+    public void subtitleLanguageAndAppearanceStayInsideThePlayer() throws Exception {
+        String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+        String prefs = readProjectFile("src/main/java/com/brouken/player/Prefs.java");
+        String settings = readProjectFile(
+                "src/main/java/com/brouken/player/SettingsActivity.java");
+
+        assertTrue(preferences.contains("app:key=\"languageSubtitle\""));
+        assertTrue(preferences.contains("app:key=\"subtitleAppearance\""));
+        assertTrue(preferences.contains("app:key=\"subtitleScale\""));
+        assertTrue(preferences.contains("app:key=\"subtitleTextColor\""));
+        assertTrue(preferences.contains("app:key=\"subtitleBackground\""));
+        assertTrue(preferences.contains("app:key=\"subtitleEdge\""));
+        assertFalse(preferences.contains("android.settings.CAPTIONING_SETTINGS"));
+        assertTrue(activity.contains("setPreferredTextLanguages"));
+        assertTrue(activity.contains("openAppSettings(\"languageSubtitle\")"));
+        assertTrue(activity.contains("mPrefs.subtitleScale"));
+        assertTrue(prefs.contains("getLanguageSubtitle"));
+        assertTrue(settings.contains("EXTRA_SCROLL_TO"));
+        assertTrue(settings.contains("openAtPreference"));
+    }
 }

@@ -60,7 +60,6 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
-import android.view.accessibility.CaptioningManager;
 import android.window.OnBackInvokedDispatcher;
 import android.widget.FrameLayout;
 import android.widget.BaseAdapter;
@@ -206,7 +205,6 @@ public class PlayerActivity extends Activity {
     private static final int REQUEST_CHOOSER_VIDEO_MEDIASTORE = 20;
     private static final int REQUEST_CHOOSER_SUBTITLE_MEDIASTORE = 21;
     private static final int REQUEST_SETTINGS = 100;
-    private static final int REQUEST_SYSTEM_CAPTIONS = 200;
     public static final int CONTROLLER_TIMEOUT = 3500;
     private static final String ACTION_MEDIA_CONTROL = "media_control";
     private static final String EXTRA_CONTROL_TYPE = "control_type";
@@ -954,8 +952,7 @@ public class PlayerActivity extends Activity {
         });
 
         exoSubtitle.setOnLongClickListener(v -> {
-            enableRotation();
-            safelyStartActivityForResult(new Intent(Settings.ACTION_CAPTIONING_SETTINGS), REQUEST_SYSTEM_CAPTIONS);
+            openAppSettings("languageSubtitle");
             return true;
         });
 
@@ -1086,9 +1083,7 @@ public class PlayerActivity extends Activity {
     public void onStart() {
         super.onStart();
         alive = true;
-        if (!(isTvBox && Build.VERSION.SDK_INT >= 31)) {
-            updateSubtitleStyle(this);
-        }
+        updateSubtitleStyle(this);
         if (Build.VERSION.SDK_INT >= 31) {
             playerView.removeCallbacks(barsHider);
             Utils.toggleSystemUi(this, playerView, true);
@@ -1119,9 +1114,6 @@ public class PlayerActivity extends Activity {
             requestPassthroughAudioRestart();
         }
         updateLampaMenuOpacity();
-        if (isTvBox && Build.VERSION.SDK_INT >= 31) {
-            updateSubtitleStyle(this);
-        }
         postPrimaryTvFocus();
     }
 
@@ -2163,11 +2155,19 @@ public class PlayerActivity extends Activity {
     }
 
     private void openAppSettings() {
+        openAppSettings(null);
+    }
+
+    private void openAppSettings(String scrollToKey) {
         Intent intent = new Intent(this, SettingsActivity.class);
+        if (scrollToKey != null) {
+            intent.putExtra(SettingsActivity.EXTRA_SCROLL_TO, scrollToKey);
+        }
         ArrayList<String> languages = new ArrayList<>();
         if (player != null) {
             for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
-                if (group.getType() != C.TRACK_TYPE_AUDIO) continue;
+                if (group.getType() != C.TRACK_TYPE_AUDIO
+                        && group.getType() != C.TRACK_TYPE_TEXT) continue;
                 for (int index = 0; index < group.length; index++) {
                     String language = AudioLanguagePriority.normalize(
                             group.getTrackFormat(index).language);
@@ -4324,6 +4324,7 @@ public class PlayerActivity extends Activity {
             }
             Utils.applyPlayerVolume();
             Utils.applyBoost();
+            applyPreferredTextLanguages();
             updateSubtitleStyle(this);
             updateLampaSegmentMarkers();
             updateLampaSkipUi();
@@ -4390,6 +4391,15 @@ public class PlayerActivity extends Activity {
         }
     }
 
+    private void applyPreferredTextLanguages() {
+        if (trackSelector == null) return;
+        List<String> languages = AudioLanguagePriority.parse(mPrefs.languageSubtitle);
+        trackSelector.setParameters(trackSelector.buildUponParameters()
+                // Subtitles only start automatically when they match the user's ordered list.
+                .setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                .setPreferredTextLanguages(languages.toArray(new String[0])));
+    }
+
     public void initializePlayer() {
         cancelFrameRateSwitchWait();
         play = false;
@@ -4443,18 +4453,7 @@ public class PlayerActivity extends Activity {
             trackSelector.setParameters(trackSelector.buildUponParameters()
                     .setPreferredAudioLanguages(preferredAudioLanguages.toArray(new String[0])));
         }
-        final CaptioningManager captioningManager = (CaptioningManager) getSystemService(Context.CAPTIONING_SERVICE);
-        if (!captioningManager.isEnabled()) {
-            trackSelector.setParameters(trackSelector.buildUponParameters()
-                    .setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-            );
-        }
-        Locale locale = captioningManager.getLocale();
-        if (locale != null) {
-            trackSelector.setParameters(trackSelector.buildUponParameters()
-                    .setPreferredTextLanguage(locale.getISO3Language())
-            );
-        }
+        applyPreferredTextLanguages();
         // https://github.com/google/ExoPlayer/issues/8571
         DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory()
                 .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS)
@@ -5780,20 +5779,18 @@ public class PlayerActivity extends Activity {
     }
 
     void updateSubtitleStyle(final Context context) {
-        final CaptioningManager captioningManager = (CaptioningManager) getSystemService(Context.CAPTIONING_SERVICE);
         final SubtitleView subtitleView = playerView.getSubtitleView();
         final boolean isTablet = Utils.isTablet(context);
-        subtitlesScale = SubtitleUtils.normalizeFontScale(captioningManager.getFontScale(), isTvBox || isTablet);
+        subtitlesScale = SubtitleUtils.normalizeFontScale(
+                mPrefs.subtitleScale, isTvBox || isTablet);
         if (subtitleView != null) {
-            final CaptioningManager.CaptionStyle userStyle = captioningManager.getUserStyle();
-            final CaptionStyleCompat userStyleCompat = CaptionStyleCompat.createFromCaptionStyle(userStyle);
             final CaptionStyleCompat captionStyle = new CaptionStyleCompat(
-                    userStyle.hasForegroundColor() ? userStyleCompat.foregroundColor : Color.WHITE,
-                    userStyle.hasBackgroundColor() ? userStyleCompat.backgroundColor : Color.TRANSPARENT,
-                    userStyle.hasWindowColor() ? userStyleCompat.windowColor : Color.TRANSPARENT,
-                    userStyle.hasEdgeType() ? userStyleCompat.edgeType : CaptionStyleCompat.EDGE_TYPE_OUTLINE,
-                    userStyle.hasEdgeColor() ? userStyleCompat.edgeColor : Color.BLACK,
-                    Typeface.create(userStyleCompat.typeface != null ? userStyleCompat.typeface : Typeface.DEFAULT,
+                    mPrefs.subtitleTextColor,
+                    mPrefs.subtitleBackgroundColor,
+                    Color.TRANSPARENT,
+                    mPrefs.subtitleEdgeType,
+                    mPrefs.subtitleTextColor == Color.BLACK ? Color.WHITE : Color.BLACK,
+                    Typeface.create(Typeface.DEFAULT,
                             mPrefs.subtitleStyleBold ? Typeface.BOLD : Typeface.NORMAL));
             subtitleView.setStyle(captionStyle);
             subtitleView.setApplyEmbeddedStyles(mPrefs.subtitleStyleEmbedded);

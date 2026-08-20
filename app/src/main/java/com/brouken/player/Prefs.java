@@ -3,12 +3,15 @@ package com.brouken.player;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Color;
 import android.net.Uri;
 import android.preference.PreferenceManager;
 import android.provider.DocumentsContract;
+import android.view.accessibility.CaptioningManager;
 
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.ui.AspectRatioFrameLayout;
+import androidx.media3.ui.CaptionStyleCompat;
 
 import com.brouken.player.together.AliasGenerator;
 import com.brouken.player.together.Relay;
@@ -51,8 +54,13 @@ class Prefs {
     private static final String PREF_KEY_DECODER_PRIORITY = "decoderPriority";
     private static final String PREF_KEY_MAP_DV7 = "mapDV7ToHevc";
     private static final String PREF_KEY_LANGUAGE_AUDIO = "languageAudio";
+    private static final String PREF_KEY_LANGUAGE_SUBTITLE = "languageSubtitle";
     private static final String PREF_KEY_SUBTITLE_STYLE_EMBEDDED = "subtitleStyleEmbedded";
     private static final String PREF_KEY_SUBTITLE_STYLE_BOLD = "subtitleStyleBold";
+    private static final String PREF_KEY_SUBTITLE_SCALE = "subtitleScale";
+    private static final String PREF_KEY_SUBTITLE_TEXT_COLOR = "subtitleTextColor";
+    private static final String PREF_KEY_SUBTITLE_BACKGROUND = "subtitleBackground";
+    private static final String PREF_KEY_SUBTITLE_EDGE = "subtitleEdge";
     private static final String PREF_KEY_SKIP_ENABLED = "skipEnabled";
     private static final String PREF_KEY_SKIP_MODE = "skipMode";
     private static final String PREF_KEY_SKIP_MODE_CREDITS = "skipModeCredits";
@@ -106,8 +114,13 @@ class Prefs {
     public int decoderPriority = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON;
     public boolean mapDV7ToHevc = false;
     public String languageAudio = "";
+    public String languageSubtitle = "";
     public boolean subtitleStyleEmbedded = true;
     public boolean subtitleStyleBold = false;
+    public float subtitleScale = 1.0f;
+    public int subtitleTextColor = Color.WHITE;
+    public int subtitleBackgroundColor = Color.TRANSPARENT;
+    public int subtitleEdgeType = CaptionStyleCompat.EDGE_TYPE_OUTLINE;
     public boolean skipEnabled = true;
     public String skipMode = SKIP_MODE_FULL;
     public String skipModeCredits = SKIP_MODE_FULL;
@@ -173,8 +186,14 @@ class Prefs {
         decoderPriority = Integer.parseInt(mSharedPreferences.getString(PREF_KEY_DECODER_PRIORITY, String.valueOf(decoderPriority)));
         mapDV7ToHevc = mSharedPreferences.getBoolean(PREF_KEY_MAP_DV7, mapDV7ToHevc);
         languageAudio = getLanguageAudio(mContext);
+        languageSubtitle = getLanguageSubtitle(mContext);
         subtitleStyleEmbedded = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_STYLE_EMBEDDED, subtitleStyleEmbedded);
         subtitleStyleBold = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_STYLE_BOLD, subtitleStyleBold);
+        subtitleScale = readFloat(PREF_KEY_SUBTITLE_SCALE, subtitleScale, 0.25f, 2.0f);
+        subtitleTextColor = readColor(PREF_KEY_SUBTITLE_TEXT_COLOR, subtitleTextColor);
+        subtitleBackgroundColor = readColor(PREF_KEY_SUBTITLE_BACKGROUND,
+                subtitleBackgroundColor);
+        subtitleEdgeType = readInt(PREF_KEY_SUBTITLE_EDGE, subtitleEdgeType, 0, 2);
         skipEnabled = mSharedPreferences.getBoolean(PREF_KEY_SKIP_ENABLED, skipEnabled);
         skipMode = mSharedPreferences.getString(PREF_KEY_SKIP_MODE, skipMode);
         skipModeCredits = mSharedPreferences.getString(PREF_KEY_SKIP_MODE_CREDITS, skipModeCredits);
@@ -239,6 +258,67 @@ class Prefs {
         String normalized = AudioLanguagePriority.serialize(AudioLanguagePriority.parse(languages));
         PreferenceManager.getDefaultSharedPreferences(context).edit()
                 .putString(PREF_KEY_LANGUAGE_AUDIO, normalized).apply();
+    }
+
+    public static String getLanguageSubtitle(Context context) {
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        String stored = preferences.getString(PREF_KEY_LANGUAGE_SUBTITLE, null);
+        if (stored != null) {
+            String normalized = AudioLanguagePriority.serialize(
+                    AudioLanguagePriority.parse(stored));
+            if (!normalized.equals(stored)) {
+                preferences.edit().putString(PREF_KEY_LANGUAGE_SUBTITLE, normalized).apply();
+            }
+            return normalized;
+        }
+
+        CaptioningManager manager =
+                (CaptioningManager) context.getSystemService(Context.CAPTIONING_SERVICE);
+        String migrated = "";
+        if (manager != null && manager.getLocale() != null) {
+            String language = AudioLanguagePriority.normalize(manager.getLocale().toLanguageTag());
+            if (language != null) migrated = language;
+        }
+        preferences.edit().putString(PREF_KEY_LANGUAGE_SUBTITLE, migrated).apply();
+        return migrated;
+    }
+
+    public static void setLanguageSubtitle(Context context, String languages) {
+        String normalized = AudioLanguagePriority.serialize(AudioLanguagePriority.parse(languages));
+        PreferenceManager.getDefaultSharedPreferences(context).edit()
+                .putString(PREF_KEY_LANGUAGE_SUBTITLE, normalized).apply();
+    }
+
+    private float readFloat(String key, float fallback, float min, float max) {
+        try {
+            float value = Float.parseFloat(mSharedPreferences.getString(key,
+                    String.valueOf(fallback)));
+            return Math.max(min, Math.min(max, value));
+        } catch (RuntimeException ignored) {
+            return fallback;
+        }
+    }
+
+    private int readColor(String key, int fallback) {
+        try {
+            return Color.parseColor(mSharedPreferences.getString(key, colorString(fallback)));
+        } catch (RuntimeException ignored) {
+            return fallback;
+        }
+    }
+
+    private int readInt(String key, int fallback, int min, int max) {
+        try {
+            int value = Integer.parseInt(mSharedPreferences.getString(key,
+                    String.valueOf(fallback)));
+            return Math.max(min, Math.min(max, value));
+        } catch (RuntimeException ignored) {
+            return fallback;
+        }
+    }
+
+    private static String colorString(int color) {
+        return String.format(java.util.Locale.US, "#%08X", color);
     }
 
     public void updateMedia(final Context context, final Uri uri, final String type) {
