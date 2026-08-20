@@ -310,16 +310,8 @@ public class PlayerActivity extends Activity {
     private long stablePlaybackStartedAt;
     private long stablePlaybackStartPosition = C.TIME_UNSET;
     private boolean playbackEverReady;
-    private final Runnable loadTimeoutRunnable = () -> {
-        if (player == null || player.getPlaybackState() != Player.STATE_BUFFERING || !haveMedia) return;
-        PlaybackRecoveryPolicy.FailureKind kind = Utils.isSupportedNetworkUri(mPrefs.mediaUri)
-                ? (playbackEverReady ? PlaybackRecoveryPolicy.FailureKind.STALL_MIDSTREAM
-                : PlaybackRecoveryPolicy.FailureKind.NETWORK_READ)
-                : PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE;
-        if (!recoverPlayback(kind)) {
-            stopPlaybackAfterRecoveryFailure(kind, null);
-        }
-    };
+    private long loadWatchdogBytes;
+    private final Runnable loadTimeoutRunnable = this::reportLoadWatchdog;
     private final Runnable stallWatchdogRunnable = new Runnable() {
         @Override public void run() {
             if (player == null || !player.isPlaying()) return;
@@ -4079,7 +4071,7 @@ public class PlayerActivity extends Activity {
             if (state == Player.STATE_READY) {
                 resetResolverResponseState();
                 frameRendered = true;
-                playerView.removeCallbacks(loadTimeoutRunnable);
+                cancelLoadWatchdog();
                 playbackWaitStartedAt = 0L;
                 playbackEverReady = true;
                 stablePlaybackStartedAt = SystemClock.elapsedRealtime();
@@ -4198,8 +4190,7 @@ public class PlayerActivity extends Activity {
                 }
             } else if (state == Player.STATE_BUFFERING) {
                 if (playbackWaitStartedAt == 0L) playbackWaitStartedAt = SystemClock.elapsedRealtime();
-                playerView.removeCallbacks(loadTimeoutRunnable);
-                playerView.postDelayed(loadTimeoutRunnable, VIDEO_LOAD_TIMEOUT_MS);
+                armLoadWatchdog();
             } else if (state == Player.STATE_ENDED) {
                 cancelPlaybackWatchdogs();
                 if (sleepTimer.isAtMediaEnd()) {
@@ -4409,9 +4400,52 @@ public class PlayerActivity extends Activity {
 
     private void cancelPlaybackWatchdogs() {
         if (playerView == null) return;
-        playerView.removeCallbacks(loadTimeoutRunnable);
+        cancelLoadWatchdog();
         playerView.removeCallbacks(stallWatchdogRunnable);
         playerView.removeCallbacks(stablePlaybackRunnable);
+    }
+
+    private void armLoadWatchdog() {
+        cancelLoadWatchdog();
+        loadWatchdogBytes = TrackNameParsingDataSource.bytesRead.get();
+        playerView.postDelayed(loadTimeoutRunnable, VIDEO_LOAD_TIMEOUT_MS);
+    }
+
+    private void cancelLoadWatchdog() {
+        if (playerView != null) playerView.removeCallbacks(loadTimeoutRunnable);
+    }
+
+    private void reportLoadWatchdog() {
+        LoadWatchdogPolicy.SourceKind sourceKind = currentLoadSourceKind();
+        LoadWatchdogPolicy.Action action = LoadWatchdogPolicy.evaluate(
+                player != null && player.getPlaybackState() == Player.STATE_BUFFERING && haveMedia,
+                playbackEverReady, loadWatchdogBytes,
+                TrackNameParsingDataSource.bytesRead.get(), sourceKind);
+        if (action == LoadWatchdogPolicy.Action.IGNORE) return;
+        if (action == LoadWatchdogPolicy.Action.REARM) {
+            armLoadWatchdog();
+            return;
+        }
+
+        cancelLoadWatchdog();
+        player.stop();
+        updateLoading(false);
+        int message = sourceKind == LoadWatchdogPolicy.SourceKind.LOCAL
+                ? R.string.error_local_media_corrupt : R.string.error_playback_stalled;
+        showSnack(getString(message), null);
+        if (lampaPlaylist != null) {
+            updateEpisodeControls();
+            updateLampaTopPanel();
+            playerView.showController();
+        }
+    }
+
+    private LoadWatchdogPolicy.SourceKind currentLoadSourceKind() {
+        if (player != null && player.isCurrentMediaItemLive()) {
+            return LoadWatchdogPolicy.SourceKind.LIVE;
+        }
+        return Utils.isSupportedNetworkUri(mPrefs.mediaUri)
+                ? LoadWatchdogPolicy.SourceKind.NETWORK : LoadWatchdogPolicy.SourceKind.LOCAL;
     }
 
     private boolean recoverPlayback(PlaybackRecoveryPolicy.FailureKind kind) {
