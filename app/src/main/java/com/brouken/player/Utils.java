@@ -626,39 +626,74 @@ class Utils {
     }
 
     public static Uri convertInputStreamToUTF(Context context, Uri subtitleUri, InputStream inputStream) {
+        return convertInputStreamToUTF(context, subtitleUri, inputStream, null);
+    }
+
+    /** Converts subtitles to UTF-8 and keeps remote files locally for later player rebuilds. */
+    public static Uri convertInputStreamToUTF(Context context, Uri subtitleUri,
+                                               InputStream inputStream, String preferredName) {
+        if (inputStream == null || subtitleUri == null) return null;
         try {
             DecodedInputStreamReader decodedInputStreamReader = Chardet.decode(inputStream, StandardCharsets.UTF_8);
             Charset charset = decodedInputStreamReader.charset();
-            if (!StandardCharsets.UTF_8.equals(charset)) {
-                String filename = subtitleUri.getPath();
-                filename = filename.substring(filename.lastIndexOf("/") + 1);
+            boolean remote = isSupportedNetworkUri(subtitleUri);
+            if (!StandardCharsets.UTF_8.equals(charset) || remote) {
+                String filename = preferredName;
+                if (filename == null || filename.trim().isEmpty()) {
+                    filename = subtitleUri.getLastPathSegment();
+                }
+                if (filename == null || filename.trim().isEmpty()) filename = "subtitle";
+                if (filename.toLowerCase(Locale.US).endsWith(".gz")) {
+                    filename = filename.substring(0, filename.length() - 3);
+                }
+                filename = new File(filename).getName();
+                if (filename.isEmpty() || ".".equals(filename) || "..".equals(filename)) {
+                    filename = "subtitle";
+                }
+                if (!filename.contains(".")) filename += ".srt";
                 final File file = new File(context.getCacheDir(), filename);
-                final BufferedReader bufferedReader = new BufferedReader(decodedInputStreamReader);
-                final BufferedWriter bufferedWriter = new BufferedWriter(new FileWriter(file));
-                char[] buffer = new char[512];
-                int num;
-                int pass = 0;
                 boolean success = true;
-                while ((num = bufferedReader.read(buffer)) != -1) {
-                    bufferedWriter.write(buffer, 0, num);
-                    pass++;
-                    if (pass * 512 > 2_000_000) {
-                        success = false;
-                        break;
+                try (BufferedReader reader = new BufferedReader(decodedInputStreamReader);
+                     BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+                    char[] buffer = new char[512];
+                    int total = 0;
+                    int count;
+                    while ((count = reader.read(buffer)) != -1) {
+                        total += count;
+                        if (total > 2_000_000) {
+                            success = false;
+                            break;
+                        }
+                        writer.write(buffer, 0, count);
                     }
                 }
-                bufferedWriter.close();
-                bufferedReader.close();
                 if (success) {
+                    trimSubtitleCache(context.getCacheDir());
                     subtitleUri = Uri.fromFile(file);
                 } else {
-                    subtitleUri = null;
+                    file.delete();
+                    if (!remote) subtitleUri = null;
                 }
+            } else {
+                decodedInputStreamReader.close();
             }
         } catch (IOException e) {
             e.printStackTrace();
         }
         return subtitleUri;
+    }
+
+    private static final int SUBTITLE_CACHE_KEEP = 20;
+
+    private static void trimSubtitleCache(File cacheDir) {
+        File[] files = cacheDir.listFiles((dir, name) ->
+                name.startsWith("subs.") && name.endsWith(".srt"));
+        if (files == null || files.length <= SUBTITLE_CACHE_KEEP) return;
+        java.util.Arrays.sort(files, (left, right) ->
+                Long.compare(left.lastModified(), right.lastModified()));
+        for (int index = 0; index < files.length - SUBTITLE_CACHE_KEEP; index++) {
+            files[index].delete();
+        }
     }
 
     public static boolean isPiPSupported(Context context) {

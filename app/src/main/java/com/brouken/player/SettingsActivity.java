@@ -298,7 +298,7 @@ public class SettingsActivity extends AppCompatActivity
                                 R.string.pref_language_audio_none,
                                 AudioLanguagePriority.parse(
                                         Prefs.getLanguageAudio(requireContext())),
-                                languages, pinnedLanguages(), picked -> {
+                                languages, pinnedLanguages(), false, picked -> {
                                     String stored = AudioLanguagePriority.serialize(picked);
                                     Prefs.setLanguageAudio(requireContext(), stored);
                                     updateLanguageSummary(preference, languages, stored,
@@ -317,7 +317,7 @@ public class SettingsActivity extends AppCompatActivity
                                 R.string.pref_language_subtitle_none,
                                 AudioLanguagePriority.parse(
                                         Prefs.getLanguageSubtitle(requireContext())),
-                                languages, pinnedLanguages(), picked -> {
+                                languages, pinnedLanguages(), true, picked -> {
                                     String stored = AudioLanguagePriority.serialize(picked);
                                     Prefs.setLanguageSubtitle(requireContext(), stored);
                                     updateLanguageSummary(preference, languages, stored,

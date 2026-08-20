@@ -7,6 +7,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -27,24 +28,61 @@ final class AudioLanguagePriorityDialog {
 
     static void show(Context context, int titleRes, int emptyRes, List<String> initial,
                      LinkedHashMap<String, String> allLanguages, List<String> pinned,
-                     Listener listener) {
+                     boolean withSearch, Listener listener) {
         List<String> languages = new ArrayList<>(initial);
         LinearLayout list = new LinearLayout(context);
         list.setOrientation(LinearLayout.VERTICAL);
         int padding = Utils.dpToPx(16);
         list.setPadding(padding, Utils.dpToPx(8), padding, Utils.dpToPx(8));
+
+        LinearLayout container = new LinearLayout(context);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.addView(list);
+
+        CheckBox search = null;
+        CheckBox strict = null;
+        if (withSearch) {
+            search = checkBox(context, R.string.pref_subtitle_search,
+                    Prefs.getSubtitleSearch(context));
+            strict = checkBox(context, R.string.pref_subtitle_search_strict,
+                    Prefs.getSubtitleSearchStrict(context));
+            strict.setEnabled(search.isChecked());
+            CheckBox strictBox = strict;
+            search.setOnCheckedChangeListener((button, checked) ->
+                    strictBox.setEnabled(checked));
+            container.addView(search);
+            container.addView(strict);
+        }
+
         ScrollView scroll = new ScrollView(context);
-        scroll.addView(list);
+        scroll.addView(container);
+
+        CheckBox searchBox = search;
+        CheckBox strictBox = strict;
 
         AlertDialog dialog = new AlertDialog.Builder(context)
                 .setTitle(titleRes)
                 .setView(scroll)
                 .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(android.R.string.ok,
-                        (ignored, which) -> listener.onLanguagesPicked(languages))
+                .setPositiveButton(android.R.string.ok, (ignored, which) -> {
+                    if (searchBox != null) {
+                        Prefs.setSubtitleSearch(context, searchBox.isChecked(),
+                                strictBox.isChecked());
+                    }
+                    listener.onLanguagesPicked(languages);
+                })
                 .create();
         rebuild(context, list, languages, allLanguages, pinned, emptyRes, -1, 0);
         dialog.show();
+    }
+
+    private static CheckBox checkBox(Context context, int textRes, boolean checked) {
+        CheckBox box = new CheckBox(context);
+        box.setText(textRes);
+        box.setChecked(checked);
+        int horizontal = Utils.dpToPx(16);
+        box.setPadding(horizontal, Utils.dpToPx(4), horizontal, Utils.dpToPx(4));
+        return box;
     }
 
     private static void rebuild(Context context, LinearLayout list, List<String> selected,

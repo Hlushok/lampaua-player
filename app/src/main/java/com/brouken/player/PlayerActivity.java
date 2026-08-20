@@ -153,6 +153,7 @@ import java.util.Arrays;
 import java.util.Date;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -160,7 +161,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class PlayerActivity extends Activity {
 
@@ -218,6 +221,8 @@ public class PlayerActivity extends Activity {
     private static final long STABLE_PLAYBACK_MS = 15_000L;
     private static final long SWIPE_UNLOCK_TIMEOUT_MS = 3_000L;
     private static final long FRAME_RATE_SWITCH_TIMEOUT_MS = 1_500L;
+    private static final long SUBTITLE_MISS_TTL_MS = 30 * 60 * 1000L;
+    private static final Map<String, Long> subtitleSearchMisses = new ConcurrentHashMap<>();
 
     private CoordinatorLayout coordinatorLayout;
     private TextView titleView;
@@ -281,6 +286,9 @@ public class PlayerActivity extends Activity {
     boolean playbackFinished;
     final HashMap<String, String> apiHeaders = new HashMap<>();
     private LampaPlaylist lampaPlaylist;
+    private String subtitleSearchStarted;
+    private Thread subtitleSearchThread;
+    private volatile int subtitleSearchGeneration;
     private boolean switchingPlaylistItem;
     private boolean inPip;
     private boolean playlistCurrentRecorded;
@@ -1575,6 +1583,7 @@ public class PlayerActivity extends Activity {
         if (!applyingRoomMedia && together != null && together.isActive()) {
             together.leave();
         }
+        cancelSubtitleSearch();
         awaitingRoomMedia = false;
         setIntent(intent);
         lampaPlaylist = null;
@@ -1793,6 +1802,7 @@ public class PlayerActivity extends Activity {
         ArrayList<String> seasons = stringValues(intent, "video_list.season");
         ArrayList<String> episodes = stringValues(intent, "video_list.episode");
         ArrayList<String> imdbIds = stringValues(intent, "video_list.imdb_id");
+        ArrayList<String> tmdbIds = stringValues(intent, "video_list.tmdb_id");
         ArrayList<String> ids = stringValues(intent, "video_list.id");
         ArrayList<Bundle> subtitleBundles = bundleValues(intent, "video_list.subtitles");
         JSONArray items = new JSONArray();
@@ -1814,6 +1824,7 @@ public class PlayerActivity extends Activity {
                 if (!item.has("title")) putIndexedText(item, "title", filenames, i);
                 putIndexedText(item, "thumbnail", thumbnails, i);
                 putIndexedText(item, "imdb_id", imdbIds, i);
+                putIndexedPositiveInt(item, "tmdb_id", tmdbIds, i);
                 putIndexedText(item, "id", ids, i);
                 putIndexedPositiveInt(item, "season", seasons, i);
                 putIndexedPositiveInt(item, "episode", episodes, i);
@@ -1971,6 +1982,7 @@ public class PlayerActivity extends Activity {
 
     private void applyPlaylistItem(LampaPlaylist.Item item, boolean preserveMissingExtras) {
         if (item == null || !item.isResolved()) return;
+        cancelSubtitleSearch();
         if (timeBar != null) timeBar.setSkipSegments(0, null, null);
         apiAccess = true;
         apiAccessPartial = false;
@@ -4356,6 +4368,201 @@ public class PlayerActivity extends Activity {
         mPrefs.updateSubtitle(uri);
     }
 
+    /** Adds one external subtitle without discarding launcher-provided tracks or the play position. */
+    boolean addSubtitleTrack(Uri subtitleUri) {
+        if (player == null || subtitleUri == null) return false;
+        MediaItem current = player.getCurrentMediaItem();
+        if (current == null || containsSubtitle(current, subtitleUri)) return false;
+
+        MediaItem updated = withSubtitle(current,
+                SubtitleUtils.buildSubtitle(this, subtitleUri, null, true));
+        long position = player.getCurrentPosition();
+        boolean resume = player.getPlayWhenReady();
+        player.setMediaItems(Collections.singletonList(updated), 0, position);
+        player.prepare();
+        player.setPlayWhenReady(resume);
+        return true;
+    }
+
+    private MediaItem.SubtitleConfiguration rememberedSubtitle() {
+        if (mPrefs.subtitleUri == null || !Utils.fileExists(this, mPrefs.subtitleUri)) {
+            return null;
+        }
+        return SubtitleUtils.buildSubtitle(this, mPrefs.subtitleUri, null, true);
+    }
+
+    private static MediaItem withSubtitle(MediaItem item,
+                                           MediaItem.SubtitleConfiguration subtitle) {
+        List<MediaItem.SubtitleConfiguration> subtitles = new ArrayList<>();
+        if (item.localConfiguration != null) {
+            subtitles.addAll(item.localConfiguration.subtitleConfigurations);
+        }
+        if (!containsSubtitle(subtitles, subtitle.uri)) subtitles.add(subtitle);
+        return item.buildUpon().setSubtitleConfigurations(subtitles).build();
+    }
+
+    private static boolean containsSubtitle(MediaItem item, Uri uri) {
+        return item.localConfiguration != null
+                && containsSubtitle(item.localConfiguration.subtitleConfigurations, uri);
+    }
+
+    private static boolean containsSubtitle(
+            List<MediaItem.SubtitleConfiguration> subtitles, Uri uri) {
+        for (MediaItem.SubtitleConfiguration subtitle : subtitles) {
+            if (subtitle.uri.equals(uri)) return true;
+        }
+        return false;
+    }
+
+    private void cancelSubtitleSearch() {
+        subtitleSearchGeneration++;
+        subtitleSearchStarted = null;
+        if (subtitleSearchThread != null) {
+            subtitleSearchThread.interrupt();
+            subtitleSearchThread = null;
+        }
+    }
+
+    private void maybeSearchSubtitlesOnline(Tracks tracks) {
+        if (player == null || !mPrefs.subtitleSearch || tracks.getGroups().isEmpty()
+                || player.getPlaybackState() == Player.STATE_IDLE) {
+            return;
+        }
+        List<String> preferred = AudioLanguagePriority.parse(mPrefs.languageSubtitle);
+        if (preferred.isEmpty()) return;
+
+        Set<String> present = new HashSet<>();
+        for (Tracks.Group group : tracks.getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            for (int index = 0; index < group.length; index++) {
+                Format format = group.getTrackFormat(index);
+                if (isPhantomClosedCaption(format)) continue;
+                String language = AudioLanguagePriority.normalize(format.language);
+                if (language != null) present.add(language);
+            }
+        }
+        List<String> wanted = SubtitleLanguagePolicy.missing(
+                preferred, present, mPrefs.subtitleSearchStrict);
+        if (wanted.isEmpty()) return;
+
+        MediaId id = currentMediaId();
+        if (id.isEmpty() || enabledSubtitleSources().isEmpty()) return;
+        String key = id.key() + "|" + wanted + "|" + enabledSubtitleSources();
+        if (key.equals(subtitleSearchStarted)) return;
+        Long missedAt = subtitleSearchMisses.get(key);
+        if (missedAt != null && System.currentTimeMillis() - missedAt < SUBTITLE_MISS_TTL_MS) {
+            return;
+        }
+
+        String cachePrefix = "subs." + id.key().replaceAll("[^A-Za-z0-9]", "-");
+        for (String language : wanted) {
+            File cached = new File(getCacheDir(), cachePrefix + "." + language + ".srt");
+            if (cached.isFile() && cached.length() > 0) {
+                cached.setLastModified(System.currentTimeMillis());
+                cancelSubtitleSearch();
+                subtitleSearchStarted = key;
+                attachSearchedSubtitle(subtitleSearchGeneration, id,
+                        Uri.fromFile(cached), language);
+                return;
+            }
+        }
+
+        cancelSubtitleSearch();
+        subtitleSearchStarted = key;
+        int generation = subtitleSearchGeneration;
+        Thread worker = new Thread(() -> {
+            AtomicBoolean answered = new AtomicBoolean();
+            SubtitleSearch.Result found = null;
+            try {
+                found = SubtitleSearch.find(id, wanted, mPrefs, result -> {
+                    if (generation != subtitleSearchGeneration) return false;
+                    List<Uri> urls = new ArrayList<>(result.urls.size());
+                    for (String url : result.urls) urls.add(Uri.parse(url));
+                    Uri file = new SubtitleFetcher(this, urls,
+                            cachePrefix + "." + result.language + ".srt").fetchNow();
+                    if (file == null) return false;
+                    runOnUiThread(() -> attachSearchedSubtitle(
+                            generation, id, file, result.language));
+                    return true;
+                }, answered);
+            } catch (Throwable error) {
+                Utils.log("subtitles: search failed " + error);
+            }
+            if (found == null && answered.get() && !Thread.currentThread().isInterrupted()) {
+                subtitleSearchMisses.put(key, System.currentTimeMillis());
+            }
+        }, "SubtitleSearch");
+        worker.setDaemon(true);
+        subtitleSearchThread = worker;
+        worker.start();
+    }
+
+    private void attachSearchedSubtitle(int generation, MediaId id, Uri file, String language) {
+        if (generation != subtitleSearchGeneration || player == null
+                || !currentMediaId().sameAs(id)) {
+            return;
+        }
+        mPrefs.updateSubtitle(file);
+        if (addSubtitleTrack(file)) {
+            Toast.makeText(this, getString(R.string.subtitle_search_found,
+                    displaySubtitleLanguage(language)), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private String enabledSubtitleSources() {
+        return (mPrefs.subtitleSourceRest ? "1" : "")
+                + (mPrefs.subtitleSourceStremio ? "2" : "")
+                + (mPrefs.subtitleSourceShegu ? "3" : "")
+                + (mPrefs.subtitleSourceOpenSubtitles ? "4" : "");
+    }
+
+    private static String displaySubtitleLanguage(String language) {
+        List<String> codes = OpenSubtitles.toIso639_1(Collections.singletonList(language));
+        if (codes.isEmpty()) return language;
+        return Locale.forLanguageTag(codes.get(0)).getDisplayLanguage();
+    }
+
+    private MediaId currentMediaId() {
+        LampaPlaylist.Item item = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
+        if (item != null) {
+            return new MediaId(item.imdbId,
+                    item.tmdbId > 0 ? String.valueOf(item.tmdbId) : null,
+                    item.season, item.episode);
+        }
+        Bundle extras = getIntent() == null ? null : getIntent().getExtras();
+        return new MediaId(firstExtra(extras, "lampaua.imdb_id", "imdb_id"),
+                firstExtra(extras, "lampaua.tmdb_id", "tmdb_id"),
+                positiveExtra(extras, "lampaua.season", "season"),
+                positiveExtra(extras, "lampaua.episode", "episode"));
+    }
+
+    private static String firstExtra(Bundle extras, String... keys) {
+        if (extras == null) return null;
+        for (String key : keys) {
+            Object value = extras.get(key);
+            if (value != null && !String.valueOf(value).trim().isEmpty()) {
+                return String.valueOf(value).trim();
+            }
+        }
+        return null;
+    }
+
+    private static int positiveExtra(Bundle extras, String... keys) {
+        String value = firstExtra(extras, keys);
+        if (value == null) return -1;
+        try {
+            int parsed = Integer.parseInt(value);
+            return parsed > 0 ? parsed : -1;
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
+    }
+
+    private static boolean isPhantomClosedCaption(Format format) {
+        return MimeTypes.APPLICATION_CEA608.equals(format.sampleMimeType)
+                && format.accessibilityChannel == Format.NO_VALUE;
+    }
+
     private static final class TrackingAudioSink extends ForwardingAudioSink {
         private final Set<String> blockedMimes;
         private volatile boolean passthrough;
@@ -4607,11 +4814,14 @@ public class PlayerActivity extends Activity {
                         .build();
                 mediaItemBuilder.setMediaMetadata(mediaMetadata);
             }
-            if (apiAccess && apiSubs.size() > 0) {
-                mediaItemBuilder.setSubtitleConfigurations(apiSubs);
-            } else if (mPrefs.subtitleUri != null && Utils.fileExists(this, mPrefs.subtitleUri)) {
-                MediaItem.SubtitleConfiguration subtitle = SubtitleUtils.buildSubtitle(this, mPrefs.subtitleUri, null, true);
-                mediaItemBuilder.setSubtitleConfigurations(Collections.singletonList(subtitle));
+            List<MediaItem.SubtitleConfiguration> startingSubtitles = new ArrayList<>();
+            if (apiAccess) startingSubtitles.addAll(apiSubs);
+            MediaItem.SubtitleConfiguration remembered = rememberedSubtitle();
+            if (remembered != null && !containsSubtitle(startingSubtitles, remembered.uri)) {
+                startingSubtitles.add(remembered);
+            }
+            if (!startingSubtitles.isEmpty()) {
+                mediaItemBuilder.setSubtitleConfigurations(startingSubtitles);
             }
             player.setMediaItem(mediaItemBuilder.build(), mPrefs.getPosition());
 
@@ -4710,6 +4920,7 @@ public class PlayerActivity extends Activity {
 
     public void releasePlayer(boolean save) {
         cancelFrameRateSwitchWait();
+        cancelSubtitleSearch();
         play = false;
         cancelPlaybackWatchdogs();
         hideSwipeToUnlock();
@@ -5044,6 +5255,7 @@ public class PlayerActivity extends Activity {
             }
             resolveTrackNames();
             updateLampaTrackDetails();
+            maybeSearchSubtitlesOnline(tracks);
         }
 
         @Override

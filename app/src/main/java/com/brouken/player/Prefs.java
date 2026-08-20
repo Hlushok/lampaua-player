@@ -55,6 +55,12 @@ class Prefs {
     private static final String PREF_KEY_MAP_DV7 = "mapDV7ToHevc";
     private static final String PREF_KEY_LANGUAGE_AUDIO = "languageAudio";
     private static final String PREF_KEY_LANGUAGE_SUBTITLE = "languageSubtitle";
+    private static final String PREF_KEY_SUBTITLE_SEARCH = "subtitleSearch";
+    private static final String PREF_KEY_SUBTITLE_SEARCH_STRICT = "subtitleSearchStrict";
+    private static final String PREF_KEY_SOURCE_OPENSUBTITLES = "subtitleSourceOpenSubtitles";
+    private static final String PREF_KEY_SOURCE_SHEGU = "subtitleSourceShegu";
+    private static final String PREF_KEY_SOURCE_STREMIO = "subtitleSourceStremio";
+    private static final String PREF_KEY_SOURCE_REST = "subtitleSourceRest";
     private static final String PREF_KEY_SUBTITLE_STYLE_EMBEDDED = "subtitleStyleEmbedded";
     private static final String PREF_KEY_SUBTITLE_STYLE_BOLD = "subtitleStyleBold";
     private static final String PREF_KEY_SUBTITLE_SCALE = "subtitleScale";
@@ -115,6 +121,13 @@ class Prefs {
     public boolean mapDV7ToHevc = false;
     public String languageAudio = "";
     public String languageSubtitle = "";
+    // Opt-in because searches disclose the title identifiers to third-party services.
+    public boolean subtitleSearch = false;
+    public boolean subtitleSearchStrict = false;
+    public boolean subtitleSourceOpenSubtitles = true;
+    public boolean subtitleSourceShegu = true;
+    public boolean subtitleSourceStremio = true;
+    public boolean subtitleSourceRest = true;
     public boolean subtitleStyleEmbedded = true;
     public boolean subtitleStyleBold = false;
     public float subtitleScale = 1.0f;
@@ -187,6 +200,17 @@ class Prefs {
         mapDV7ToHevc = mSharedPreferences.getBoolean(PREF_KEY_MAP_DV7, mapDV7ToHevc);
         languageAudio = getLanguageAudio(mContext);
         languageSubtitle = getLanguageSubtitle(mContext);
+        subtitleSearch = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_SEARCH, subtitleSearch);
+        subtitleSearchStrict = mSharedPreferences.getBoolean(
+                PREF_KEY_SUBTITLE_SEARCH_STRICT, subtitleSearchStrict);
+        subtitleSourceOpenSubtitles = mSharedPreferences.getBoolean(
+                PREF_KEY_SOURCE_OPENSUBTITLES, subtitleSourceOpenSubtitles);
+        subtitleSourceShegu = mSharedPreferences.getBoolean(
+                PREF_KEY_SOURCE_SHEGU, subtitleSourceShegu);
+        subtitleSourceStremio = mSharedPreferences.getBoolean(
+                PREF_KEY_SOURCE_STREMIO, subtitleSourceStremio);
+        subtitleSourceRest = mSharedPreferences.getBoolean(
+                PREF_KEY_SOURCE_REST, subtitleSourceRest);
         subtitleStyleEmbedded = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_STYLE_EMBEDDED, subtitleStyleEmbedded);
         subtitleStyleBold = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_STYLE_BOLD, subtitleStyleBold);
         subtitleScale = readFloat(PREF_KEY_SUBTITLE_SCALE, subtitleScale, 0.25f, 2.0f);
@@ -287,6 +311,23 @@ class Prefs {
         String normalized = AudioLanguagePriority.serialize(AudioLanguagePriority.parse(languages));
         PreferenceManager.getDefaultSharedPreferences(context).edit()
                 .putString(PREF_KEY_LANGUAGE_SUBTITLE, normalized).apply();
+    }
+
+    public static boolean getSubtitleSearch(Context context) {
+        return PreferenceManager.getDefaultSharedPreferences(context)
+                .getBoolean(PREF_KEY_SUBTITLE_SEARCH, false);
+    }
+
+    public static boolean getSubtitleSearchStrict(Context context) {
+        return PreferenceManager.getDefaultSharedPreferences(context)
+                .getBoolean(PREF_KEY_SUBTITLE_SEARCH_STRICT, false);
+    }
+
+    public static void setSubtitleSearch(Context context, boolean enabled, boolean strict) {
+        PreferenceManager.getDefaultSharedPreferences(context).edit()
+                .putBoolean(PREF_KEY_SUBTITLE_SEARCH, enabled)
+                .putBoolean(PREF_KEY_SUBTITLE_SEARCH_STRICT, strict)
+                .apply();
     }
 
     private float readFloat(String key, float fallback, float min, float max) {

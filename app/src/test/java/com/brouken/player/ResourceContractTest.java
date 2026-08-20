@@ -207,4 +207,34 @@ public class ResourceContractTest {
         assertTrue(settings.contains("EXTRA_SCROLL_TO"));
         assertTrue(settings.contains("openAtPreference"));
     }
+
+    @Test
+    public void onlineSubtitleSearchKeepsSourceAndPrivacyContracts() throws Exception {
+        String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
+        String prefs = readProjectFile("src/main/java/com/brouken/player/Prefs.java");
+        String search = readProjectFile("src/main/java/com/brouken/player/SubtitleSearch.java");
+        String openSubtitles = readProjectFile(
+                "src/main/java/com/brouken/player/OpenSubtitles.java");
+        String fetcher = readProjectFile(
+                "src/main/java/com/brouken/player/SubtitleFetcher.java");
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+
+        assertTrue(preferences.contains("app:key=\"subtitleSources\""));
+        assertTrue(preferences.contains("app:key=\"subtitleSourceRest\""));
+        assertTrue(preferences.contains("app:key=\"subtitleSourceStremio\""));
+        assertTrue(preferences.contains("app:key=\"subtitleSourceShegu\""));
+        assertTrue(preferences.contains("app:key=\"subtitleSourceOpenSubtitles\""));
+        assertTrue(prefs.contains("public boolean subtitleSearch = false"));
+        assertTrue(search.contains("rest.opensubtitles.org"));
+        assertTrue(search.contains("opensubtitles-v3.strem.io"));
+        assertTrue(search.contains("subtitles.shegu.st"));
+        assertFalse(search.contains("SegmentFinder"));
+        assertTrue(openSubtitles.contains("header(\"Api-Key\", KEY)"));
+        assertTrue(openSubtitles.contains("UA-Player/"));
+        assertFalse(openSubtitles.contains("JustPlayer"));
+        assertTrue(fetcher.contains("Uri fetchNow()"));
+        assertTrue(activity.contains("maybeSearchSubtitlesOnline(tracks)"));
+        assertTrue(activity.contains("addSubtitleTrack(Uri subtitleUri)"));
+    }
 }
