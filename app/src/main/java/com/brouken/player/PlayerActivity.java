@@ -204,8 +204,6 @@ public class PlayerActivity extends Activity {
     private static final long STALL_CHECK_INTERVAL_MS = 1_500L;
     private static final long STALL_TIMEOUT_MS = 10_000L;
     private static final long STABLE_PLAYBACK_MS = 15_000L;
-    private static final long LIVE_RECOVERY_FORGET_MS = 60_000L;
-    private static final int MAX_LIVE_RECOVERIES = 2;
 
     private CoordinatorLayout coordinatorLayout;
     private TextView titleView;
@@ -338,9 +336,8 @@ public class PlayerActivity extends Activity {
         if (SystemClock.elapsedRealtime() - stablePlaybackStartedAt >= STABLE_PLAYBACK_MS
                 && progress >= 5_000) {
             sourceRecoveryAttempts = 0;
-            if (SystemClock.elapsedRealtime() - lastLiveRecoveryAt >= LIVE_RECOVERY_FORGET_MS) {
-                liveRecoveryAttempts = 0;
-            }
+            liveRecoveryAttempts = LiveRecoveryPolicy.effectiveAttempts(liveRecoveryAttempts,
+                    SystemClock.elapsedRealtime(), lastLiveRecoveryAt);
         }
     };
     private final AudioRecoveryState audioRecoveryState = new AudioRecoveryState();
@@ -4450,25 +4447,17 @@ public class PlayerActivity extends Activity {
 
     private boolean recoverPlayback(PlaybackRecoveryPolicy.FailureKind kind) {
         if (player == null || kind == null) return false;
-        long now = SystemClock.elapsedRealtime();
-        int attempts = sourceRecoveryAttempts;
         if (kind == PlaybackRecoveryPolicy.FailureKind.LIVE_STALL) {
-            if (now - lastLiveRecoveryAt >= LIVE_RECOVERY_FORGET_MS) liveRecoveryAttempts = 0;
-            if (liveRecoveryAttempts >= MAX_LIVE_RECOVERIES) return false;
-            attempts = liveRecoveryAttempts;
+            return rejoinLiveWindow();
         }
 
         boolean lowerAvailable = hasLowerQualityCandidate();
         PlaybackRecoveryPolicy.Action action = PlaybackRecoveryPolicy.decide(
-                kind, playbackEverReady, attempts, compatibilityRecoveryAttempts, lowerAvailable);
+                kind, playbackEverReady, sourceRecoveryAttempts,
+                compatibilityRecoveryAttempts, lowerAvailable);
         switch (action) {
             case RETRY_SOURCE:
-                if (kind == PlaybackRecoveryPolicy.FailureKind.LIVE_STALL) {
-                    liveRecoveryAttempts++;
-                    lastLiveRecoveryAt = now;
-                } else {
-                    sourceRecoveryAttempts++;
-                }
+                sourceRecoveryAttempts++;
                 savePlayer();
                 restorePlayState = player.getPlayWhenReady();
                 updateLoading(true);
@@ -4478,8 +4467,7 @@ public class PlayerActivity extends Activity {
                                 : R.string.playback_recovery_retry), 2500);
                 String retryKey = playbackRecoveryKey;
                 long delay = Math.min(3_000L, 600L * Math.max(1,
-                        kind == PlaybackRecoveryPolicy.FailureKind.LIVE_STALL
-                                ? liveRecoveryAttempts : sourceRecoveryAttempts));
+                        sourceRecoveryAttempts));
                 playerView.postDelayed(() -> {
                     if (isFinishing() || isDestroyed() || switchingPlaylistItem
                             || !Objects.equals(retryKey, playbackRecoveryKey)) return;
@@ -4504,6 +4492,27 @@ public class PlayerActivity extends Activity {
             default:
                 return false;
         }
+    }
+
+    private boolean rejoinLiveWindow() {
+        if (player == null || !player.isCurrentMediaItemLive()) return false;
+        long now = SystemClock.elapsedRealtime();
+        liveRecoveryAttempts = LiveRecoveryPolicy.effectiveAttempts(
+                liveRecoveryAttempts, now, lastLiveRecoveryAt);
+        if (!LiveRecoveryPolicy.canRejoin(liveRecoveryAttempts, now, lastLiveRecoveryAt)) {
+            return false;
+        }
+
+        boolean resume = player.getPlayWhenReady();
+        liveRecoveryAttempts++;
+        lastLiveRecoveryAt = now;
+        updateLoading(true);
+        Utils.showText(playerView, getString(R.string.playback_recovery_retry), 2500);
+        player.seekToDefaultPosition();
+        player.prepare();
+        player.setPlayWhenReady(resume);
+        armLoadWatchdog();
+        return true;
     }
 
     private int currentVideoHeight() {

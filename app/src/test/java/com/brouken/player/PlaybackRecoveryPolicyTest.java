@@ -7,6 +7,7 @@ import static com.brouken.player.PlaybackRecoveryPolicy.Action.LOWER_QUALITY;
 import static com.brouken.player.PlaybackRecoveryPolicy.Action.RETRY_COMPATIBILITY;
 import static com.brouken.player.PlaybackRecoveryPolicy.Action.RETRY_SOURCE;
 import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.DECODER;
+import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.LIVE_STALL;
 import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.NETWORK_READ;
 import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE;
 import static org.junit.Assert.assertEquals;
@@ -37,5 +38,11 @@ public class PlaybackRecoveryPolicyTest {
     public void corruptLocalInputIsNeverRetriedAsNetwork() {
         assertEquals(FAIL,
                 PlaybackRecoveryPolicy.decide(TRUNCATED_LOCAL_FILE, false, 0, 0, true));
+    }
+
+    @Test
+    public void liveStallUsesItsDedicatedRejoinBudget() {
+        assertEquals(FAIL,
+                PlaybackRecoveryPolicy.decide(LIVE_STALL, true, 0, 0, true));
     }
 }

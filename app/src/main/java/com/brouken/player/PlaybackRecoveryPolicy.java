@@ -29,12 +29,11 @@ final class PlaybackRecoveryPolicy {
     static Action decide(FailureKind kind, boolean everReady, int sourceRetries,
                          int compatibilityRetries, boolean lowerQualityAvailable) {
         if (kind == null || kind == FailureKind.TRUNCATED_LOCAL_FILE
-                || kind == FailureKind.UNKNOWN) {
+                || kind == FailureKind.LIVE_STALL || kind == FailureKind.UNKNOWN) {
             return Action.FAIL;
         }
 
-        if (kind == FailureKind.NETWORK_READ || kind == FailureKind.RESOLVER_NOT_READY
-                || kind == FailureKind.LIVE_STALL) {
+        if (kind == FailureKind.NETWORK_READ || kind == FailureKind.RESOLVER_NOT_READY) {
             return sourceRetries < MAX_SOURCE_RETRIES ? Action.RETRY_SOURCE : Action.FAIL;
         }
 
