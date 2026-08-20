@@ -569,6 +569,9 @@ public class PlayerActivity extends Activity {
         playerView = findViewById(R.id.video_view);
         exoPlayPause = findViewById(R.id.exo_play_pause);
         loadingProgressBar = findViewById(R.id.loading);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            loadingProgressBar.setDefaultFocusHighlightEnabled(false);
+        }
         loadingRateView = new TextView(this);
         loadingRateView.setTextColor(Color.WHITE);
         loadingRateView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
@@ -2656,6 +2659,9 @@ public class PlayerActivity extends Activity {
             lampaSkipButton.requestFocus();
         } else if (target == TvFocusPolicy.Target.PLAY_PAUSE) {
             exoPlayPause.requestFocus();
+        } else if (isTvBox && playerView.isControllerFullyVisible()
+                && loadingProgressBar != null && loadingProgressBar.isShown()) {
+            parkFocusOnLoadingRing();
         }
     }
 
@@ -4012,6 +4018,11 @@ public class PlayerActivity extends Activity {
         }
 
         @Override
+        public void onRenderedFirstFrame() {
+            frameRendered = true;
+        }
+
+        @Override
         public void onPositionDiscontinuity(Player.PositionInfo oldPosition,
                                             Player.PositionInfo newPosition, int reason) {
             if (reason == Player.DISCONTINUITY_REASON_SEEK
@@ -5118,21 +5129,30 @@ public class PlayerActivity extends Activity {
 
     private void updateLoading(final boolean enableLoading) {
         if (enableLoading) {
-            exoPlayPause.setVisibility(View.GONE);
+            boolean playPauseHadFocus = exoPlayPause.hasFocus();
+            exoPlayPause.setVisibility(View.INVISIBLE);
             loadingProgressBar.setVisibility(View.VISIBLE);
+            if (isTvBox && (playPauseHadFocus || focusPlay)) parkFocusOnLoadingRing();
             updateTransferRateUi();
         } else {
+            boolean loadingHadFocus = loadingProgressBar.hasFocus();
+            loadingProgressBar.setFocusable(false);
             loadingProgressBar.setVisibility(View.GONE);
             if (loadingRateView != null) loadingRateView.setVisibility(View.GONE);
             exoPlayPause.setVisibility(View.VISIBLE);
-            boolean shouldFocusPlay = focusPlay;
+            boolean shouldFocusPlay = focusPlay || loadingHadFocus;
             focusPlay = false;
-            if (isTvBox) {
-                postPrimaryTvFocus();
-            } else if (shouldFocusPlay) {
+            if (shouldFocusPlay) {
                 exoPlayPause.requestFocus();
+            } else if (isTvBox && getCurrentFocus() == null) {
+                postPrimaryTvFocus();
             }
         }
+    }
+
+    private void parkFocusOnLoadingRing() {
+        loadingProgressBar.setFocusable(true);
+        loadingProgressBar.requestFocus();
     }
 
     @RequiresApi(api = Build.VERSION_CODES.O)

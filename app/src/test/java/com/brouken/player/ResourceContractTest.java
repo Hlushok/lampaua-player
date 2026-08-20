@@ -116,4 +116,26 @@ public class ResourceContractTest {
         assertTrue(swipe.contains("setOnStartTouchingListener"));
         assertTrue(swipe.contains("setOnStopTouchingListener"));
     }
+
+    @Test
+    public void upstreamTvInteractionFixesStayIntegrated() throws Exception {
+        String customView = readProjectFile(
+                "src/main/java/com/brouken/player/CustomPlayerView.java");
+        String timeBar = readProjectFile(
+                "src/main/java/com/brouken/player/CustomDefaultTimeBar.java");
+        String settings = readProjectFile(
+                "src/main/java/com/brouken/player/SettingsActivity.java");
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+        String manifest = readProjectFile("src/main/AndroidManifest.xml");
+
+        assertTrue(customView.contains("seekGesture(final long position)"));
+        assertTrue(customView.contains("player.seekTo(seekStart + seekChange)"));
+        assertTrue(timeBar.contains("drawBand(Canvas canvas, int left, int right)"));
+        assertTrue(settings.contains("calculateExtraLayoutSpace"));
+        assertTrue(activity.contains("parkFocusOnLoadingRing"));
+        assertTrue(manifest.contains("android:autoRemoveFromRecents=\"true\""));
+        assertTrue(manifest.contains("android:launchMode=\"singleTask\""));
+        assertTrue(activity.contains("com.mxtech.intent.result.VIEW"));
+    }
 }

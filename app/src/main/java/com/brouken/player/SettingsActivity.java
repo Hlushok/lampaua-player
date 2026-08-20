@@ -17,6 +17,7 @@ import androidx.preference.ListPreference;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.SwitchPreferenceCompat;
+import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.brouken.player.update.UpdateUi;
@@ -86,6 +87,17 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     public static class SettingsFragment extends PreferenceFragmentCompat {
+        @Override
+        public RecyclerView.LayoutManager onCreateLayoutManager() {
+            return new LinearLayoutManager(getContext()) {
+                @Override
+                protected void calculateExtraLayoutSpace(@NonNull RecyclerView.State state,
+                                                         @NonNull int[] extraLayoutSpace) {
+                    extraLayoutSpace[0] = extraLayoutSpace[1] = getHeight() * 2;
+                }
+            };
+        }
+
         @Override
         public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
             boolean hadAllowSystemFrameRateKey =

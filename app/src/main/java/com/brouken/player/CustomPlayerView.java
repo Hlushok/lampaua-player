@@ -15,6 +15,7 @@ import android.widget.TextView;
 
 import androidx.core.view.GestureDetectorCompat;
 import androidx.media3.common.C;
+import androidx.media3.common.Player;
 import androidx.media3.exoplayer.SeekParameters;
 import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.PlayerView;
@@ -137,6 +138,10 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
                 }
                 if (handleTouch) {
                     if (gestureOrientation == Orientation.HORIZONTAL) {
+                        Player player = PlayerActivity.player;
+                        if (PlayerActivity.haveMedia && player != null) {
+                            player.seekTo(seekStart + seekChange);
+                        }
                         setCustomErrorMessage(null);
                     } else {
                         postDelayed(textClearRunnable, isHandledLongPress ? MESSAGE_TIMEOUT_LONG : MESSAGE_TIMEOUT_TOUCH);
@@ -205,6 +210,15 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
         return false;
     }
 
+    private void seekGesture(final long position) {
+        if (!(getContext() instanceof PlayerActivity)) return;
+        Player player = PlayerActivity.player;
+        PlayerActivity activity = (PlayerActivity) getContext();
+        if (player == null || !activity.frameRendered) return;
+        activity.frameRendered = false;
+        player.seekTo(position);
+    }
+
     @Override
     public boolean onScroll(MotionEvent motionEvent, MotionEvent motionEvent1, float distanceX, float distanceY) {
         if (mScaleDetector.isInProgress() || PlayerActivity.player == null || PlayerActivity.locked)
@@ -253,18 +267,18 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
                             PlayerActivity.player.setSeekParameters(SeekParameters.PREVIOUS_SYNC);
                             seekChange -= SEEK_STEP * distanceDiff;
                             position = seekStart + seekChange;
-                            PlayerActivity.player.seekTo(position);
+                            seekGesture(position);
                         }
                     } else {
                         PlayerActivity.player.setSeekParameters(SeekParameters.NEXT_SYNC);
                         if (seekMax == C.TIME_UNSET) {
                             seekChange += SEEK_STEP * distanceDiff;
                             position = seekStart + seekChange;
-                            PlayerActivity.player.seekTo(position);
+                            seekGesture(position);
                         } else if (seekStart + seekChange + SEEK_STEP < seekMax) {
                             seekChange += SEEK_STEP  * distanceDiff;
                             position = seekStart + seekChange;
-                            PlayerActivity.player.seekTo(position);
+                            seekGesture(position);
                         }
                     }
                     String message = Utils.formatMilisSign(seekChange);
