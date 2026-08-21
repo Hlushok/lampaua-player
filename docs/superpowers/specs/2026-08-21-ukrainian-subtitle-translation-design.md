@@ -6,7 +6,7 @@ Add the subtitle timing work merged into Just+ Player's subtitle feature branch 
 
 The reviewed upstream source is:
 
-- Just+ subtitle branch: `just-plus-player/feature/subtitles` at `d2892550cb1467377457175975116284643c5117`.
+- Just+ subtitle branch: `just-plus-player/feature/subtitles` at `d289255732e2b2623562dd596a34395826c48cdd`.
 - Subtitle timing and hot-attach work: PR #130, commits `d55277b2a4e7663ae46015ce8d593a3b0620f803` and `774b873acce77d1ec314772b76cf8c232e36f396`.
 
 The translation pipeline is a UA Player implementation. It does not copy a translation service or source-selection policy from Just+ Player.
@@ -15,6 +15,7 @@ The translation pipeline is a UA Player implementation. It does not copy a trans
 
 - Keep package id `com.lampaua.player`, version `1.6.1`, version code `19`, and the existing signing certificate.
 - Keep UA Player branding, Ukrainian-first UI, LAMPA extras, playlist behavior, result contract, updater, and server skip integration.
+- Keep manual skip offset excluded. The offset panel added here controls subtitle timing only.
 - Do not add Just+ branding, Sentry, telemetry, remote diagnostics, or direct skip database calls.
 - Do not send media URLs, titles, external ids, timestamps, room state, device data, or credentials to the translation service.
 - Do not block, pause, seek, rebuild, or re-prepare video merely to translate or attach subtitles.
@@ -47,7 +48,7 @@ Adapt Just+ Player's `SubtitleOffset` and `SubtitleTimeline` classes with attrib
 - pause, seek, playback speed, item changes, and player rebuilds use media time rather than wall-clock timers;
 - the offset resets to zero on item changes and never persists across episodes.
 
-Expose the offset in the existing player side menu directly below the skip controls, only while a text subtitle is active or a timeline is being painted. Use the existing offset panel interaction and UA Player styling.
+Adapt Just+ Player's `OffsetPanel` for subtitle timing only. Expose it in the existing player side menu directly below the skip controls, only while a text subtitle is active or a timeline is being painted. Preserve UA Player styling and do not add Just+ Player's manual skip-offset action.
 
 An online subtitle that arrives during playback is parsed into a timeline and painted directly. The current `setMediaItems()` plus `prepare()` path remains only as a fallback when Media3 cannot parse the external file. This avoids reopening HTTP and torrent-backed media for a subtitle-only change.
 
