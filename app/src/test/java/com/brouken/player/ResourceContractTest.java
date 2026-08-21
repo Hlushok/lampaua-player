@@ -380,4 +380,49 @@ public class ResourceContractTest {
         assertFalse(activity.contains("button_skip_offset"));
         assertFalse(activity.contains("skipOffsetSec"));
     }
+
+    @Test
+    public void onlineSubtitleTranslationStaysUkrainianAndPrivate() throws Exception {
+        String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
+        String prefs = readProjectFile("src/main/java/com/brouken/player/Prefs.java");
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+        String transport = readProjectFile(
+                "src/main/java/com/brouken/player/GoogleSubtitleTranslationTransport.java");
+        String translator = readProjectFile(
+                "src/main/java/com/brouken/player/UkrainianSubtitleTranslator.java");
+        String ukrainian = readProjectFile("src/main/res/values-uk/strings.xml");
+
+        assertTrue(preferences.contains("app:key=\"subtitleAutoTranslateUkrainian\""));
+        assertTrue(preferences.contains("app:defaultValue=\"true\""));
+        assertTrue(prefs.contains("public boolean subtitleSearch = false"));
+        assertTrue(prefs.contains("public boolean subtitleAutoTranslateUkrainian = true"));
+        assertTrue(activity.contains("UkrainianSubtitlePolicy.directLanguages"));
+        assertTrue(activity.contains("UkrainianSubtitlePolicy.fallbackLanguages"));
+        assertTrue(activity.contains("auto-ukr"));
+        assertTrue(activity.contains("if (!directAnswered.get())"));
+        assertTrue(transport.contains(
+                "https://translate.googleapis.com/translate_a/single"));
+        assertTrue(transport.contains("new FormBody.Builder()"));
+        assertTrue(transport.contains(".add(\"tl\", UkrainianSubtitlePolicy.targetIso2())"));
+        assertFalse(transport.contains("MediaId"));
+        assertFalse(transport.contains("apiTitle"));
+        assertFalse(transport.contains("imdb"));
+        assertFalse(transport.contains("tmdb"));
+        assertFalse(transport.contains("HttpLoggingInterceptor"));
+        assertTrue(translator.contains("target.getName() + \".tmp\""));
+        assertTrue(translator.contains("temporary.renameTo(target)"));
+        assertTrue(ukrainian.contains("name=\"subtitle_translate_progress\""));
+        assertTrue(ukrainian.contains("name=\"subtitle_translate_success\""));
+        assertTrue(ukrainian.contains("name=\"subtitle_translate_failed\""));
+
+        String search = readProjectFile(
+                "src/main/java/com/brouken/player/SubtitleSearch.java");
+        String openSubtitles = readProjectFile(
+                "src/main/java/com/brouken/player/OpenSubtitles.java");
+        assertTrue(search.contains(
+                "if (response.isSuccessful() && body != null) answered.set(true)"));
+        assertTrue(openSubtitles.contains(
+                "if (response.isSuccessful() && body != null && answered != null)"));
+    }
 }

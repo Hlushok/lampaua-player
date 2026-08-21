@@ -60,6 +60,8 @@ class Prefs {
     private static final String PREF_KEY_LANGUAGE_SUBTITLE = "languageSubtitle";
     private static final String PREF_KEY_SUBTITLE_SEARCH = "subtitleSearch";
     private static final String PREF_KEY_SUBTITLE_SEARCH_STRICT = "subtitleSearchStrict";
+    private static final String PREF_KEY_SUBTITLE_AUTO_TRANSLATE_UKRAINIAN =
+            "subtitleAutoTranslateUkrainian";
     private static final String PREF_KEY_SOURCE_OPENSUBTITLES = "subtitleSourceOpenSubtitles";
     private static final String PREF_KEY_SOURCE_SHEGU = "subtitleSourceShegu";
     private static final String PREF_KEY_SOURCE_STREMIO = "subtitleSourceStremio";
@@ -130,6 +132,7 @@ class Prefs {
     // Opt-in because searches disclose the title identifiers to third-party services.
     public boolean subtitleSearch = false;
     public boolean subtitleSearchStrict = false;
+    public boolean subtitleAutoTranslateUkrainian = true;
     public boolean subtitleSourceOpenSubtitles = true;
     public boolean subtitleSourceShegu = true;
     public boolean subtitleSourceStremio = true;
@@ -213,6 +216,9 @@ class Prefs {
         subtitleSearch = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_SEARCH, subtitleSearch);
         subtitleSearchStrict = mSharedPreferences.getBoolean(
                 PREF_KEY_SUBTITLE_SEARCH_STRICT, subtitleSearchStrict);
+        subtitleAutoTranslateUkrainian = mSharedPreferences.getBoolean(
+                PREF_KEY_SUBTITLE_AUTO_TRANSLATE_UKRAINIAN,
+                subtitleAutoTranslateUkrainian);
         subtitleSourceOpenSubtitles = mSharedPreferences.getBoolean(
                 PREF_KEY_SOURCE_OPENSUBTITLES, subtitleSourceOpenSubtitles);
         subtitleSourceShegu = mSharedPreferences.getBoolean(

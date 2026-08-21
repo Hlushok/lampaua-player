@@ -83,6 +83,17 @@ public class UkrainianSubtitleTranslatorTest {
         assertFalse(target.exists());
     }
 
+    @Test
+    public void validatesGeneratedCacheBeforeReuse() throws Exception {
+        File valid = write("valid.srt", simpleSource(1));
+        File invalid = write("invalid.srt", "not subtitles");
+
+        assertTrue(UkrainianSubtitleTranslator.isUsableCache(valid));
+        assertFalse(UkrainianSubtitleTranslator.isUsableCache(invalid));
+        assertFalse(UkrainianSubtitleTranslator.isUsableCache(
+                new File(temporary.getRoot(), "missing.srt")));
+    }
+
     private File write(String name, String value) throws IOException {
         File file = new File(temporary.getRoot(), name);
         try (FileOutputStream output = new FileOutputStream(file)) {

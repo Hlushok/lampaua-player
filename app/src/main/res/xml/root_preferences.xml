@@ -149,6 +149,12 @@
             app:key="languageSubtitle"
             app:title="@string/pref_language_subtitle" />
 
+        <SwitchPreferenceCompat
+            app:key="subtitleAutoTranslateUkrainian"
+            app:defaultValue="true"
+            app:summary="@string/pref_subtitle_auto_translate_ukrainian_summary"
+            app:title="@string/pref_subtitle_auto_translate_ukrainian" />
+
         <PreferenceScreen
             app:key="subtitleSources"
             app:summary="@string/pref_subtitle_sources_summary"

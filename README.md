@@ -13,6 +13,8 @@ Open-source Android video player for Lampa and LampaUA, based on [Just Player](h
 - torrent-aware buffering and in-place retry for transient network reads;
 - video quality, audio track and subtitle selection;
 - ordered preferred audio and subtitle languages, in-player subtitle styling and opt-in online subtitle search;
+- subtitle timing from -30 to +30 seconds and interruption-free attachment of newly found text subtitles;
+- optional Ukrainian-only auto-translation when no original Ukrainian SubRip subtitle is available; only cue text is sent to an unofficial external Google translation endpoint;
 - richer MKV, AVI and MP4 track, frame-rate and bitrate metadata;
 - episode playlists with titles, thumbnails and remote-control navigation;
 - automatic playback of the next episode;

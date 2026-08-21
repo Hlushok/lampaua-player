@@ -298,8 +298,8 @@ final class SubtitleSearch {
                 .header("Accept", "application/json")
                 .build();
         try (Response response = CLIENT.newCall(request).execute()) {
-            answered.set(true);
             ResponseBody body = response.body();
+            if (response.isSuccessful() && body != null) answered.set(true);
             if (!response.isSuccessful() || body == null) {
                 Utils.log("subtitles: " + response.code() + " " + request.url().host());
                 return null;

@@ -154,6 +154,11 @@
     <string name="pref_subtitle_search">Search online when missing</string>
     <string name="pref_subtitle_search_strict">Only when none of the languages above are present</string>
     <string name="subtitle_search_found">Subtitles found: %1$s</string>
+    <string name="pref_subtitle_auto_translate_ukrainian">Auto-translate to Ukrainian</string>
+    <string name="pref_subtitle_auto_translate_ukrainian_summary">When Ukrainian subtitles are unavailable, only cue text is sent to an external Google service and translated to Ukrainian</string>
+    <string name="subtitle_translate_progress">Translating subtitles to Ukrainian…</string>
+    <string name="subtitle_translate_success">Ukrainian subtitle translation is ready</string>
+    <string name="subtitle_translate_failed">Could not safely translate subtitles to Ukrainian</string>
     <string name="pref_subtitle_sources">Subtitle sources</string>
     <string name="pref_subtitle_sources_summary">Third-party sources tried until one provides a preferred language</string>
     <string name="pref_subtitle_source_opensubtitles">OpenSubtitles.com</string>

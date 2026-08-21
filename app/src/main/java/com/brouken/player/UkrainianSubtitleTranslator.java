@@ -11,6 +11,19 @@ import java.io.InputStream;
 final class UkrainianSubtitleTranslator {
     private UkrainianSubtitleTranslator() { }
 
+    static boolean isUsableCache(File file) {
+        if (file == null || !file.isFile() || file.length() <= 0
+                || file.length() > SubRipDocument.MAX_INPUT_BYTES) {
+            return false;
+        }
+        try {
+            SubRipDocument.parse(readBounded(file));
+            return true;
+        } catch (IOException | RuntimeException error) {
+            return false;
+        }
+    }
+
     static boolean translate(File source, File target, String sourceIso3,
                              SubtitleTranslationTransport transport) {
         if (source == null || target == null || transport == null

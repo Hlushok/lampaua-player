@@ -300,6 +300,7 @@ public class PlayerActivity extends Activity {
     final HashMap<String, String> apiHeaders = new HashMap<>();
     private LampaPlaylist lampaPlaylist;
     private String subtitleSearchStarted;
+    private String subtitleSearchSuppressed;
     private Thread subtitleSearchThread;
     private volatile int subtitleSearchGeneration;
     private double subtitleOffsetSec;
@@ -4678,6 +4679,8 @@ public class PlayerActivity extends Activity {
                 }
             }
         } else if (requestCode == REQUEST_SETTINGS) {
+            cancelSubtitleSearch();
+            subtitleSearchSuppressed = null;
             mPrefs.loadUserPreferences();
             systemVolume = mPrefs.systemVolume;
             playerVolume = mPrefs.playerVolume;
@@ -4694,6 +4697,7 @@ public class PlayerActivity extends Activity {
             updateLampaSegmentMarkers();
             updateLampaSkipUi();
             updateStatsPanel();
+            if (player != null) maybeSearchSubtitlesOnline(player.getCurrentTracks());
             if (mPrefs.skipEnabled && mPrefs.skipFetchOnline && player != null
                     && lampaPlaylist != null && player.getDuration() > 0) {
                 LampaPlaylist.Item item = lampaPlaylist.getCurrent();
@@ -4719,6 +4723,7 @@ public class PlayerActivity extends Activity {
         // Convert subtitles to UTF-8 if necessary
         SubtitleUtils.clearCache(this);
         uri = Utils.convertToUTF(this, uri);
+        suppressAutomaticSubtitleSearch();
         clearSubtitleTimeline();
         mPrefs.updateSubtitle(uri);
     }
@@ -4816,7 +4821,10 @@ public class PlayerActivity extends Activity {
         if (fileOnly != null) {
             if (painting) checked = labels.size();
             labels.add(subtitleFileLabel(fileOnly));
-            actions.add(() -> addSubtitleTrack(fileOnly));
+            actions.add(() -> {
+                suppressAutomaticSubtitleSearch();
+                addSubtitleTrack(fileOnly);
+            });
         }
 
         for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
@@ -4859,6 +4867,7 @@ public class PlayerActivity extends Activity {
 
     private void resetSubtitleSessionForMediaChange() {
         subtitleOffsetSec = 0;
+        subtitleSearchSuppressed = null;
         clearSubtitleTimeline();
         if (subtitleOffsetDialog != null) {
             subtitleOffsetDialog.dismiss();
@@ -4947,6 +4956,7 @@ public class PlayerActivity extends Activity {
 
     private void disableSubtitles() {
         if (player == null) return;
+        suppressAutomaticSubtitleSearch();
         clearPaintedSubtitle();
         player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
                 .clearOverridesOfType(C.TRACK_TYPE_TEXT)
@@ -4956,6 +4966,7 @@ public class PlayerActivity extends Activity {
 
     private void applySubtitle(TrackGroup group, int index) {
         if (player == null || group == null) return;
+        suppressAutomaticSubtitleSearch();
         clearPaintedSubtitle();
         player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
                 .clearOverridesOfType(C.TRACK_TYPE_TEXT)
@@ -4963,6 +4974,12 @@ public class PlayerActivity extends Activity {
                 .setOverrideForType(new TrackSelectionOverride(
                         group, Collections.singletonList(index)))
                 .build());
+    }
+
+    private void suppressAutomaticSubtitleSearch() {
+        cancelSubtitleSearch();
+        MediaId id = currentMediaId();
+        subtitleSearchSuppressed = id.isEmpty() ? null : id.key();
     }
 
     private MediaItem.SubtitleConfiguration rememberedSubtitle() {
@@ -5027,8 +5044,18 @@ public class PlayerActivity extends Activity {
         if (wanted.isEmpty()) return;
 
         MediaId id = currentMediaId();
-        if (id.isEmpty() || enabledSubtitleSources().isEmpty()) return;
-        String key = id.key() + "|" + wanted + "|" + enabledSubtitleSources();
+        String sources = enabledSubtitleSources();
+        if (id.isEmpty() || sources.isEmpty() || id.key().equals(subtitleSearchSuppressed)) return;
+        boolean translateUkrainian = wanted.contains(UkrainianSubtitlePolicy.SEARCH_LANGUAGE)
+                && UkrainianSubtitlePolicy.enabled(
+                mPrefs.subtitleAutoTranslateUkrainian, preferred);
+        List<String> direct = translateUkrainian
+                ? UkrainianSubtitlePolicy.directLanguages(preferred) : wanted;
+        List<String> fallback = translateUkrainian
+                ? UkrainianSubtitlePolicy.fallbackLanguages(preferred)
+                : Collections.emptyList();
+        String mode = translateUkrainian ? "auto-ukr|" + fallback : "direct";
+        String key = id.key() + "|" + direct + "|" + sources + "|" + mode;
         if (key.equals(subtitleSearchStarted)) return;
         Long missedAt = subtitleSearchMisses.get(key);
         if (missedAt != null && System.currentTimeMillis() - missedAt < SUBTITLE_MISS_TTL_MS) {
@@ -5036,7 +5063,7 @@ public class PlayerActivity extends Activity {
         }
 
         String cachePrefix = "subs." + id.key().replaceAll("[^A-Za-z0-9]", "-");
-        for (String language : wanted) {
+        for (String language : direct) {
             File cached = new File(getCacheDir(), cachePrefix + "." + language + ".srt");
             if (cached.isFile() && cached.length() > 0) {
                 cached.setLastModified(System.currentTimeMillis());
@@ -5052,30 +5079,145 @@ public class PlayerActivity extends Activity {
         subtitleSearchStarted = key;
         int generation = subtitleSearchGeneration;
         Thread worker = new Thread(() -> {
-            AtomicBoolean answered = new AtomicBoolean();
-            SubtitleSearch.Result found = null;
             try {
-                found = SubtitleSearch.find(id, wanted, mPrefs, result -> {
-                    if (generation != subtitleSearchGeneration) return false;
-                    List<Uri> urls = new ArrayList<>(result.urls.size());
-                    for (String url : result.urls) urls.add(Uri.parse(url));
-                    Uri file = new SubtitleFetcher(this, urls,
-                            cachePrefix + "." + result.language + ".srt").fetchNow();
-                    if (file == null) return false;
-                    runOnUiThread(() -> attachSearchedSubtitle(
-                            generation, id, file, result.language));
-                    return true;
-                }, answered);
+                if (translateUkrainian) {
+                    searchAndTranslateUkrainian(generation, id, key, cachePrefix,
+                            preferred, fallback);
+                } else {
+                    searchOriginalSubtitles(generation, id, key, cachePrefix, direct);
+                }
             } catch (Throwable error) {
-                Utils.log("subtitles: search failed " + error);
-            }
-            if (found == null && answered.get() && !Thread.currentThread().isInterrupted()) {
-                subtitleSearchMisses.put(key, System.currentTimeMillis());
+                Utils.log("subtitles: search failed " + error.getClass().getSimpleName());
             }
         }, "SubtitleSearch");
         worker.setDaemon(true);
         subtitleSearchThread = worker;
         worker.start();
+    }
+
+    private void searchOriginalSubtitles(int generation, MediaId id, String key,
+                                         String cachePrefix, List<String> wanted) {
+        AtomicBoolean answered = new AtomicBoolean();
+        SubtitleSearch.Result found = SubtitleSearch.find(id, wanted, mPrefs, result -> {
+            if (generation != subtitleSearchGeneration
+                    || Thread.currentThread().isInterrupted()) return false;
+            Uri file = downloadSubtitle(result,
+                    cachePrefix + "." + result.language + ".srt");
+            if (file == null) return false;
+            runOnUiThread(() -> attachSearchedSubtitle(
+                    generation, id, file, result.language));
+            return true;
+        }, answered);
+        if (found == null && answered.get() && !Thread.currentThread().isInterrupted()
+                && generation == subtitleSearchGeneration) {
+            subtitleSearchMisses.put(key, System.currentTimeMillis());
+        }
+    }
+
+    private void searchAndTranslateUkrainian(int generation, MediaId id, String key,
+                                             String cachePrefix, List<String> preferred,
+                                             List<String> fallback) {
+        for (String source : fallback) {
+            String translatedName = UkrainianSubtitlePolicy.translatedCacheName(
+                    cachePrefix, source);
+            if (translatedName == null) continue;
+            File cached = new File(getCacheDir(), translatedName);
+            if (UkrainianSubtitleTranslator.isUsableCache(cached)) {
+                cached.setLastModified(System.currentTimeMillis());
+                runOnUiThread(() -> attachTranslatedSubtitle(
+                        generation, id, Uri.fromFile(cached)));
+                return;
+            }
+            if (cached.exists()) cached.delete();
+        }
+
+        AtomicBoolean directAnswered = new AtomicBoolean();
+        SubtitleSearch.Result direct = SubtitleSearch.find(id,
+                UkrainianSubtitlePolicy.directLanguages(preferred), mPrefs, result -> {
+                    if (generation != subtitleSearchGeneration
+                            || Thread.currentThread().isInterrupted()) return false;
+                    Uri file = downloadSubtitle(result,
+                            cachePrefix + "." + UkrainianSubtitlePolicy.SEARCH_LANGUAGE + ".srt");
+                    if (file == null) return false;
+                    runOnUiThread(() -> attachSearchedSubtitle(generation, id, file,
+                            UkrainianSubtitlePolicy.SEARCH_LANGUAGE));
+                    return true;
+                }, directAnswered);
+        if (direct != null || generation != subtitleSearchGeneration
+                || Thread.currentThread().isInterrupted()) {
+            return;
+        }
+        if (!directAnswered.get()) {
+            runOnUiThread(() -> {
+                if (generation == subtitleSearchGeneration
+                        && key.equals(subtitleSearchStarted)) {
+                    subtitleSearchStarted = null;
+                }
+            });
+            return;
+        }
+
+        AtomicBoolean foreignAnswered = new AtomicBoolean();
+        AtomicBoolean translationAttempted = new AtomicBoolean();
+        AtomicBoolean progressShown = new AtomicBoolean();
+        SubtitleSearch.Result translated = SubtitleSearch.find(id, fallback, mPrefs, result -> {
+            if (generation != subtitleSearchGeneration
+                    || Thread.currentThread().isInterrupted()) return false;
+            String source = UkrainianSubtitlePolicy.normalizeIso3(result.language);
+            String translatedName = UkrainianSubtitlePolicy.translatedCacheName(
+                    cachePrefix, source);
+            if (translatedName == null) return false;
+            Uri downloaded = downloadSubtitle(result,
+                    cachePrefix + ".source." + source + ".srt");
+            File sourceFile = localSubtitleFile(downloaded);
+            if (sourceFile == null) return false;
+            translationAttempted.set(true);
+            if (progressShown.compareAndSet(false, true)) {
+                showSubtitleTranslationNotice(
+                        generation, id, R.string.subtitle_translate_progress);
+            }
+            File target = new File(getCacheDir(), translatedName);
+            if (!UkrainianSubtitleTranslator.translate(sourceFile, target, source,
+                    new GoogleSubtitleTranslationTransport())) {
+                return false;
+            }
+            if (generation != subtitleSearchGeneration
+                    || Thread.currentThread().isInterrupted()) return false;
+            runOnUiThread(() -> attachTranslatedSubtitle(
+                    generation, id, Uri.fromFile(target)));
+            return true;
+        }, foreignAnswered);
+
+        if (translated != null || generation != subtitleSearchGeneration
+                || Thread.currentThread().isInterrupted()) {
+            return;
+        }
+        if (translationAttempted.get()) {
+            showSubtitleTranslationNotice(
+                    generation, id, R.string.subtitle_translate_failed);
+        } else if (foreignAnswered.get()) {
+            subtitleSearchMisses.put(key, System.currentTimeMillis());
+        }
+    }
+
+    private Uri downloadSubtitle(SubtitleSearch.Result result, String cacheName) {
+        List<Uri> urls = new ArrayList<>(result.urls.size());
+        for (String url : result.urls) urls.add(Uri.parse(url));
+        return new SubtitleFetcher(this, urls, cacheName).fetchNow();
+    }
+
+    private static File localSubtitleFile(Uri uri) {
+        return uri != null && ContentResolver.SCHEME_FILE.equals(uri.getScheme())
+                && uri.getPath() != null ? new File(uri.getPath()) : null;
+    }
+
+    private void showSubtitleTranslationNotice(int generation, MediaId id, int message) {
+        runOnUiThread(() -> {
+            if (generation == subtitleSearchGeneration && player != null
+                    && currentMediaId().sameAs(id)) {
+                Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     private void attachSearchedSubtitle(int generation, MediaId id, Uri file, String language) {
@@ -5087,6 +5229,19 @@ public class PlayerActivity extends Activity {
         if (addSubtitleTrack(file)) {
             Toast.makeText(this, getString(R.string.subtitle_search_found,
                     displaySubtitleLanguage(language)), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void attachTranslatedSubtitle(int generation, MediaId id, Uri file) {
+        if (generation != subtitleSearchGeneration || player == null
+                || !mPrefs.subtitleSearch || !mPrefs.subtitleAutoTranslateUkrainian
+                || !currentMediaId().sameAs(id)) {
+            return;
+        }
+        mPrefs.updateSubtitle(file);
+        if (addSubtitleTrack(file)) {
+            Toast.makeText(this, R.string.subtitle_translate_success,
+                    Toast.LENGTH_SHORT).show();
         }
     }
 

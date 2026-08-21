@@ -183,8 +183,10 @@ final class OpenSubtitles {
 
     private static String execute(Request request, AtomicBoolean answered) {
         try (Response response = CLIENT.newCall(request).execute()) {
-            if (answered != null) answered.set(true);
             ResponseBody body = response.body();
+            if (response.isSuccessful() && body != null && answered != null) {
+                answered.set(true);
+            }
             if (!response.isSuccessful() || body == null) {
                 Utils.log("OpenSubtitles: " + response.code() + " "
                         + request.url().encodedPath());
