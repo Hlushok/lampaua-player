@@ -38,6 +38,9 @@ public class UkrainianSubtitlePolicyTest {
     @Test
     public void targetAndGeneratedCacheNameAreFixedAndPathSafe() {
         assertEquals("uk", UkrainianSubtitlePolicy.targetIso2());
+        assertEquals("en", UkrainianSubtitlePolicy.sourceIso2("eng"));
+        assertEquals("ru", UkrainianSubtitlePolicy.sourceIso2("rus"));
+        assertNull(UkrainianSubtitlePolicy.sourceIso2("bad/path"));
         assertEquals("subs.tt123.auto-ukr.eng.srt",
                 UkrainianSubtitlePolicy.translatedCacheName("subs.tt123", " ENG "));
         assertNull(UkrainianSubtitlePolicy.translatedCacheName("subs.tt123", "../eng"));

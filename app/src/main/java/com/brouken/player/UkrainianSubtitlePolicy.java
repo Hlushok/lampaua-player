@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.MissingResourceException;
 import java.util.Set;
 
 /** Fixed Ukrainian-first policy for direct and translated online subtitles. */
@@ -34,6 +35,19 @@ final class UkrainianSubtitlePolicy {
 
     static String targetIso2() {
         return TARGET_ISO2;
+    }
+
+    static String sourceIso2(String sourceIso3) {
+        String source = normalizeIso3(sourceIso3);
+        if (source == null) return null;
+        for (String iso2 : Locale.getISOLanguages()) {
+            try {
+                if (source.equals(new Locale(iso2).getISO3Language())) return iso2;
+            } catch (MissingResourceException ignored) {
+                // Ignore incomplete locale tables on older Android versions.
+            }
+        }
+        return null;
     }
 
     static String translatedCacheName(String cachePrefix, String sourceIso3) {
