@@ -3,7 +3,7 @@
 Open-source Android video player for Lampa and LampaUA, based on [Just Player](https://github.com/moneytoo/Player).
 
 - Android application ID: `com.lampaua.player`
-- Current version: `1.6.1` (`versionCode 19`)
+- Current version: `2.0.0` (`versionCode 20`)
 - Android 6.0+ and Android TV
 - Media3/ExoPlayer playback engine
 
