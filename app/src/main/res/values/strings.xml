@@ -92,6 +92,12 @@
     <string name="pref_volume_gestures_summary">Adjust volume on the right side of the screen</string>
     <string name="pref_brightness_gestures">Brightness gestures</string>
     <string name="pref_brightness_gestures_summary">Adjust brightness on the left side of the screen</string>
+    <string name="pref_hold_speed">Hold to change playback speed</string>
+    <string name="pref_hold_speed_on">Hold the video for 2x, then drag sideways to change speed or rewind</string>
+    <string name="pref_hold_speed_off">Holding the video does nothing</string>
+    <string name="pref_time_remaining">Show remaining time</string>
+    <string name="pref_time_remaining_on">The bottom bar counts down to the end</string>
+    <string name="pref_time_remaining_off">The bottom bar shows the total duration</string>
     <string name="resolver_not_ready">The source did not prepare a playable stream. Please open it again.</string>
     <string name="live_stream_fallback">Trying alternate live-stream mode</string>
     <string name="playback_finishes_at">Finishes at %1$s</string>

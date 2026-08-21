@@ -50,6 +50,8 @@ class Prefs {
     private static final String PREF_KEY_ALLOW_SYSTEM_FRAMERATE = "allowSystemFrameRate";
     private static final String PREF_KEY_REPEAT_TOGGLE = "repeatToggle";
     private static final String PREF_KEY_SPEED = "speed";
+    private static final String PREF_KEY_HOLD_SPEED = "holdSpeed";
+    private static final String PREF_KEY_TIME_REMAINING = "timeRemaining";
     private static final String PREF_KEY_FILE_ACCESS = "fileAccess";
     private static final String PREF_KEY_DECODER_PRIORITY = "decoderPriority";
     private static final String PREF_KEY_MAP_DV7 = "mapDV7ToHevc";
@@ -102,6 +104,8 @@ class Prefs {
     public Utils.Orientation orientation = Utils.Orientation.UNSPECIFIED;
     public float scale = 1.f;
     public float speed = 1.f;
+    public boolean holdSpeed = true;
+    public boolean timeRemaining = false;
 
     public String subtitleTrackId;
     public String audioTrackId;
@@ -190,6 +194,9 @@ class Prefs {
 
     public void loadUserPreferences() {
         autoPiP = mSharedPreferences.getBoolean(PREF_KEY_AUTO_PIP, autoPiP);
+        holdSpeed = mSharedPreferences.getBoolean(PREF_KEY_HOLD_SPEED, holdSpeed);
+        timeRemaining = mSharedPreferences.getBoolean(
+                PREF_KEY_TIME_REMAINING, timeRemaining);
         tunneling = mSharedPreferences.getBoolean(PREF_KEY_TUNNELING, tunneling);
         skipSilence = mSharedPreferences.getBoolean(PREF_KEY_SKIP_SILENCE, skipSilence);
         frameRateMatching = mSharedPreferences.getBoolean(PREF_KEY_FRAMERATE_MATCHING, frameRateMatching);

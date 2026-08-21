@@ -171,6 +171,10 @@ public class SettingsActivity extends AppCompatActivity
                     preferenceAllowSystemFrameRate.setChecked(!Utils.isTvBox(getContext()));
                 }
             }
+            Preference preferenceHoldSpeed = findPreference("holdSpeed");
+            if (preferenceHoldSpeed != null && Utils.isTvBox(getContext())) {
+                preferenceHoldSpeed.setVisible(false);
+            }
 
             final EditTextPreference preferenceNick = findPreference("togetherNick");
             final Preference preferenceNickRandom = findPreference("togetherNickRandom");

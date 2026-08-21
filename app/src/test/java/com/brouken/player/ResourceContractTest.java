@@ -272,4 +272,32 @@ public class ResourceContractTest {
         assertTrue(activity.contains("new Dv7Converter"));
         assertFalse(build.contains("io.sentry"));
     }
+
+    @Test
+    public void remainingTimeAndHeldSpeedStayBoundedAndRoomSafe() throws Exception {
+        String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
+        String prefs = readProjectFile("src/main/java/com/brouken/player/Prefs.java");
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+        String customView = readProjectFile(
+                "src/main/java/com/brouken/player/CustomPlayerView.java");
+        String settings = readProjectFile(
+                "src/main/java/com/brouken/player/SettingsActivity.java");
+        String ukrainian = readProjectFile("src/main/res/values-uk/strings.xml");
+
+        assertTrue(preferences.contains("app:key=\"timeRemaining\""));
+        assertTrue(preferences.contains("app:key=\"holdSpeed\""));
+        assertTrue(prefs.contains("public boolean timeRemaining = false"));
+        assertTrue(prefs.contains("public boolean holdSpeed = true"));
+        assertTrue(activity.contains("setProgressUpdateListener"));
+        assertTrue(activity.contains("mPrefs.timeRemaining"));
+        assertTrue(activity.contains("isSpeedBoosting()"));
+        assertTrue(activity.contains("isSeekGesture()"));
+        assertTrue(customView.contains("REWIND_TICK_MS = 100"));
+        assertTrue(customView.contains("HoldSpeedPolicy.evaluate"));
+        assertTrue(customView.contains("SeekParameters.DEFAULT"));
+        assertTrue(settings.contains("findPreference(\"holdSpeed\")"));
+        assertTrue(ukrainian.contains("name=\"pref_time_remaining\""));
+        assertTrue(ukrainian.contains("name=\"pref_hold_speed\""));
+    }
 }

@@ -22,11 +22,13 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.UriPermission;
 import android.content.pm.ActivityInfo;
+import android.content.res.ColorStateList;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.Icon;
 import android.hardware.display.DisplayManager;
@@ -94,6 +96,7 @@ import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 import androidx.media3.common.audio.AudioProcessor;
+import androidx.media3.common.util.Util;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.DefaultLoadControl;
@@ -154,6 +157,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.Collections;
+import java.util.Formatter;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -299,6 +303,9 @@ public class PlayerActivity extends Activity {
     private boolean lampaIptv;
     private TextView roomPill;
     private TextView roomMessage;
+    private TextView speedBoostIndicator;
+    private Drawable speedBoostIconForward;
+    private Drawable speedBoostIconRewind;
     private TogetherManager together;
     private boolean applyingRoomMedia;
     private boolean awaitingRoomMedia;
@@ -794,6 +801,7 @@ public class PlayerActivity extends Activity {
         centerView.addView(titleView);
         setupLampaOverlay(centerView);
         setupTogetherOverlay();
+        setupHoldSpeedOverlay();
 
         if (!isTvBox) {
             swipeToUnlock = new SwipeToUnlockView(this);
@@ -846,6 +854,19 @@ public class PlayerActivity extends Activity {
         }
 
         controlView = playerView.findViewById(R.id.exo_controller);
+        final TextView durationView = playerView.findViewById(R.id.exo_duration);
+        final StringBuilder timeBuilder = new StringBuilder();
+        final Formatter timeFormatter = new Formatter(timeBuilder, Locale.getDefault());
+        controlView.setProgressUpdateListener((position, bufferedPosition) -> {
+            if (durationView == null || player == null || player.isCurrentMediaItemLive()) return;
+            long duration = player.getContentDuration();
+            if (duration == C.TIME_UNSET || duration < 0L) return;
+            long shown = mPrefs != null && mPrefs.timeRemaining
+                    ? Math.max(0L, duration - Math.max(0L, position))
+                    : duration;
+            String value = Util.getStringForTime(timeBuilder, timeFormatter, shown);
+            durationView.setText(mPrefs != null && mPrefs.timeRemaining ? "-" + value : value);
+        });
         controlView.setOnApplyWindowInsetsListener((view, windowInsets) -> {
             if (windowInsets != null) {
                 if (Build.VERSION.SDK_INT >= 31) {
@@ -1150,6 +1171,7 @@ public class PlayerActivity extends Activity {
     protected void onPause() {
         super.onPause();
         audioRecoveryState.onPause();
+        if (playerView != null) playerView.cancelHoldSpeed();
         savePlayer();
     }
 
@@ -1537,6 +1559,8 @@ public class PlayerActivity extends Activity {
         inPip = isInPictureInPictureMode;
 
         if (isInPictureInPictureMode) {
+            playerView.cancelHoldSpeed();
+            setSpeedBoostIndicatorVisible(false);
             // On Android TV it is required to hide controller in this PIP change callback
             playerView.hideController();
             hideSwipeToUnlock();
@@ -2307,6 +2331,61 @@ public class PlayerActivity extends Activity {
         playerView.addView(roomMessage, messageParams);
     }
 
+    private void setupHoldSpeedOverlay() {
+        final int gold = Color.rgb(211, 165, 24);
+        speedBoostIndicator = new TextView(this);
+        speedBoostIndicator.setText("2.0\u00D7");
+        speedBoostIndicator.setTextColor(Color.WHITE);
+        speedBoostIndicator.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        speedBoostIndicator.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        speedBoostIndicator.setGravity(Gravity.CENTER_VERTICAL);
+        speedBoostIndicator.setPadding(Utils.dpToPx(14), Utils.dpToPx(9),
+                Utils.dpToPx(14), Utils.dpToPx(9));
+        speedBoostIndicator.setClickable(false);
+        speedBoostIndicator.setFocusable(false);
+        speedBoostIndicator.setBackground(lampaBackground(
+                Color.argb(238, 4, 18, 40), gold, 10));
+
+        speedBoostIconForward = ContextCompat.getDrawable(
+                this, R.drawable.exo_icon_fastforward);
+        speedBoostIconRewind = ContextCompat.getDrawable(
+                this, R.drawable.exo_icon_rewind);
+        final int iconSize = Utils.dpToPx(18);
+        if (speedBoostIconForward != null) {
+            speedBoostIconForward.setBounds(0, 0, iconSize, iconSize);
+        }
+        if (speedBoostIconRewind != null) {
+            speedBoostIconRewind.setBounds(0, 0, iconSize, iconSize);
+        }
+        speedBoostIndicator.setCompoundDrawablePadding(Utils.dpToPx(7));
+        speedBoostIndicator.setCompoundDrawableTintList(ColorStateList.valueOf(gold));
+
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        params.topMargin = Utils.dpToPx(28);
+        speedBoostIndicator.setVisibility(View.GONE);
+        playerView.addView(speedBoostIndicator, params);
+    }
+
+    void setSpeedBoostIndicator(float speed, boolean rewind) {
+        if (speedBoostIndicator == null) return;
+        speedBoostIndicator.setText(String.format(Locale.US, "%.1f\u00D7", speed));
+        speedBoostIndicator.setCompoundDrawablesRelative(
+                rewind ? speedBoostIconRewind : null,
+                null,
+                rewind ? null : speedBoostIconForward,
+                null);
+        setSpeedBoostIndicatorVisible(true);
+    }
+
+    void setSpeedBoostIndicatorVisible(boolean visible) {
+        if (speedBoostIndicator != null) {
+            speedBoostIndicator.setVisibility(
+                    visible && !inPip && !locked ? View.VISIBLE : View.GONE);
+        }
+    }
+
     private Uri currentPlayingUri() {
         if (player != null) {
             final MediaItem item = player.getCurrentMediaItem();
@@ -2878,7 +2957,8 @@ public class PlayerActivity extends Activity {
             }
 
             @Override public boolean scrubbing() {
-                return isScrubbing;
+                return isScrubbing || playerView.isSpeedBoosting()
+                        || playerView.isSeekGesture();
             }
 
             @Override public long positionMs() {
