@@ -10,9 +10,8 @@ import androidx.media3.datasource.DataSpec;
 import androidx.media3.datasource.TeeDataSource;
 import androidx.media3.datasource.TransferListener;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -39,7 +38,7 @@ final class TrackNameParsingDataSource implements DataSource {
      */
     static final AtomicLong bytesRead = new AtomicLong();
 
-    /** Receives parsed track metadata (on a background thread) and reports whether it already has it. */
+    /** Receives parsed track metadata on the load thread and reports whether it already has it. */
     interface Listener {
         void onMetadataParsed(List<TrackMetadata> tracks);
         boolean isMetadataParsed();
@@ -62,16 +61,9 @@ final class TrackNameParsingDataSource implements DataSource {
         void onResolverNotReady(Uri originalUri);
     }
 
-    // 64 KB in-RAM pipe вЂ” a standard IO chunk; keeps memory bounded and provides backpressure.
-    private static final int PIPE_BUFFER_SIZE = 64 * 1024;
-    // Upper bound on bytes fed to the parser. A large faststart moov can be tens of MB (the sample
-    // tables of a multi-hour 4K file), so this is generous; a non-faststart file bails on the first
-    // mdat instead of streaming this far.
-    private static final int MAX_BYTES_TO_PARSE = 128 * 1024 * 1024;
-
     private final DataSource upstream;
     private final Listener listener;
-    private final PipeSink pipeSink = new PipeSink();
+    private final HeaderSink headerSink = new HeaderSink();
 
     private TeeDataSource teeDataSource;
 
@@ -84,7 +76,7 @@ final class TrackNameParsingDataSource implements DataSource {
     public long open(DataSpec dataSpec) throws IOException {
         final long length;
         if (dataSpec.position == 0 && !listener.isMetadataParsed()) {
-            teeDataSource = new TeeDataSource(upstream, pipeSink);
+            teeDataSource = new TeeDataSource(upstream, headerSink);
             length = teeDataSource.open(dataSpec);
         } else {
             teeDataSource = null;
@@ -231,7 +223,7 @@ final class TrackNameParsingDataSource implements DataSource {
                 upstream.close();
             }
         } finally {
-            pipeSink.stopParsing();
+            headerSink.close();
             teeDataSource = null;
         }
     }
@@ -246,93 +238,43 @@ final class TrackNameParsingDataSource implements DataSource {
         return upstream.getResponseHeaders();
     }
 
-    private final class PipeSink implements DataSink {
-        private PipedOutputStream pipedOut;
-        private Thread parsingThread;
-        private long totalBytesWritten;
-        private volatile boolean parsingActive;
+    private final class HeaderSink implements DataSink {
+        private ContainerHeaderBuffer buffer;
 
         @Override
         public void open(DataSpec dataSpec) {
-            if (dataSpec.position != 0 || listener.isMetadataParsed()) {
-                return;
-            }
-            closePipes();
-            totalBytesWritten = 0;
-            parsingActive = true;
-
-            final PipedInputStream pipedIn;
-            try {
-                pipedOut = new PipedOutputStream();
-                pipedIn = new PipedInputStream(pipedOut, PIPE_BUFFER_SIZE);
-            } catch (IOException e) {
-                parsingActive = false;
-                pipedOut = null;
-                return;
-            }
-
-            parsingThread = new Thread(() -> {
-                try {
-                    final List<TrackMetadata> tracks = ContainerMetadataReader.parse(pipedIn);
-                    if (!tracks.isEmpty()) {
-                        listener.onMetadataParsed(tracks);
-                    }
-                } catch (Exception ignored) {
-                    // Pipe closed / interrupted вЂ” normal termination.
-                } finally {
-                    parsingActive = false;
-                    try {
-                        pipedIn.close();
-                    } catch (IOException ignored) {
-                    }
-                }
-            }, "TrackNameParser");
-            parsingThread.setDaemon(true);
-            parsingThread.start();
+            buffer = dataSpec.position == 0 && !listener.isMetadataParsed()
+                    ? new ContainerHeaderBuffer() : null;
         }
 
         @Override
-        public void write(byte[] buffer, int offset, int length) {
-            if (!parsingActive) {
-                return;
-            }
-            if (totalBytesWritten >= MAX_BYTES_TO_PARSE) {
-                stopParsing();
-                return;
-            }
+        public void write(byte[] bytes, int offset, int length) {
+            if (buffer == null) return;
             try {
-                // Blocks once the 64 KB pipe fills until the parser drains it (backpressure).
-                pipedOut.write(buffer, offset, length);
-                totalBytesWritten += length;
-            } catch (IOException e) {
-                // "Pipe closed"/"Pipe broken" вЂ” the parser finished.
-                stopParsing();
+                buffer.append(bytes, offset, length);
+                if (buffer.isDone()) parseHeader();
+            } catch (Throwable ignored) {
+                buffer = null;
             }
         }
 
         @Override
         public void close() {
-            stopParsing();
+            try {
+                parseHeader();
+            } catch (Throwable ignored) {
+                buffer = null;
+            }
         }
 
-        void stopParsing() {
-            if (parsingActive) {
-                parsingActive = false;
-                if (parsingThread != null) {
-                    parsingThread.interrupt();
-                }
-            }
-            closePipes();
-        }
-
-        private void closePipes() {
-            if (pipedOut != null) {
-                try {
-                    pipedOut.close();
-                } catch (IOException ignored) {
-                }
-                pipedOut = null;
-            }
+        private void parseHeader() {
+            if (buffer == null) return;
+            byte[] bytes = buffer.finish();
+            buffer = null;
+            if (bytes == null) return;
+            List<TrackMetadata> tracks = ContainerMetadataReader.parse(
+                    new ByteArrayInputStream(bytes));
+            if (!tracks.isEmpty()) listener.onMetadataParsed(tracks);
         }
     }
 
@@ -351,4 +293,3 @@ final class TrackNameParsingDataSource implements DataSource {
         }
     }
 }
-

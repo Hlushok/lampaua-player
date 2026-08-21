@@ -55,7 +55,7 @@ final class Mp4MetadataReader {
         } catch (EOFException e) {
             // Stream ended (or the tap was cut off) before moov was fully read вЂ” return what we have.
         } catch (IOException e) {
-            // Pipe closed / broken вЂ” normal termination of the tap.
+            // The bounded header ended before the full box was available.
         }
         return tracks;
     }
@@ -266,7 +266,7 @@ final class Mp4MetadataReader {
             if (skipped > 0) {
                 remaining -= skipped;
             } else {
-                // skip() made no progress вЂ” fall back to a blocking read to force the pipe forward.
+                // skip() made no progress, so force the bounded stream forward by one byte.
                 if (stream.read() < 0) throw new EOFException();
                 remaining--;
             }
