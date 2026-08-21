@@ -62,10 +62,6 @@ class Prefs {
     private static final String PREF_KEY_SUBTITLE_SEARCH_STRICT = "subtitleSearchStrict";
     private static final String PREF_KEY_SUBTITLE_AUTO_TRANSLATE_UKRAINIAN =
             "subtitleAutoTranslateUkrainian";
-    private static final String PREF_KEY_SOURCE_OPENSUBTITLES = "subtitleSourceOpenSubtitles";
-    private static final String PREF_KEY_SOURCE_SHEGU = "subtitleSourceShegu";
-    private static final String PREF_KEY_SOURCE_STREMIO = "subtitleSourceStremio";
-    private static final String PREF_KEY_SOURCE_REST = "subtitleSourceRest";
     private static final String PREF_KEY_SUBTITLE_STYLE_EMBEDDED = "subtitleStyleEmbedded";
     private static final String PREF_KEY_SUBTITLE_STYLE_BOLD = "subtitleStyleBold";
     private static final String PREF_KEY_SUBTITLE_SCALE = "subtitleScale";
@@ -81,6 +77,18 @@ class Prefs {
     private static final String PREF_KEY_VOLUME_BOOST = "volumeBoost";
     private static final String PREF_KEY_VOLUME_GESTURES = "volumeGesturesEnabled";
     private static final String PREF_KEY_BRIGHTNESS_GESTURES = "brightnessGesturesEnabled";
+    private static final String PREF_KEY_SHOW_BUTTON_OPEN = "showButtonOpen";
+    private static final String PREF_KEY_SHOW_BUTTON_PLAYLIST = "showButtonPlaylist";
+    private static final String PREF_KEY_SHOW_BUTTON_QUALITY = "showButtonQuality";
+    private static final String PREF_KEY_SHOW_BUTTON_SUBTITLES = "showButtonSubtitles";
+    private static final String PREF_KEY_SHOW_BUTTON_ASPECT_RATIO = "showButtonAspectRatio";
+    private static final String PREF_KEY_SHOW_BUTTON_ROTATION = "showButtonRotation";
+    private static final String PREF_KEY_SHOW_BUTTON_LOCK = "showButtonLock";
+    private static final String PREF_KEY_SHOW_BUTTON_PIP = "showButtonPiP";
+    private static final String PREF_KEY_SHOW_BUTTON_PLAYBACK_OPTIONS =
+            "showButtonPlaybackOptions";
+    private static final String PREF_KEY_SHOW_BUTTON_TOGETHER = "showButtonTogether";
+    private static final String PREF_KEY_SHOW_BUTTON_APP_SETTINGS = "showButtonAppSettings";
     private static final String PREF_KEY_TOGETHER_NICK = "togetherNick";
     private static final String PREF_KEY_TOGETHER_PASSWORD = "togetherPassword";
     private static final String PREF_KEY_TOGETHER_PUBLIC = "togetherPublic";
@@ -133,10 +141,6 @@ class Prefs {
     public boolean subtitleSearch = false;
     public boolean subtitleSearchStrict = false;
     public boolean subtitleAutoTranslateUkrainian = true;
-    public boolean subtitleSourceOpenSubtitles = true;
-    public boolean subtitleSourceShegu = true;
-    public boolean subtitleSourceStremio = true;
-    public boolean subtitleSourceRest = true;
     public boolean subtitleStyleEmbedded = true;
     public boolean subtitleStyleBold = false;
     public float subtitleScale = 1.0f;
@@ -152,6 +156,17 @@ class Prefs {
     public int volumeBoost = 0;
     public boolean volumeGesturesEnabled = true;
     public boolean brightnessGesturesEnabled = true;
+    public boolean showButtonOpen = true;
+    public boolean showButtonPlaylist = true;
+    public boolean showButtonQuality = true;
+    public boolean showButtonSubtitles = true;
+    public boolean showButtonAspectRatio = true;
+    public boolean showButtonRotation = true;
+    public boolean showButtonLock = true;
+    public boolean showButtonPiP = true;
+    public boolean showButtonPlaybackOptions = true;
+    public boolean showButtonTogether = true;
+    public boolean showButtonAppSettings = true;
     public String togetherNick = "";
     public String togetherPassword = "";
     public boolean togetherPublic = false;
@@ -219,14 +234,6 @@ class Prefs {
         subtitleAutoTranslateUkrainian = mSharedPreferences.getBoolean(
                 PREF_KEY_SUBTITLE_AUTO_TRANSLATE_UKRAINIAN,
                 subtitleAutoTranslateUkrainian);
-        subtitleSourceOpenSubtitles = mSharedPreferences.getBoolean(
-                PREF_KEY_SOURCE_OPENSUBTITLES, subtitleSourceOpenSubtitles);
-        subtitleSourceShegu = mSharedPreferences.getBoolean(
-                PREF_KEY_SOURCE_SHEGU, subtitleSourceShegu);
-        subtitleSourceStremio = mSharedPreferences.getBoolean(
-                PREF_KEY_SOURCE_STREMIO, subtitleSourceStremio);
-        subtitleSourceRest = mSharedPreferences.getBoolean(
-                PREF_KEY_SOURCE_REST, subtitleSourceRest);
         subtitleStyleEmbedded = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_STYLE_EMBEDDED, subtitleStyleEmbedded);
         subtitleStyleBold = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_STYLE_BOLD, subtitleStyleBold);
         subtitleScale = readFloat(PREF_KEY_SUBTITLE_SCALE, subtitleScale, 0.25f, 2.0f);
@@ -253,6 +260,28 @@ class Prefs {
                 PREF_KEY_VOLUME_GESTURES, volumeGesturesEnabled);
         brightnessGesturesEnabled = mSharedPreferences.getBoolean(
                 PREF_KEY_BRIGHTNESS_GESTURES, brightnessGesturesEnabled);
+        showButtonOpen = mSharedPreferences.getBoolean(
+                PREF_KEY_SHOW_BUTTON_OPEN, showButtonOpen);
+        showButtonPlaylist = mSharedPreferences.getBoolean(
+                PREF_KEY_SHOW_BUTTON_PLAYLIST, showButtonPlaylist);
+        showButtonQuality = mSharedPreferences.getBoolean(
+                PREF_KEY_SHOW_BUTTON_QUALITY, showButtonQuality);
+        showButtonSubtitles = mSharedPreferences.getBoolean(
+                PREF_KEY_SHOW_BUTTON_SUBTITLES, showButtonSubtitles);
+        showButtonAspectRatio = mSharedPreferences.getBoolean(
+                PREF_KEY_SHOW_BUTTON_ASPECT_RATIO, showButtonAspectRatio);
+        showButtonRotation = mSharedPreferences.getBoolean(
+                PREF_KEY_SHOW_BUTTON_ROTATION, showButtonRotation);
+        showButtonLock = mSharedPreferences.getBoolean(
+                PREF_KEY_SHOW_BUTTON_LOCK, showButtonLock);
+        showButtonPiP = mSharedPreferences.getBoolean(
+                PREF_KEY_SHOW_BUTTON_PIP, showButtonPiP);
+        showButtonPlaybackOptions = mSharedPreferences.getBoolean(
+                PREF_KEY_SHOW_BUTTON_PLAYBACK_OPTIONS, showButtonPlaybackOptions);
+        showButtonTogether = mSharedPreferences.getBoolean(
+                PREF_KEY_SHOW_BUTTON_TOGETHER, showButtonTogether);
+        showButtonAppSettings = mSharedPreferences.getBoolean(
+                PREF_KEY_SHOW_BUTTON_APP_SETTINGS, showButtonAppSettings);
         togetherPassword = mSharedPreferences.getString(
                 PREF_KEY_TOGETHER_PASSWORD, togetherPassword);
         togetherPublic = mSharedPreferences.getBoolean(

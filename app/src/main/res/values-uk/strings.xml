@@ -120,6 +120,14 @@
     <string name="pref_subtitle_source_rest_summary">Застарілий неофіційний API; може припинити роботу будь-коли</string>
     <string name="pref_subtitle_appearance">Вигляд</string>
     <string name="pref_subtitle_appearance_summary">Розмір, колір, тло та обведення</string>
+    <string name="pref_subtitle_preview">Попередній перегляд</string>
+    <string name="subtitle_preview_sample">Так виглядатимуть ваші субтитри</string>
+    <string name="pref_player_buttons">Кнопки плеєра</string>
+    <string name="pref_player_buttons_summary">Оберіть необов’язкові кнопки під шкалою часу</string>
+    <string name="pref_player_buttons_required">Play/Pause і меню «Ще» показуються завжди</string>
+    <string name="pref_player_button_subtitles">Субтитри</string>
+    <string name="subtitle_offset_earlier">− Раніше</string>
+    <string name="subtitle_offset_later">Пізніше +</string>
     <string name="pref_subtitle_scale">Розмір тексту</string>
     <string name="pref_subtitle_scale_smallest">Дуже малий</string>
     <string name="pref_subtitle_scale_small">Малий</string>

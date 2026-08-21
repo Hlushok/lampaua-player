@@ -110,6 +110,7 @@ import androidx.media3.exoplayer.analytics.AnalyticsListener;
 import androidx.media3.exoplayer.audio.AudioSink;
 import androidx.media3.exoplayer.audio.DefaultAudioSink;
 import androidx.media3.exoplayer.audio.ForwardingAudioSink;
+import androidx.media3.exoplayer.hls.playlist.HlsPlaylistTracker;
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.text.TextOutput;
@@ -379,11 +380,12 @@ public class PlayerActivity extends Activity {
             if (player == null || !player.isPlaying()) return;
             long now = SystemClock.elapsedRealtime();
             long position = player.getCurrentPosition();
-            if (lastObservedPosition == C.TIME_UNSET || position > lastObservedPosition + 250) {
+            boolean live = player.isCurrentMediaItemLive();
+            if (LiveRecoveryPolicy.hasPlaybackProgress(lastObservedPosition, position, live)) {
                 lastObservedPosition = position;
                 lastPositionAdvanceAt = now;
             } else if (now - lastPositionAdvanceAt >= STALL_TIMEOUT_MS) {
-                PlaybackRecoveryPolicy.FailureKind kind = player.isCurrentMediaItemLive()
+                PlaybackRecoveryPolicy.FailureKind kind = live
                         ? PlaybackRecoveryPolicy.FailureKind.LIVE_STALL
                         : (playbackEverReady && position - stablePlaybackStartPosition >= 2_000
                         ? PlaybackRecoveryPolicy.FailureKind.STALL_MIDSTREAM
@@ -735,7 +737,8 @@ public class PlayerActivity extends Activity {
         buttonPlaylist.setImageResource(R.drawable.ic_playlist_play_24dp);
         buttonPlaylist.setId(View.generateViewId());
         buttonPlaylist.setContentDescription(getString(R.string.button_playlist));
-        buttonPlaylist.setVisibility(lampaPlaylist != null && lampaPlaylist.size() > 1 ? View.VISIBLE : View.GONE);
+        buttonPlaylist.setVisibility(mPrefs.showButtonPlaylist && lampaPlaylist != null
+                && lampaPlaylist.size() > 1 ? View.VISIBLE : View.GONE);
         buttonPlaylist.setOnClickListener(view -> showLampaPlaylist());
 
         buttonQuality = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
@@ -1052,6 +1055,7 @@ public class PlayerActivity extends Activity {
         controls.addView(buttonUpdate);
         controls.addView(buttonAppSettings);
         styleTvBottomControls(controls);
+        applyControlVisibility();
 
         exoBasicControls.addView(horizontalScrollView);
 
@@ -1850,7 +1854,8 @@ public class PlayerActivity extends Activity {
                 mPrefs.setPersistent(false);
             }
             if (buttonPlaylist != null) {
-                buttonPlaylist.setVisibility(lampaPlaylist.size() > 1 ? View.VISIBLE : View.GONE);
+                buttonPlaylist.setVisibility(mPrefs.showButtonPlaylist
+                        && lampaPlaylist.size() > 1 ? View.VISIBLE : View.GONE);
             }
         } catch (Exception e) {
             lampaPlaylist = null;
@@ -2353,6 +2358,10 @@ public class PlayerActivity extends Activity {
             items.add(getString(R.string.together_title)
                     + (summary == null ? "" : "  \u00B7  " + summary));
             actions.add(this::showTogetherMenu);
+        }
+        if (!mPrefs.showButtonAppSettings) {
+            items.add(getString(R.string.button_app_settings));
+            actions.add(this::openAppSettings);
         }
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle(R.string.player_tools)
@@ -3020,7 +3029,8 @@ public class PlayerActivity extends Activity {
     private void updateRoomBadge() {
         final boolean active = together != null && together.isActive();
         if (buttonTogether != null) {
-            buttonTogether.setVisibility(togetherAvailable() ? View.VISIBLE : View.GONE);
+            buttonTogether.setVisibility(mPrefs.showButtonTogether && togetherAvailable()
+                    ? View.VISIBLE : View.GONE);
         }
         if (roomPill != null) {
             final boolean visible = active && controllerChromeVisible && !inPip && !locked;
@@ -3886,6 +3896,10 @@ public class PlayerActivity extends Activity {
     }
 
     private void updateEpisodeControls() {
+        if (buttonPlaylist != null) {
+            buttonPlaylist.setVisibility(mPrefs.showButtonPlaylist && lampaPlaylist != null
+                    && lampaPlaylist.size() > 1 ? View.VISIBLE : View.GONE);
+        }
         if (exoPrevious == null || exoNext == null || lampaPlaylist == null) return;
         int index = lampaPlaylist.getCurrentIndex();
         exoPrevious.setVisibility(index > 0 ? View.VISIBLE : View.INVISIBLE);
@@ -3894,9 +3908,6 @@ public class PlayerActivity extends Activity {
         exoNext.setEnabled(index + 1 < lampaPlaylist.size());
         exoPrevious.setAlpha(index > 0 ? 1f : 0f);
         exoNext.setAlpha(index + 1 < lampaPlaylist.size() ? 1f : 0f);
-        if (buttonPlaylist != null) {
-            buttonPlaylist.setVisibility(lampaPlaylist.size() > 1 ? View.VISIBLE : View.GONE);
-        }
     }
 
     private void showLampaPlaylist() {
@@ -4697,6 +4708,7 @@ public class PlayerActivity extends Activity {
             updateLampaSegmentMarkers();
             updateLampaSkipUi();
             updateStatsPanel();
+            applyControlVisibility();
             if (player != null) maybeSearchSubtitlesOnline(player.getCurrentTracks());
             if (mPrefs.skipEnabled && mPrefs.skipFetchOnline && player != null
                     && lampaPlaylist != null && player.getDuration() > 0) {
@@ -4802,7 +4814,8 @@ public class PlayerActivity extends Activity {
                 }
             }
         }
-        exoSubtitle.setVisibility(hasSubtitles ? View.VISIBLE : View.GONE);
+        exoSubtitle.setVisibility(mPrefs.showButtonSubtitles && hasSubtitles
+                ? View.VISIBLE : View.GONE);
         Utils.setButtonEnabled(this, exoSubtitle, hasSubtitles);
         exoSubtitle.setSelected(selected);
     }
@@ -4846,14 +4859,18 @@ public class PlayerActivity extends Activity {
             }
         }
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
                 .setTitle(R.string.pref_subtitle_header)
                 .setSingleChoiceItems(labels.toArray(new String[0]), checked, (selected, which) -> {
                     actions.get(which).run();
                     selected.dismiss();
                 })
-                .setNegativeButton(android.R.string.cancel, null)
-                .create();
+                .setNegativeButton(android.R.string.cancel, null);
+        if (hasActiveSubtitle()) {
+            builder.setNeutralButton(R.string.subtitle_offset_title,
+                    (selected, which) -> showSubtitleOffsetDialog());
+        }
+        AlertDialog dialog = builder.create();
         dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
         dialog.show();
     }
@@ -5098,7 +5115,7 @@ public class PlayerActivity extends Activity {
     private void searchOriginalSubtitles(int generation, MediaId id, String key,
                                          String cachePrefix, List<String> wanted) {
         AtomicBoolean answered = new AtomicBoolean();
-        SubtitleSearch.Result found = SubtitleSearch.find(id, wanted, mPrefs, result -> {
+        SubtitleSearch.Result found = SubtitleSearch.find(id, wanted, result -> {
             if (generation != subtitleSearchGeneration
                     || Thread.currentThread().isInterrupted()) return false;
             Uri file = downloadSubtitle(result,
@@ -5133,7 +5150,7 @@ public class PlayerActivity extends Activity {
 
         AtomicBoolean directAnswered = new AtomicBoolean();
         SubtitleSearch.Result direct = SubtitleSearch.find(id,
-                UkrainianSubtitlePolicy.directLanguages(preferred), mPrefs, result -> {
+                UkrainianSubtitlePolicy.directLanguages(preferred), result -> {
                     if (generation != subtitleSearchGeneration
                             || Thread.currentThread().isInterrupted()) return false;
                     Uri file = downloadSubtitle(result,
@@ -5160,7 +5177,7 @@ public class PlayerActivity extends Activity {
         AtomicBoolean foreignAnswered = new AtomicBoolean();
         AtomicBoolean translationAttempted = new AtomicBoolean();
         AtomicBoolean progressShown = new AtomicBoolean();
-        SubtitleSearch.Result translated = SubtitleSearch.find(id, fallback, mPrefs, result -> {
+        SubtitleSearch.Result translated = SubtitleSearch.find(id, fallback, result -> {
             if (generation != subtitleSearchGeneration
                     || Thread.currentThread().isInterrupted()) return false;
             String source = UkrainianSubtitlePolicy.normalizeIso3(result.language);
@@ -5246,10 +5263,7 @@ public class PlayerActivity extends Activity {
     }
 
     private String enabledSubtitleSources() {
-        return (mPrefs.subtitleSourceRest ? "1" : "")
-                + (mPrefs.subtitleSourceStremio ? "2" : "")
-                + (mPrefs.subtitleSourceShegu ? "3" : "")
-                + (mPrefs.subtitleSourceOpenSubtitles ? "4" : "");
+        return "automatic-v1";
     }
 
     private static String displaySubtitleLanguage(String language) {
@@ -5685,6 +5699,17 @@ public class PlayerActivity extends Activity {
         }
     }
 
+    private void saveRecoveryPosition() {
+        if (player == null) return;
+        long position = PlaybackRecoveryPolicy.recoveryPosition(
+                player.getCurrentPosition(), lastObservedPosition, playbackEverReady);
+        if (position <= 0L) return;
+        mPrefs.updatePosition(position);
+        if (lampaPlaylist != null && lampaPlaylist.getCurrent() != null) {
+            lampaPlaylist.getCurrent().positionMs = position;
+        }
+    }
+
     public void releasePlayer() {
         releasePlayer(true);
     }
@@ -5987,8 +6012,6 @@ public class PlayerActivity extends Activity {
                         frameRateSettled();
                     }
 
-                    updateLoading(false);
-
                     if (mPrefs.speed <= 0.99f || mPrefs.speed >= 1.01f) {
                         player.setPlaybackSpeed(mPrefs.speed);
                     }
@@ -5996,6 +6019,7 @@ public class PlayerActivity extends Activity {
                         setSelectedTracks(mPrefs.subtitleTrackId, mPrefs.audioTrackId);
                     }
                 }
+                updateLoading(false);
             } else if (state == Player.STATE_BUFFERING) {
                 if (playbackWaitStartedAt == 0L) playbackWaitStartedAt = SystemClock.elapsedRealtime();
                 armLoadWatchdog();
@@ -6046,8 +6070,12 @@ public class PlayerActivity extends Activity {
                 final ExoPlaybackException exoPlaybackException = (ExoPlaybackException) error;
                 if (exoPlaybackException.type == ExoPlaybackException.TYPE_SOURCE) {
                     if (recoverResolverControlResponse(error)) return;
+                    String sourceUri = mPrefs.mediaUri == null ? null : mPrefs.mediaUri.toString();
+                    boolean streamTypeFallbackAllowed = StreamTypeFallbackPolicy.canTryAlternate(
+                            playbackEverReady, error.errorCode, sourceUri);
                     String detectedManifest = consumeDetectedManifestType();
-                    if (detectedManifest != null && !detectedManifest.equals(forcedStreamMimeType)) {
+                    if (streamTypeFallbackAllowed && detectedManifest != null
+                            && !detectedManifest.equals(forcedStreamMimeType)) {
                         alternateStreamTypeTried = true;
                         forcedStreamMimeType = detectedManifest;
                         restorePlayState = true;
@@ -6057,14 +6085,17 @@ public class PlayerActivity extends Activity {
                     if (lampaPlaylist != null && !alternateStreamTypeTried
                             && mPrefs.mediaUri != null
                             && Utils.isSupportedNetworkUri(mPrefs.mediaUri)
-                            && getStreamMimeType(mPrefs.mediaUri, mPrefs.mediaType) == null) {
+                            && StreamTypeFallbackPolicy.canTryHls(playbackEverReady,
+                            error.errorCode,
+                            getStreamMimeType(mPrefs.mediaUri, mPrefs.mediaType), sourceUri)) {
                         alternateStreamTypeTried = true;
                         forcedStreamMimeType = MimeTypes.APPLICATION_M3U8;
                         restorePlayState = true;
                         initializePlayer();
                         return;
                     }
-                    if (lampaIptv && !alternateStreamTypeTried && mPrefs.mediaUri != null) {
+                    if (lampaIptv && !alternateStreamTypeTried && mPrefs.mediaUri != null
+                            && streamTypeFallbackAllowed) {
                         alternateStreamTypeTried = true;
                         String currentMime = getStreamMimeType(mPrefs.mediaUri, mPrefs.mediaType);
                         forcedStreamMimeType = "application/x-mpegURL".equals(currentMime)
@@ -6148,6 +6179,9 @@ public class PlayerActivity extends Activity {
             return PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE;
         }
         for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof HlsPlaylistTracker.PlaylistStuckException) {
+                return PlaybackRecoveryPolicy.FailureKind.PLAYLIST_STUCK;
+            }
             if (cause instanceof HttpDataSource.InvalidResponseCodeException) {
                 return PlaybackRecoveryPolicy.FailureKind.NETWORK_RESPONSE;
             }
@@ -6308,6 +6342,7 @@ public class PlayerActivity extends Activity {
             case RETRY_SOURCE:
                 sourceRecoveryAttempts++;
                 savePlayer();
+                saveRecoveryPosition();
                 restorePlayState = player.getPlayWhenReady();
                 updateLoading(true);
                 Utils.showText(playerView, getString(
@@ -7158,6 +7193,43 @@ public class PlayerActivity extends Activity {
         } else {
             Utils.setButtonEnabled(this, exoSettings, enable);
         }
+    }
+
+    private void applyControlVisibility() {
+        if (buttonOpen != null) {
+            buttonOpen.setVisibility(mPrefs.showButtonOpen ? View.VISIBLE : View.GONE);
+        }
+        updateEpisodeControls();
+        if (buttonQuality != null) {
+            buttonQuality.setVisibility(mPrefs.showButtonQuality ? View.VISIBLE : View.GONE);
+        }
+        if (exoSubtitle != null) updateSubtitleButton();
+        if (buttonAspectRatio != null) {
+            buttonAspectRatio.setVisibility(
+                    mPrefs.showButtonAspectRatio ? View.VISIBLE : View.GONE);
+        }
+        if (buttonRotation != null) {
+            buttonRotation.setVisibility(mPrefs.showButtonRotation ? View.VISIBLE : View.GONE);
+        }
+        if (buttonLock != null) {
+            buttonLock.setVisibility(mPrefs.showButtonLock ? View.VISIBLE : View.GONE);
+        }
+        if (buttonPiP != null) {
+            buttonPiP.setVisibility(mPrefs.showButtonPiP ? View.VISIBLE : View.GONE);
+        }
+        if (exoSettings != null) {
+            exoSettings.setVisibility(
+                    mPrefs.showButtonPlaybackOptions ? View.VISIBLE : View.GONE);
+        }
+        if (buttonTogether != null) {
+            buttonTogether.setVisibility(mPrefs.showButtonTogether && togetherAvailable()
+                    ? View.VISIBLE : View.GONE);
+        }
+        if (buttonAppSettings != null) {
+            buttonAppSettings.setVisibility(
+                    mPrefs.showButtonAppSettings ? View.VISIBLE : View.GONE);
+        }
+        if (buttonTools != null) buttonTools.setVisibility(View.VISIBLE);
     }
 
     private void scaleStart() {

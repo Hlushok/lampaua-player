@@ -171,6 +171,14 @@
     <string name="pref_subtitle_source_rest_summary">Legacy unofficial API; it may stop working at any time</string>
     <string name="pref_subtitle_appearance">Appearance</string>
     <string name="pref_subtitle_appearance_summary">Size, color, background and edge</string>
+    <string name="pref_subtitle_preview">Live preview</string>
+    <string name="subtitle_preview_sample">This is how your subtitles will look</string>
+    <string name="pref_player_buttons">Player buttons</string>
+    <string name="pref_player_buttons_summary">Choose optional buttons shown below the timeline</string>
+    <string name="pref_player_buttons_required">Play/Pause and More are always shown</string>
+    <string name="pref_player_button_subtitles">Subtitles</string>
+    <string name="subtitle_offset_earlier">− Earlier</string>
+    <string name="subtitle_offset_later">Later +</string>
     <string name="pref_subtitle_scale">Text size</string>
     <string name="pref_subtitle_scale_smallest">Very small</string>
     <string name="pref_subtitle_scale_small">Small</string>

@@ -15,10 +15,11 @@ public class DiagnosticReportTest {
 
         String sanitized = DiagnosticReport.sanitizeText(text);
 
-        assertEquals("Open https://media.example.test:8443/live/movie.m3u8 now", sanitized);
+        assertEquals("Open https://media.example.test:8443/[redacted] now", sanitized);
         assertFalse(sanitized.contains("user"));
         assertFalse(sanitized.contains("pass"));
         assertFalse(sanitized.contains("secret"));
+        assertFalse(sanitized.contains("movie.m3u8"));
     }
 
     @Test
@@ -26,7 +27,7 @@ public class DiagnosticReportTest {
         String text = "https://one.test/a?token=first then "
                 + "http://name:password@two.test/b#second";
 
-        assertEquals("https://one.test/a then http://two.test/b",
+        assertEquals("https://one.test/[redacted] then http://two.test/[redacted]",
                 DiagnosticReport.sanitizeText(text));
     }
 
@@ -61,8 +62,17 @@ public class DiagnosticReportTest {
 
         String trace = DiagnosticReport.stackTrace(error);
 
-        assertTrue(trace.contains("https://media.test/file.m3u8"));
+        assertTrue(trace.contains("https://media.test/[redacted]"));
+        assertFalse(trace.contains("file.m3u8"));
         assertFalse(trace.contains("user:pass"));
         assertFalse(trace.contains("token=abc"));
+    }
+
+    @Test
+    public void signedPathTokensAreNeverExposed() {
+        String signed = "https://cdn.test/s/FH_1IhZTTYDW0KHDRPCy6IJ0F/token/title.mp4";
+
+        assertEquals("https://cdn.test/[redacted]",
+                DiagnosticReport.sanitizeNetworkUri(signed));
     }
 }

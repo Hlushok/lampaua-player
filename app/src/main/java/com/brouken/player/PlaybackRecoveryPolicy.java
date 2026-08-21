@@ -18,6 +18,7 @@ final class PlaybackRecoveryPolicy {
         NETWORK_RESPONSE,
         SOURCE_CONFIGURATION,
         RESOLVER_NOT_READY,
+        PLAYLIST_STUCK,
         DECODER,
         STALL_AT_START,
         STALL_MIDSTREAM,
@@ -44,6 +45,9 @@ final class PlaybackRecoveryPolicy {
         if (kind == FailureKind.RESOLVER_NOT_READY) {
             return sourceRetries < MAX_SOURCE_RETRIES ? Action.RETRY_SOURCE : Action.FAIL;
         }
+        if (kind == FailureKind.PLAYLIST_STUCK) {
+            return sourceRetries < MAX_SOURCE_RETRIES ? Action.RETRY_SOURCE : Action.FAIL;
+        }
 
         if (!everReady && sourceRetries < MAX_SOURCE_RETRIES) {
             return Action.RETRY_SOURCE;
@@ -55,5 +59,11 @@ final class PlaybackRecoveryPolicy {
             return Action.LOWER_QUALITY;
         }
         return Action.FAIL;
+    }
+
+    static long recoveryPosition(long currentPosition, long lastObservedPosition,
+                                 boolean everReady) {
+        if (currentPosition > 0L) return currentPosition;
+        return everReady && lastObservedPosition > 0L ? lastObservedPosition : 0L;
     }
 }

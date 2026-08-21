@@ -61,8 +61,9 @@ final class DiagnosticReport {
         try {
             URI parsed = new URI(trimmed);
             if (parsed.getHost() != null) {
-                return new URI(scheme, null, parsed.getHost(), parsed.getPort(),
-                        parsed.getRawPath(), null, null).toASCIIString();
+                String origin = new URI(scheme, null, parsed.getHost(), parsed.getPort(),
+                        null, null, null).toASCIIString();
+                return origin + redactedPath(parsed.getRawPath());
             }
         } catch (URISyntaxException ignored) {
             // The fallback below still removes authority credentials and URL parameters.
@@ -72,9 +73,11 @@ final class DiagnosticReport {
         int cut = firstPositive(remainder.indexOf('?'), remainder.indexOf('#'));
         if (cut >= 0) remainder = remainder.substring(0, cut);
         int path = remainder.indexOf('/');
-        int at = remainder.lastIndexOf('@', path < 0 ? remainder.length() : path);
-        if (at >= 0) remainder = remainder.substring(at + 1);
-        return scheme + "://" + remainder;
+        String authority = path < 0 ? remainder : remainder.substring(0, path);
+        int at = authority.lastIndexOf('@');
+        if (at >= 0) authority = authority.substring(at + 1);
+        boolean hasPath = path >= 0 && path + 1 < remainder.length();
+        return scheme + "://" + authority + (hasPath ? "/[redacted]" : "");
     }
 
     static String rootMessage(Throwable error) {
@@ -101,5 +104,9 @@ final class DiagnosticReport {
         if (first < 0) return second;
         if (second < 0) return first;
         return Math.min(first, second);
+    }
+
+    private static String redactedPath(String path) {
+        return path == null || path.isEmpty() || "/".equals(path) ? "" : "/[redacted]";
     }
 }

@@ -194,6 +194,10 @@ public class ResourceContractTest {
         String prefs = readProjectFile("src/main/java/com/brouken/player/Prefs.java");
         String settings = readProjectFile(
                 "src/main/java/com/brouken/player/SettingsActivity.java");
+        String preview = readProjectFile(
+                "src/main/java/com/brouken/player/SubtitlePreviewPreference.java");
+        String previewLayout = readProjectFile(
+                "src/main/res/layout/preference_subtitle_preview.xml");
 
         assertTrue(preferences.contains("app:key=\"languageSubtitle\""));
         assertTrue(preferences.contains("app:key=\"subtitleAppearance\""));
@@ -201,6 +205,8 @@ public class ResourceContractTest {
         assertTrue(preferences.contains("app:key=\"subtitleTextColor\""));
         assertTrue(preferences.contains("app:key=\"subtitleBackground\""));
         assertTrue(preferences.contains("app:key=\"subtitleEdge\""));
+        assertTrue(preferences.contains("com.brouken.player.SubtitlePreviewPreference"));
+        assertTrue(preferences.contains("app:key=\"subtitleStylePreview\""));
         assertFalse(preferences.contains("android.settings.CAPTIONING_SETTINGS"));
         assertTrue(activity.contains("setPreferredTextLanguages"));
         assertTrue(activity.contains("openAppSettings(\"languageSubtitle\")"));
@@ -208,6 +214,10 @@ public class ResourceContractTest {
         assertTrue(prefs.contains("getLanguageSubtitle"));
         assertTrue(settings.contains("EXTRA_SCROLL_TO"));
         assertTrue(settings.contains("openAtPreference"));
+        assertTrue(settings.contains("refreshSubtitlePreview"));
+        assertTrue(preview.contains("CaptionStyleCompat"));
+        assertTrue(preview.contains("setApplyEmbeddedStyles"));
+        assertTrue(previewLayout.contains("@+id/subtitle_preview"));
     }
 
     @Test
@@ -222,15 +232,20 @@ public class ResourceContractTest {
         String activity = readProjectFile(
                 "src/main/java/com/brouken/player/PlayerActivity.java");
 
-        assertTrue(preferences.contains("app:key=\"subtitleSources\""));
-        assertTrue(preferences.contains("app:key=\"subtitleSourceRest\""));
-        assertTrue(preferences.contains("app:key=\"subtitleSourceStremio\""));
-        assertTrue(preferences.contains("app:key=\"subtitleSourceShegu\""));
-        assertTrue(preferences.contains("app:key=\"subtitleSourceOpenSubtitles\""));
+        assertFalse(preferences.contains("app:key=\"subtitleSources\""));
+        assertFalse(preferences.contains("app:key=\"subtitleSourceRest\""));
+        assertFalse(preferences.contains("app:key=\"subtitleSourceStremio\""));
+        assertFalse(preferences.contains("app:key=\"subtitleSourceShegu\""));
+        assertFalse(preferences.contains("app:key=\"subtitleSourceOpenSubtitles\""));
         assertTrue(prefs.contains("public boolean subtitleSearch = false"));
+        assertFalse(prefs.contains("subtitleSourceOpenSubtitles"));
+        assertFalse(prefs.contains("subtitleSourceShegu"));
+        assertFalse(prefs.contains("subtitleSourceStremio"));
+        assertFalse(prefs.contains("subtitleSourceRest"));
         assertTrue(search.contains("rest.opensubtitles.org"));
         assertTrue(search.contains("opensubtitles-v3.strem.io"));
         assertTrue(search.contains("subtitles.shegu.st"));
+        assertFalse(search.contains("prefs.subtitleSource"));
         assertFalse(search.contains("SegmentFinder"));
         assertTrue(openSubtitles.contains("header(\"Api-Key\", KEY)"));
         assertTrue(openSubtitles.contains("UA-Player/"));
@@ -301,6 +316,37 @@ public class ResourceContractTest {
         assertTrue(settings.contains("findPreference(\"holdSpeed\")"));
         assertTrue(ukrainian.contains("name=\"pref_time_remaining\""));
         assertTrue(ukrainian.contains("name=\"pref_hold_speed\""));
+    }
+
+    @Test
+    public void optionalPlayerButtonsCanBeHiddenWithoutLosingCoreActions() throws Exception {
+        String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
+        String prefs = readProjectFile("src/main/java/com/brouken/player/Prefs.java");
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+        String offset = readProjectFile("src/main/java/com/brouken/player/OffsetPanel.java");
+        String ukrainian = readProjectFile("src/main/res/values-uk/strings.xml");
+
+        assertTrue(preferences.contains("app:key=\"playerButtons\""));
+        assertTrue(preferences.contains("app:key=\"showButtonOpen\""));
+        assertTrue(preferences.contains("app:key=\"showButtonPlaylist\""));
+        assertTrue(preferences.contains("app:key=\"showButtonQuality\""));
+        assertTrue(preferences.contains("app:key=\"showButtonSubtitles\""));
+        assertTrue(preferences.contains("app:key=\"showButtonAspectRatio\""));
+        assertTrue(preferences.contains("app:key=\"showButtonTogether\""));
+        assertTrue(preferences.contains("app:key=\"showButtonAppSettings\""));
+        assertTrue(prefs.contains("public boolean showButtonOpen = true"));
+        assertTrue(prefs.contains("public boolean showButtonAppSettings = true"));
+        assertTrue(activity.contains("applyControlVisibility()"));
+        assertTrue(activity.contains("controls.addView(buttonTools)"));
+        assertTrue(activity.contains(
+                "setNeutralButton(R.string.subtitle_offset_title"));
+        assertFalse(preferences.contains("showButtonTools"));
+        assertFalse(preferences.contains("showButtonPlayPause"));
+        assertTrue(offset.contains("subtitle_offset_earlier"));
+        assertTrue(offset.contains("subtitle_offset_later"));
+        assertTrue(ukrainian.contains("name=\"subtitle_offset_earlier\""));
+        assertTrue(ukrainian.contains("name=\"subtitle_offset_later\""));
     }
 
     @Test

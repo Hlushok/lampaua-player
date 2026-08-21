@@ -3,6 +3,7 @@ package com.brouken.player;
 final class LiveRecoveryPolicy {
     static final int MAX_ATTEMPTS = 2;
     static final long RESET_AFTER_MS = 60_000L;
+    private static final long MIN_POSITION_CHANGE_MS = 250L;
 
     private LiveRecoveryPolicy() {}
 
@@ -12,5 +13,13 @@ final class LiveRecoveryPolicy {
 
     static boolean canRejoin(int attempts, long nowMs, long lastAttemptAtMs) {
         return effectiveAttempts(attempts, nowMs, lastAttemptAtMs) < MAX_ATTEMPTS;
+    }
+
+    static boolean hasPlaybackProgress(long previousPositionMs, long currentPositionMs,
+                                       boolean live) {
+        if (previousPositionMs < 0L || currentPositionMs < 0L) return true;
+        long change = currentPositionMs - previousPositionMs;
+        return change > MIN_POSITION_CHANGE_MS
+                || (live && change < -MIN_POSITION_CHANGE_MS);
     }
 }

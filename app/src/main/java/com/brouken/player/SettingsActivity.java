@@ -1,6 +1,7 @@
 package com.brouken.player;
 
 import android.content.res.Configuration;
+import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -28,6 +29,7 @@ import androidx.preference.ListPreference;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceGroup;
+import androidx.preference.PreferenceManager;
 import androidx.preference.PreferenceScreen;
 import androidx.preference.SwitchPreferenceCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -136,7 +138,8 @@ public class SettingsActivity extends AppCompatActivity
         return true;
     }
 
-    public static class SettingsFragment extends PreferenceFragmentCompat {
+    public static class SettingsFragment extends PreferenceFragmentCompat
+            implements SharedPreferences.OnSharedPreferenceChangeListener {
         @Override
         public RecyclerView.LayoutManager onCreateLayoutManager() {
             return new LinearLayoutManager(getContext()) {
@@ -175,6 +178,13 @@ public class SettingsActivity extends AppCompatActivity
             if (preferenceHoldSpeed != null && Utils.isTvBox(getContext())) {
                 preferenceHoldSpeed.setVisible(false);
             }
+            boolean tvBox = Utils.isTvBox(getContext());
+            Preference showRotation = findPreference("showButtonRotation");
+            Preference showLock = findPreference("showButtonLock");
+            Preference showPiP = findPreference("showButtonPiP");
+            if (showRotation != null) showRotation.setVisible(!tvBox);
+            if (showLock != null) showLock.setVisible(!tvBox);
+            if (showPiP != null) showPiP.setVisible(Utils.isPiPSupported(getContext()));
 
             final EditTextPreference preferenceNick = findPreference("togetherNick");
             final Preference preferenceNickRandom = findPreference("togetherNickRandom");
@@ -390,6 +400,40 @@ public class SettingsActivity extends AppCompatActivity
             if (savedInstanceState == null && getArguments() == null) {
                 String key = requireActivity().getIntent().getStringExtra(EXTRA_SCROLL_TO);
                 if (key != null) openAtPreference(key, 3);
+            }
+        }
+
+        @Override
+        public void onStart() {
+            super.onStart();
+            PreferenceManager.getDefaultSharedPreferences(requireContext())
+                    .registerOnSharedPreferenceChangeListener(this);
+            refreshSubtitlePreview();
+        }
+
+        @Override
+        public void onStop() {
+            PreferenceManager.getDefaultSharedPreferences(requireContext())
+                    .unregisterOnSharedPreferenceChangeListener(this);
+            super.onStop();
+        }
+
+        @Override
+        public void onSharedPreferenceChanged(SharedPreferences preferences, String key) {
+            if ("subtitleStyleEmbedded".equals(key)
+                    || "subtitleScale".equals(key)
+                    || "subtitleTextColor".equals(key)
+                    || "subtitleBackground".equals(key)
+                    || "subtitleEdge".equals(key)
+                    || "subtitleStyleBold".equals(key)) {
+                refreshSubtitlePreview();
+            }
+        }
+
+        private void refreshSubtitlePreview() {
+            Preference preference = findPreference("subtitleStylePreview");
+            if (preference instanceof SubtitlePreviewPreference) {
+                ((SubtitlePreviewPreference) preference).refresh();
             }
         }
 

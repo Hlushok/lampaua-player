@@ -23,7 +23,7 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
-/** Searches the subtitle sources selected by the user until one delivers a usable file. */
+/** Searches the integrated subtitle sources until one delivers a usable file. */
 final class SubtitleSearch {
     private SubtitleSearch() { }
 
@@ -70,7 +70,7 @@ final class SubtitleSearch {
         boolean accept(Result result);
     }
 
-    static Result find(MediaId id, List<String> preferred, Prefs prefs, Sink sink,
+    static Result find(MediaId id, List<String> preferred, Sink sink,
                        AtomicBoolean answered) {
         if (id == null || id.isEmpty() || preferred.isEmpty()) return null;
         if (!id.isMovie() && id.episode < 1) {
@@ -79,20 +79,14 @@ final class SubtitleSearch {
         }
 
         List<Callable<Result>> keyless = new ArrayList<>(3);
-        if (prefs.subtitleSourceRest) {
-            keyless.add(() -> best(SOURCE_REST,
-                    restOpenSubtitles(id, preferred, answered), preferred));
-        }
-        if (prefs.subtitleSourceStremio) {
-            keyless.add(() -> best(SOURCE_STREMIO, stremio(id, answered), preferred));
-        }
-        if (prefs.subtitleSourceShegu) {
-            keyless.add(() -> best(SOURCE_SHEGU, shegu(id, answered), preferred));
-        }
+        keyless.add(() -> best(SOURCE_REST,
+                restOpenSubtitles(id, preferred, answered), preferred));
+        keyless.add(() -> best(SOURCE_STREMIO, stremio(id, answered), preferred));
+        keyless.add(() -> best(SOURCE_SHEGU, shegu(id, answered), preferred));
         for (Result result : inParallel(keyless)) {
             if (delivered(result, sink)) return result;
         }
-        if (!cancelled() && prefs.subtitleSourceOpenSubtitles) {
+        if (!cancelled()) {
             Result result = fromOpenSubtitles(id, preferred, answered);
             if (delivered(result, sink)) return result;
         }

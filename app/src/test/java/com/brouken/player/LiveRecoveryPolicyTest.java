@@ -17,4 +17,15 @@ public class LiveRecoveryPolicyTest {
         assertEquals(0, LiveRecoveryPolicy.effectiveAttempts(2, 80_001L, 20_000L));
         assertTrue(LiveRecoveryPolicy.canRejoin(2, 80_001L, 20_000L));
     }
+
+    @Test public void slidingLiveWindowResetCountsAsPlaybackProgress() {
+        assertTrue(LiveRecoveryPolicy.hasPlaybackProgress(5_800L, 900L, true));
+        assertTrue(LiveRecoveryPolicy.hasPlaybackProgress(900L, 2_400L, true));
+        assertFalse(LiveRecoveryPolicy.hasPlaybackProgress(2_400L, 2_400L, true));
+    }
+
+    @Test public void vodPositionMustAdvanceForward() {
+        assertTrue(LiveRecoveryPolicy.hasPlaybackProgress(10_000L, 11_500L, false));
+        assertFalse(LiveRecoveryPolicy.hasPlaybackProgress(10_000L, 9_000L, false));
+    }
 }

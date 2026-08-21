@@ -23,6 +23,72 @@
             app:title="@string/pref_menu_opacity"
             app:useSimpleSummaryProvider="true" />
 
+        <PreferenceScreen
+            app:key="playerButtons"
+            app:summary="@string/pref_player_buttons_summary"
+            app:title="@string/pref_player_buttons">
+
+            <Preference
+                app:selectable="false"
+                app:summary="@string/pref_player_buttons_required" />
+
+            <SwitchPreferenceCompat
+                app:key="showButtonOpen"
+                app:defaultValue="true"
+                app:title="@string/button_open" />
+
+            <SwitchPreferenceCompat
+                app:key="showButtonPlaylist"
+                app:defaultValue="true"
+                app:title="@string/button_playlist" />
+
+            <SwitchPreferenceCompat
+                app:key="showButtonQuality"
+                app:defaultValue="true"
+                app:title="@string/button_quality" />
+
+            <SwitchPreferenceCompat
+                app:key="showButtonSubtitles"
+                app:defaultValue="true"
+                app:title="@string/pref_player_button_subtitles" />
+
+            <SwitchPreferenceCompat
+                app:key="showButtonAspectRatio"
+                app:defaultValue="true"
+                app:title="@string/button_crop" />
+
+            <SwitchPreferenceCompat
+                app:key="showButtonRotation"
+                app:defaultValue="true"
+                app:title="@string/button_rotate" />
+
+            <SwitchPreferenceCompat
+                app:key="showButtonLock"
+                app:defaultValue="true"
+                app:title="@string/button_lock" />
+
+            <SwitchPreferenceCompat
+                app:key="showButtonPiP"
+                app:defaultValue="true"
+                app:title="@string/button_pip" />
+
+            <SwitchPreferenceCompat
+                app:key="showButtonPlaybackOptions"
+                app:defaultValue="true"
+                app:title="@string/button_playback_options" />
+
+            <SwitchPreferenceCompat
+                app:key="showButtonTogether"
+                app:defaultValue="true"
+                app:title="@string/together_title" />
+
+            <SwitchPreferenceCompat
+                app:key="showButtonAppSettings"
+                app:defaultValue="true"
+                app:title="@string/button_app_settings" />
+
+        </PreferenceScreen>
+
         <SwitchPreferenceCompat
             app:key="timeRemaining"
             app:defaultValue="false"
@@ -156,37 +222,6 @@
             app:title="@string/pref_subtitle_auto_translate_ukrainian" />
 
         <PreferenceScreen
-            app:key="subtitleSources"
-            app:summary="@string/pref_subtitle_sources_summary"
-            app:title="@string/pref_subtitle_sources">
-
-            <SwitchPreferenceCompat
-                app:key="subtitleSourceRest"
-                app:defaultValue="true"
-                app:summary="@string/pref_subtitle_source_rest_summary"
-                app:title="@string/pref_subtitle_source_rest" />
-
-            <SwitchPreferenceCompat
-                app:key="subtitleSourceStremio"
-                app:defaultValue="true"
-                app:summary="@string/pref_subtitle_source_stremio_summary"
-                app:title="@string/pref_subtitle_source_stremio" />
-
-            <SwitchPreferenceCompat
-                app:key="subtitleSourceShegu"
-                app:defaultValue="true"
-                app:summary="@string/pref_subtitle_source_shegu_summary"
-                app:title="@string/pref_subtitle_source_shegu" />
-
-            <SwitchPreferenceCompat
-                app:key="subtitleSourceOpenSubtitles"
-                app:defaultValue="true"
-                app:summary="@string/pref_subtitle_source_opensubtitles_summary"
-                app:title="@string/pref_subtitle_source_opensubtitles" />
-
-        </PreferenceScreen>
-
-        <PreferenceScreen
             app:key="subtitleAppearance"
             app:summary="@string/pref_subtitle_appearance_summary"
             app:title="@string/pref_subtitle_appearance">
@@ -236,6 +271,11 @@
                 android:summaryOn="@string/pref_subtitle_style_bold_on"
                 android:summaryOff="@string/pref_subtitle_style_bold_off"
                 app:title="@string/pref_subtitle_style_bold" />
+
+            <com.brouken.player.SubtitlePreviewPreference
+                app:key="subtitleStylePreview"
+                app:iconSpaceReserved="false"
+                app:selectable="false" />
 
         </PreferenceScreen>
 

@@ -11,6 +11,7 @@ import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.DECODER;
 import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.LIVE_STALL;
 import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.NETWORK_READ;
 import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.NETWORK_RESPONSE;
+import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.PLAYLIST_STUCK;
 import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.RESOLVER_NOT_READY;
 import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.SOURCE_CONFIGURATION;
 import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE;
@@ -62,5 +63,25 @@ public class PlaybackRecoveryPolicyTest {
     public void liveStallUsesItsDedicatedRejoinBudget() {
         assertEquals(FAIL,
                 PlaybackRecoveryPolicy.decide(LIVE_STALL, true, 0, 0, true));
+    }
+
+    @Test
+    public void stuckHlsPlaylistRebuildsTheMediaSource() {
+        assertEquals(RETRY_SOURCE,
+                PlaybackRecoveryPolicy.decide(PLAYLIST_STUCK, true, 0, 0, false));
+        assertEquals(RETRY_SOURCE,
+                PlaybackRecoveryPolicy.decide(PLAYLIST_STUCK, true, 2, 0, false));
+        assertEquals(FAIL,
+                PlaybackRecoveryPolicy.decide(PLAYLIST_STUCK, true, 3, 0, false));
+    }
+
+    @Test
+    public void sourceRebuildKeepsTheLastKnownPlaybackPosition() {
+        assertEquals(245_000L,
+                PlaybackRecoveryPolicy.recoveryPosition(0L, 245_000L, true));
+        assertEquals(250_000L,
+                PlaybackRecoveryPolicy.recoveryPosition(250_000L, 245_000L, true));
+        assertEquals(0L,
+                PlaybackRecoveryPolicy.recoveryPosition(0L, 245_000L, false));
     }
 }

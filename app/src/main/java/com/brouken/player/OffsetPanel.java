@@ -58,6 +58,15 @@ final class OffsetPanel {
                 Utils.dpToPx(58), ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(row);
 
+        LinearLayout direction = new LinearLayout(context);
+        TextView earlier = hint(context, R.string.subtitle_offset_earlier, Gravity.START);
+        TextView later = hint(context, R.string.subtitle_offset_later, Gravity.END);
+        direction.addView(earlier, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        direction.addView(later, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(direction);
+
         Button reset = actionButton(context, context.getString(R.string.subtitle_offset_reset));
         LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -113,6 +122,16 @@ final class OffsetPanel {
         button.setAllCaps(false);
         button.setBackgroundResource(R.drawable.ua_dialog_button_background);
         return button;
+    }
+
+    private static TextView hint(Context context, int text, int gravity) {
+        TextView view = new TextView(context);
+        view.setText(text);
+        view.setTextColor(Color.rgb(145, 178, 219));
+        view.setTextSize(13);
+        view.setGravity(gravity);
+        view.setPadding(Utils.dpToPx(8), 0, Utils.dpToPx(8), 0);
+        return view;
     }
 
     static String format(double sec) {
