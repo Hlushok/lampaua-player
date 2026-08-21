@@ -300,4 +300,39 @@ public class ResourceContractTest {
         assertTrue(ukrainian.contains("name=\"pref_time_remaining\""));
         assertTrue(ukrainian.contains("name=\"pref_hold_speed\""));
     }
+
+    @Test
+    public void playbackReportsStayLocalSanitizedAndShareOnlyOnDemand() throws Exception {
+        String manifest = readProjectFile("src/main/AndroidManifest.xml");
+        String reportActivity = readProjectFile(
+                "src/main/java/com/brouken/player/PlaybackReportActivity.java");
+        String diagnostic = readProjectFile(
+                "src/main/java/com/brouken/player/DiagnosticReport.java");
+        String player = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+        String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
+        String readme = readProjectFile("../README.md");
+
+        assertTrue(manifest.contains("android:name=\".PlaybackReportActivity\""));
+        assertTrue(manifest.contains("android:excludeFromRecents=\"true\""));
+        assertTrue(manifest.contains("android:exported=\"false\""));
+        assertTrue(reportActivity.contains("static void show(Context context"));
+        assertTrue(reportActivity.contains("ClipboardManager"));
+        assertTrue(reportActivity.contains("Intent.ACTION_SEND"));
+        assertTrue(reportActivity.contains("R.id.report_close"));
+        assertTrue(diagnostic.contains("sanitizeNetworkUri"));
+        assertTrue(diagnostic.contains("sanitizeText"));
+        assertFalse(reportActivity.contains("HttpURLConnection"));
+        assertFalse(reportActivity.contains("Socket"));
+        assertFalse(reportActivity.contains("termbin.com"));
+        assertFalse(reportActivity.contains("qrserver.com"));
+        assertFalse(reportActivity.contains("Sentry"));
+        assertTrue(player.contains("PlaybackReportActivity.show"));
+        assertTrue(player.contains("fadeAuxiliaryChrome"));
+        assertTrue(player.contains("fadeAuxiliaryChrome(statsView"));
+        assertTrue(player.contains("fadeAuxiliaryChrome(roomPill"));
+        assertTrue(preferences.contains("app:key=\"showStats\""));
+        assertTrue(readme.contains("Oleksandr Zhyzhchenko"));
+        assertTrue(readme.contains("just-plus-player/just-plus-player"));
+    }
 }

@@ -115,3 +115,5 @@ This repository contains only the UA Player Android application. Lampac modules,
 ## Credits and license
 
 UA Player is derived from [moneytoo/Player](https://github.com/moneytoo/Player). The project retains the upstream [Unlicense](LICENSE). Third-party AndroidX Media/decoder components keep their respective licenses.
+
+Selected playback, subtitle and Watch Together behavior was independently adapted after reviewing [just-plus-player/just-plus-player](https://github.com/just-plus-player/just-plus-player) by Oleksandr Zhyzhchenko. UA Player does not include Just+ branding, Sentry or remote diagnostic uploads. Anonymous room aliases are adapted from [LocalSend](https://github.com/localsend/localsend) under Apache-2.0; attribution is retained in the source.

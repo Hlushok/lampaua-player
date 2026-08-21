@@ -28,6 +28,12 @@
     <string name="playback_stats_decoder">Decoder</string>
     <string name="playback_stats_audio">Audio</string>
     <string name="playback_stats_dropped_frames">Dropped frames</string>
+    <string name="playback_report_title">Playback report</string>
+    <string name="playback_error_report_title">Playback error</string>
+    <string name="playback_report_copy">Copy</string>
+    <string name="playback_report_share">Share</string>
+    <string name="playback_report_close">Close</string>
+    <string name="playback_report_copied">Report copied</string>
     <string name="video_resize_crop">Crop</string>
     <string name="video_orientation_video">Video orientation</string>
     <string name="video_orientation_sensor">Auto-rotate</string>
@@ -98,6 +104,8 @@
     <string name="pref_time_remaining">Show remaining time</string>
     <string name="pref_time_remaining_on">The bottom bar counts down to the end</string>
     <string name="pref_time_remaining_off">The bottom bar shows the total duration</string>
+    <string name="pref_show_stats">Live playback statistics</string>
+    <string name="pref_show_stats_summary">Show buffer, network, decoder and dropped frames while controls are visible</string>
     <string name="resolver_not_ready">The source did not prepare a playable stream. Please open it again.</string>
     <string name="live_stream_fallback">Trying alternate live-stream mode</string>
     <string name="playback_finishes_at">Finishes at %1$s</string>

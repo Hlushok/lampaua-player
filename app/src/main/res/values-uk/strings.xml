@@ -25,6 +25,12 @@
     <string name="playback_stats_decoder">Декодер</string>
     <string name="playback_stats_audio">Аудіо</string>
     <string name="playback_stats_dropped_frames">Пропущені кадри</string>
+    <string name="playback_report_title">Звіт про відтворення</string>
+    <string name="playback_error_report_title">Помилка відтворення</string>
+    <string name="playback_report_copy">Копіювати</string>
+    <string name="playback_report_share">Поділитися</string>
+    <string name="playback_report_close">Закрити</string>
+    <string name="playback_report_copied">Звіт скопійовано</string>
     <string name="video_resize_fit">Підігнати</string>
     <string name="video_resize_fill">Розтягнути</string>
     <string name="video_resize_crop">Обрізати</string>
@@ -180,6 +186,8 @@
     <string name="pref_time_remaining">Показувати час, що залишився</string>
     <string name="pref_time_remaining_on">Нижня панель відлічує час до кінця</string>
     <string name="pref_time_remaining_off">Нижня панель показує загальну тривалість</string>
+    <string name="pref_show_stats">Жива статистика відтворення</string>
+    <string name="pref_show_stats_summary">Показувати буфер, мережу, декодер і пропущені кадри разом з елементами керування</string>
     <string name="resolver_not_ready">Джерело не підготувало потік. Відкрийте його повторно.</string>
     <string name="live_stream_fallback">Пробую альтернативний режим прямого потоку</string>
     <string name="update_available_title">Оновлення UA Player</string>

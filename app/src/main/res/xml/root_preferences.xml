@@ -31,6 +31,12 @@
             app:title="@string/pref_time_remaining" />
 
         <SwitchPreferenceCompat
+            app:key="showStats"
+            app:defaultValue="false"
+            app:summary="@string/pref_show_stats_summary"
+            app:title="@string/pref_show_stats" />
+
+        <SwitchPreferenceCompat
             app:key="systemVolume"
             app:defaultValue="true"
             app:summaryOn="@string/pref_system_volume_on"

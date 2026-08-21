@@ -52,6 +52,7 @@ class Prefs {
     private static final String PREF_KEY_SPEED = "speed";
     private static final String PREF_KEY_HOLD_SPEED = "holdSpeed";
     private static final String PREF_KEY_TIME_REMAINING = "timeRemaining";
+    private static final String PREF_KEY_SHOW_STATS = "showStats";
     private static final String PREF_KEY_FILE_ACCESS = "fileAccess";
     private static final String PREF_KEY_DECODER_PRIORITY = "decoderPriority";
     private static final String PREF_KEY_MAP_DV7 = "mapDV7ToHevc";
@@ -106,6 +107,7 @@ class Prefs {
     public float speed = 1.f;
     public boolean holdSpeed = true;
     public boolean timeRemaining = false;
+    public boolean showStats = false;
 
     public String subtitleTrackId;
     public String audioTrackId;
@@ -197,6 +199,7 @@ class Prefs {
         holdSpeed = mSharedPreferences.getBoolean(PREF_KEY_HOLD_SPEED, holdSpeed);
         timeRemaining = mSharedPreferences.getBoolean(
                 PREF_KEY_TIME_REMAINING, timeRemaining);
+        showStats = mSharedPreferences.getBoolean(PREF_KEY_SHOW_STATS, showStats);
         tunneling = mSharedPreferences.getBoolean(PREF_KEY_TUNNELING, tunneling);
         skipSilence = mSharedPreferences.getBoolean(PREF_KEY_SKIP_SILENCE, skipSilence);
         frameRateMatching = mSharedPreferences.getBoolean(PREF_KEY_FRAMERATE_MATCHING, frameRateMatching);

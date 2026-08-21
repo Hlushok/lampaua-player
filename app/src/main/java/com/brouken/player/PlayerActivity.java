@@ -166,6 +166,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -197,7 +198,6 @@ public class PlayerActivity extends Activity {
     public static boolean controllerVisible;
     public static boolean controllerVisibleFully;
     public static Snackbar snackbar;
-    private ExoPlaybackException errorToShow;
     public static int boostLevel = 0;
     public static boolean systemVolume = true;
     public static float playerVolume = 100f;
@@ -227,6 +227,7 @@ public class PlayerActivity extends Activity {
     private static final long STABLE_PLAYBACK_MS = 15_000L;
     private static final long SWIPE_UNLOCK_TIMEOUT_MS = 3_000L;
     private static final long FRAME_RATE_SWITCH_TIMEOUT_MS = 1_500L;
+    private static final long CHROME_FADE_MS = 250L;
     private static final long SUBTITLE_MISS_TTL_MS = 30 * 60 * 1000L;
     private static final Map<String, Long> subtitleSearchMisses = new ConcurrentHashMap<>();
 
@@ -303,6 +304,7 @@ public class PlayerActivity extends Activity {
     private boolean lampaIptv;
     private TextView roomPill;
     private TextView roomMessage;
+    private TextView statsView;
     private TextView speedBoostIndicator;
     private Drawable speedBoostIconForward;
     private Drawable speedBoostIconRewind;
@@ -348,6 +350,8 @@ public class PlayerActivity extends Activity {
     private long stablePlaybackStartedAt;
     private long stablePlaybackStartPosition = C.TIME_UNSET;
     private boolean playbackEverReady;
+    private boolean controllerChromeVisible;
+    private final Map<View, Boolean> auxiliaryChromeTargets = new WeakHashMap<>();
     private long loadWatchdogBytes;
     private final Runnable loadTimeoutRunnable = this::reportLoadWatchdog;
     private final Runnable swipeHider = this::hideSwipeToUnlock;
@@ -366,7 +370,7 @@ public class PlayerActivity extends Activity {
                         : (playbackEverReady && position - stablePlaybackStartPosition >= 2_000
                         ? PlaybackRecoveryPolicy.FailureKind.STALL_MIDSTREAM
                         : PlaybackRecoveryPolicy.FailureKind.STALL_AT_START);
-                if (!recoverPlayback(kind)) stopPlaybackAfterRecoveryFailure(kind, null);
+                if (!recoverPlayback(kind)) stopPlaybackAfterRecoveryFailure(kind, null, null);
                 return;
             }
             playerView.postDelayed(this, STALL_CHECK_INTERVAL_MS);
@@ -802,6 +806,7 @@ public class PlayerActivity extends Activity {
         setupLampaOverlay(centerView);
         setupTogetherOverlay();
         setupHoldSpeedOverlay();
+        setupStatsOverlay();
 
         if (!isTvBox) {
             swipeToUnlock = new SwipeToUnlockView(this);
@@ -1036,12 +1041,22 @@ public class PlayerActivity extends Activity {
         playerView.setControllerVisibilityListener(new PlayerView.ControllerVisibilityListener() {
             @Override
             public void onVisibilityChanged(int visibility) {
+                boolean wasVisible = controllerVisible;
+                boolean wasFullyVisible = controllerVisibleFully;
                 controllerVisible = visibility == View.VISIBLE;
                 controllerVisibleFully = playerView.isControllerFullyVisible();
+                if (!controllerVisible) {
+                    controllerChromeVisible = false;
+                } else if (controllerVisibleFully || !wasVisible) {
+                    controllerChromeVisible = true;
+                } else if (wasFullyVisible) {
+                    controllerChromeVisible = false;
+                }
                 if (lampaTopPanel != null) {
                     lampaTopPanel.setVisibility(controllerVisible ? View.VISIBLE : View.GONE);
                 }
                 updateRoomBadge();
+                updateStatsPanel();
 
                 if (PlayerActivity.restoreControllerTimeout) {
                     restoreControllerTimeout = false;
@@ -1078,10 +1093,6 @@ public class PlayerActivity extends Activity {
                         // TODO: Explain gestures?
                         //  "Use vertical and horizontal gestures to change brightness, volume and seek in video"
                         mPrefs.markFirstRun();
-                    }
-                    if (errorToShow != null) {
-                        showError(errorToShow);
-                        errorToShow = null;
                     }
                 }
             }
@@ -1188,6 +1199,8 @@ public class PlayerActivity extends Activity {
         playerView.setCustomErrorMessage(null);
         playerView.removeCallbacks(sleepTimerRunnable);
         lampaUiHandler.removeCallbacks(lampaUiTicker);
+        fadeAuxiliaryChrome(statsView, false, true);
+        fadeAuxiliaryChrome(roomPill, false, true);
         unregisterAudioOutputReceiver();
         releasePlayer(false);
     }
@@ -1603,6 +1616,7 @@ public class PlayerActivity extends Activity {
             if (locked) showSwipeToUnlock();
         }
         updateRoomBadge();
+        updateStatsPanel();
     }
 
     private void applyViewIntent(final Intent intent, final boolean initialize) {
@@ -2368,6 +2382,60 @@ public class PlayerActivity extends Activity {
         playerView.addView(speedBoostIndicator, params);
     }
 
+    private void setupStatsOverlay() {
+        statsView = new TextView(this);
+        statsView.setTextColor(Color.WHITE);
+        statsView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        statsView.setTypeface(Typeface.MONOSPACE);
+        statsView.setLineSpacing(Utils.dpToPx(1), 1f);
+        statsView.setPadding(Utils.dpToPx(12), Utils.dpToPx(9),
+                Utils.dpToPx(12), Utils.dpToPx(9));
+        statsView.setMaxWidth(Utils.dpToPx(360));
+        statsView.setBackground(lampaBackground(
+                Color.argb(232, 4, 18, 40), Color.rgb(240, 183, 38), 9));
+        statsView.setAlpha(0f);
+        statsView.setVisibility(View.GONE);
+
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.START | Gravity.CENTER_VERTICAL);
+        params.leftMargin = Utils.dpToPx(22);
+        playerView.addView(statsView, params);
+    }
+
+    private void fadeAuxiliaryChrome(View view, boolean visible, boolean immediate) {
+        if (view == null) return;
+        Boolean previousTarget = auxiliaryChromeTargets.get(view);
+        if (Objects.equals(previousTarget, visible)
+                && !(immediate && !visible && view.getVisibility() != View.GONE)) return;
+        auxiliaryChromeTargets.put(view, visible);
+        view.animate().cancel();
+
+        if (visible) {
+            if (view.getVisibility() != View.VISIBLE) {
+                view.setAlpha(0f);
+                view.setVisibility(View.VISIBLE);
+            }
+            if (immediate) {
+                view.setAlpha(1f);
+            } else {
+                view.animate().alpha(1f).setDuration(CHROME_FADE_MS).start();
+            }
+            return;
+        }
+
+        if (immediate || view.getVisibility() != View.VISIBLE) {
+            view.setAlpha(0f);
+            view.setVisibility(View.GONE);
+            return;
+        }
+        view.animate().alpha(0f).setDuration(CHROME_FADE_MS).withEndAction(() -> {
+            if (Boolean.FALSE.equals(auxiliaryChromeTargets.get(view))) {
+                view.setVisibility(View.GONE);
+            }
+        }).start();
+    }
+
     void setSpeedBoostIndicator(float speed, boolean rewind) {
         if (speedBoostIndicator == null) return;
         speedBoostIndicator.setText(String.format(Locale.US, "%.1f\u00D7", speed));
@@ -2899,7 +2967,7 @@ public class PlayerActivity extends Activity {
             buttonTogether.setVisibility(togetherAvailable() ? View.VISIBLE : View.GONE);
         }
         if (roomPill != null) {
-            final boolean visible = active && controllerVisible && !inPip && !locked;
+            final boolean visible = active && controllerChromeVisible && !inPip && !locked;
             if (visible) {
                 roomPill.setText(together.connected()
                         ? getString(R.string.together_badge, together.code(), together.peers())
@@ -2909,7 +2977,7 @@ public class PlayerActivity extends Activity {
                 roomPill.setTextColor(together.connected()
                         ? Color.WHITE : Color.rgb(240, 183, 38));
             }
-            roomPill.setVisibility(visible ? View.VISIBLE : View.GONE);
+            fadeAuxiliaryChrome(roomPill, visible, inPip || locked);
         }
         if (roomMessage != null) {
             final String waiting = active ? together.waitingFor() : null;
@@ -2924,6 +2992,14 @@ public class PlayerActivity extends Activity {
             }
             roomMessage.setVisibility(visible ? View.VISIBLE : View.GONE);
         }
+    }
+
+    private void updateStatsPanel() {
+        if (statsView == null) return;
+        boolean visible = mPrefs != null && mPrefs.showStats && player != null
+                && controllerChromeVisible && !inPip && !locked;
+        if (visible) statsView.setText(playbackStatisticsSnapshot().render(playbackStatisticsLabels()));
+        fadeAuxiliaryChrome(statsView, visible, inPip || locked);
     }
 
     private void announceRoomAction(final String nick, final RoomAction action) {
@@ -3124,9 +3200,15 @@ public class PlayerActivity extends Activity {
 
     private void showPlaybackStatistics() {
         if (player == null) return;
+        PlaybackStatistics.Snapshot snapshot = playbackStatisticsSnapshot();
+        PlaybackReportActivity.show(this, getString(R.string.playback_statistics_title),
+                snapshot.render(playbackStatisticsLabels()), playbackReport(null));
+    }
+
+    private PlaybackStatistics.Snapshot playbackStatisticsSnapshot() {
         Format video = player.getVideoFormat();
         Format audio = player.getAudioFormat();
-        PlaybackStatistics.Snapshot snapshot = new PlaybackStatistics.Snapshot(
+        return new PlaybackStatistics.Snapshot(
                 mediaContainerLabel(),
                 video == null ? 0 : video.width,
                 video == null ? 0 : video.height,
@@ -3140,7 +3222,10 @@ public class PlayerActivity extends Activity {
                         + (audioDecoderName == null ? "" : " \u00B7 " + audioDecoderName),
                 currentTransferBitrate(),
                 totalDroppedFrames);
-        PlaybackStatistics.Labels labels = new PlaybackStatistics.Labels(
+    }
+
+    private PlaybackStatistics.Labels playbackStatisticsLabels() {
+        return new PlaybackStatistics.Labels(
                 getString(R.string.playback_stats_container),
                 getString(R.string.playback_stats_video),
                 getString(R.string.playback_stats_fps),
@@ -3150,13 +3235,93 @@ public class PlayerActivity extends Activity {
                 getString(R.string.playback_stats_decoder),
                 getString(R.string.playback_stats_audio),
                 getString(R.string.playback_stats_dropped_frames));
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(R.string.playback_statistics_title)
-                .setMessage(snapshot.render(labels))
-                .setPositiveButton(android.R.string.ok, null)
-                .create();
-        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, true));
-        dialog.show();
+    }
+
+    private void showPlaybackReport(String title, String summary, Throwable error) {
+        String detail = summary;
+        String root = DiagnosticReport.rootMessage(error);
+        if (!root.isEmpty()) detail = root;
+        PlaybackReportActivity.show(this, title, detail, playbackReport(error));
+    }
+
+    private String playbackReport(Throwable error) {
+        StringBuilder report = new StringBuilder(2048);
+        String media = currentMediaKey();
+        report.append("Media: ").append(DiagnosticReport.sanitizeNetworkUri(media)).append('\n');
+        report.append("Container: ").append(mediaContainerLabel()).append('\n');
+        if (player == null) {
+            report.append("Player: released\n");
+        } else {
+            long duration = player.getDuration();
+            report.append("State: ").append(playbackStateName(player.getPlaybackState()))
+                    .append(", playWhenReady=").append(player.getPlayWhenReady())
+                    .append(", isPlaying=").append(player.isPlaying()).append('\n');
+            report.append("Position: ").append(reportTime(player.getCurrentPosition()))
+                    .append(" / ").append(reportTime(duration))
+                    .append(", buffered=").append(reportTime(player.getTotalBufferedDuration()))
+                    .append('\n');
+            report.append(String.format(Locale.US, "Speed: %.2fx%n",
+                    player.getPlaybackParameters().speed));
+            Format video = player.getVideoFormat();
+            Format audio = player.getAudioFormat();
+            report.append("Video: ").append(video == null ? "(none)" : Format.toLogString(video))
+                    .append('\n');
+            report.append("Audio: ").append(audio == null ? "(none)" : Format.toLogString(audio))
+                    .append('\n');
+        }
+        report.append("Video decoder: ").append(emptyReportValue(videoDecoderName)).append('\n');
+        report.append("Audio decoder: ").append(emptyReportValue(audioDecoderName)).append('\n');
+        report.append(String.format(Locale.US,
+                "Bitrate: video=%.2f Mbps, transfer=%.2f Mbps, estimate=%.2f Mbps%n",
+                videoBitrate() / 1_000_000f, currentTransferBitrate() / 1_000_000f,
+                bandwidthBitrate / 1_000_000f));
+        report.append("Dropped frames: ").append(totalDroppedFrames).append('\n');
+        report.append("Source: iptv=").append(lampaIptv)
+                .append(", playlist=").append(lampaPlaylist != null)
+                .append(", externalApi=").append(apiAccess || apiAccessPartial).append('\n');
+        report.append("Recovery: source=").append(sourceRecoveryAttempts)
+                .append(", compatibility=").append(compatibilityRecoveryAttempts)
+                .append(", live=").append(liveRecoveryAttempts)
+                .append(", alternateStream=").append(alternateStreamTypeTried)
+                .append(", lowerQuality=").append(decoderQualityFallbackTried)
+                .append(", decoderCompatibility=").append(decoderCompatibilityMode)
+                .append('\n');
+        report.append("Dolby Vision: mapProfile7=").append(mPrefs != null && mPrefs.mapDV7ToHevc)
+                .append(", forceHevc=").append(forceHevcForDolbyVision)
+                .append(", status=").append(dv7Converter == null
+                        ? "inactive" : emptyReportValue(dv7Converter.status())).append('\n');
+        if (together != null && together.isActive()) {
+            report.append("Watch Together: active, connected=").append(together.connected())
+                    .append(", peers=").append(together.peers()).append('\n');
+        }
+        if (error != null) {
+            report.append("\nError: ").append(error.getClass().getName()).append('\n');
+            report.append("Root message: ").append(DiagnosticReport.rootMessage(error)).append('\n');
+            report.append("\nStack trace:\n").append(DiagnosticReport.stackTrace(error));
+        }
+        return DiagnosticReport.sanitizeText(report.toString());
+    }
+
+    private String playbackStateName(int state) {
+        switch (state) {
+            case Player.STATE_BUFFERING:
+                return "BUFFERING";
+            case Player.STATE_READY:
+                return "READY";
+            case Player.STATE_ENDED:
+                return "ENDED";
+            case Player.STATE_IDLE:
+            default:
+                return "IDLE";
+        }
+    }
+
+    private String reportTime(long timeMs) {
+        return timeMs == C.TIME_UNSET || timeMs < 0 ? "unknown" : Utils.formatMilis(timeMs);
+    }
+
+    private String emptyReportValue(String value) {
+        return value == null || value.trim().isEmpty() ? "(none)" : value;
     }
 
     private float videoFrameRate() {
@@ -3361,6 +3526,7 @@ public class PlayerActivity extends Activity {
         }
         updateLampaSkipUi();
         updateTransferRateUi();
+        updateStatsPanel();
     }
 
     private void updateTransferRateUi() {
@@ -4471,6 +4637,7 @@ public class PlayerActivity extends Activity {
             updateSubtitleStyle(this);
             updateLampaSegmentMarkers();
             updateLampaSkipUi();
+            updateStatsPanel();
             if (mPrefs.skipEnabled && mPrefs.skipFetchOnline && player != null
                     && lampaPlaylist != null && player.getDuration() > 0) {
                 LampaPlaylist.Item item = lampaPlaylist.getCurrent();
@@ -5407,7 +5574,7 @@ public class PlayerActivity extends Activity {
             if (error instanceof ExoPlaybackException) {
                 final ExoPlaybackException exoPlaybackException = (ExoPlaybackException) error;
                 if (exoPlaybackException.type == ExoPlaybackException.TYPE_SOURCE) {
-                    if (recoverResolverControlResponse()) return;
+                    if (recoverResolverControlResponse(error)) return;
                     String detectedManifest = consumeDetectedManifestType();
                     if (detectedManifest != null && !detectedManifest.equals(forcedStreamMimeType)) {
                         alternateStreamTypeTried = true;
@@ -5440,7 +5607,7 @@ public class PlayerActivity extends Activity {
                             ? PlaybackRecoveryPolicy.FailureKind.NETWORK_READ
                             : PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE;
                     if (recoverPlayback(kind)) return;
-                    stopPlaybackAfterRecoveryFailure(kind, error.getLocalizedMessage());
+                    stopPlaybackAfterRecoveryFailure(kind, error.getLocalizedMessage(), error);
                     return;
                 }
                 if (error.errorCode == PlaybackException.ERROR_CODE_TIMEOUT) {
@@ -5452,18 +5619,17 @@ public class PlayerActivity extends Activity {
                             ? PlaybackRecoveryPolicy.FailureKind.STALL_MIDSTREAM
                             : PlaybackRecoveryPolicy.FailureKind.STALL_AT_START);
                     if (recoverPlayback(kind)) return;
-                    stopPlaybackAfterRecoveryFailure(kind, error.getLocalizedMessage());
+                    stopPlaybackAfterRecoveryFailure(kind, error.getLocalizedMessage(), error);
                     return;
                 }
                 if (exoPlaybackException.type == ExoPlaybackException.TYPE_RENDERER) {
                     if (recoverPlayback(PlaybackRecoveryPolicy.FailureKind.DECODER)) return;
                 }
-                if (controllerVisible && controllerVisibleFully) {
-                    showError(exoPlaybackException);
-                } else {
-                    errorToShow = exoPlaybackException;
-                }
+                showError(exoPlaybackException);
+                return;
             }
+            showPlaybackReport(getString(R.string.playback_error_report_title),
+                    error.getLocalizedMessage(), error);
         }
     }
 
@@ -5487,7 +5653,7 @@ public class PlayerActivity extends Activity {
         return true;
     }
 
-    private boolean recoverResolverControlResponse() {
+    private boolean recoverResolverControlResponse(Throwable error) {
         if (resolverControlUri == null || player == null) return false;
         MediaItem mediaItem = player.getCurrentMediaItem();
         String currentUri = mediaItem == null || mediaItem.localConfiguration == null
@@ -5496,7 +5662,8 @@ public class PlayerActivity extends Activity {
 
         resolverControlUri = null;
         if (!recoverPlayback(PlaybackRecoveryPolicy.FailureKind.RESOLVER_NOT_READY)) {
-            showSnack(getString(R.string.resolver_not_ready), null);
+            showPlaybackReport(getString(R.string.playback_error_report_title),
+                    getString(R.string.resolver_not_ready), error);
             releasePlayer(false);
         }
         return true;
@@ -5602,12 +5769,13 @@ public class PlayerActivity extends Activity {
             return;
         }
 
-        cancelLoadWatchdog();
-        player.stop();
-        updateLoading(false);
         int message = sourceKind == LoadWatchdogPolicy.SourceKind.LOCAL
                 ? R.string.error_local_media_corrupt : R.string.error_playback_stalled;
-        showSnack(getString(message), null);
+        cancelLoadWatchdog();
+        showPlaybackReport(getString(R.string.playback_error_report_title),
+                getString(message), null);
+        player.stop();
+        updateLoading(false);
         if (lampaPlaylist != null) {
             updateEpisodeControls();
             updateLampaTopPanel();
@@ -5716,11 +5884,12 @@ public class PlayerActivity extends Activity {
     }
 
     private void stopPlaybackAfterRecoveryFailure(PlaybackRecoveryPolicy.FailureKind kind,
-                                                  String detail) {
+                                                  String detail, Throwable error) {
         cancelPlaybackWatchdogs();
         int message = kind == PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE
                 ? R.string.error_local_media_corrupt : R.string.error_playback_stalled;
-        showSnack(getString(message), detail);
+        showPlaybackReport(getString(R.string.playback_error_report_title),
+                detail == null || detail.trim().isEmpty() ? getString(message) : detail, error);
         releasePlayer(false);
     }
 
@@ -6058,26 +6227,8 @@ public class PlayerActivity extends Activity {
     }
 
     void showError(ExoPlaybackException error) {
-        final String errorGeneral = error.getLocalizedMessage();
-        String errorDetailed;
-
-        switch (error.type) {
-            case ExoPlaybackException.TYPE_SOURCE:
-                errorDetailed = error.getSourceException().getLocalizedMessage();
-                break;
-            case ExoPlaybackException.TYPE_RENDERER:
-                errorDetailed = error.getRendererException().getLocalizedMessage();
-                break;
-            case ExoPlaybackException.TYPE_UNEXPECTED:
-                errorDetailed = error.getUnexpectedException().getLocalizedMessage();
-                break;
-            case ExoPlaybackException.TYPE_REMOTE:
-            default:
-                errorDetailed = errorGeneral;
-                break;
-        }
-
-        showSnack(errorGeneral, errorDetailed);
+        showPlaybackReport(getString(R.string.playback_error_report_title),
+                error == null ? null : error.getLocalizedMessage(), error);
     }
 
     void showSnack(final String textPrimary, final String textSecondary) {
@@ -6626,6 +6777,7 @@ public class PlayerActivity extends Activity {
             playerView.showController();
         }
         updateRoomBadge();
+        updateStatsPanel();
     }
 
     private void updatebuttonAspectRatioIcon() {
