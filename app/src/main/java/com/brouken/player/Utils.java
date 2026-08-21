@@ -510,78 +510,53 @@ class Utils {
         return (int)(rate * 100f);
     }
 
-    @RequiresApi(api = Build.VERSION_CODES.M)
-    static void handleFrameRate(final PlayerActivity activity, float frameRate, boolean play) {
-        activity.runOnUiThread(() -> {
-            boolean switchingModes = false;
-
-            if (frameRate > 0) {
-                Display display = activity.getWindow().getDecorView().getDisplay();
-                if (display == null) {
-                    return;
-                }
+    static boolean handleFrameRate(final PlayerActivity activity, float frameRate) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            activity.frameRateSettled();
+            return false;
+        }
+        boolean switchingModes = false;
+        try {
+            Display display = frameRate > 0f
+                    ? activity.getWindow().getDecorView().getDisplay() : null;
+            if (display != null) {
                 Display.Mode[] supportedModes = display.getSupportedModes();
                 Display.Mode activeMode = display.getMode();
-
-                if (supportedModes.length > 1) {
-                    // Refresh rate >= video FPS
-                    List<Display.Mode> modesHigh = new ArrayList<>();
-                    // Max refresh rate
-                    Display.Mode modeTop = activeMode;
-                    int modesResolutionCount = 0;
-
-                    // Filter only resolutions same as current
-                    for (Display.Mode mode : supportedModes) {
-                        if (mode.getPhysicalWidth() == activeMode.getPhysicalWidth() &&
-                                mode.getPhysicalHeight() == activeMode.getPhysicalHeight()) {
-                            modesResolutionCount++;
-
-                            if (normRate(mode.getRefreshRate()) >= normRate(frameRate))
-                                modesHigh.add(mode);
-
-                            if (normRate(mode.getRefreshRate()) > normRate(modeTop.getRefreshRate()))
-                                modeTop = mode;
-                        }
+                List<Display.Mode> sameResolution = new ArrayList<>();
+                for (Display.Mode mode : supportedModes) {
+                    if (mode.getPhysicalWidth() == activeMode.getPhysicalWidth()
+                            && mode.getPhysicalHeight() == activeMode.getPhysicalHeight()) {
+                        sameResolution.add(mode);
                     }
+                }
 
-                    if (modesResolutionCount > 1) {
-                        Display.Mode modeBest = null;
-                        for (Display.Mode mode : modesHigh) {
-                            if (normRate(mode.getRefreshRate()) % normRate(frameRate) <= 0.0001f) {
-                                if (modeBest == null || normRate(mode.getRefreshRate()) > normRate(modeBest.getRefreshRate())) {
-                                    modeBest = mode;
-                                }
-                            }
-                        }
-
+                if (sameResolution.size() > 1) {
+                    float[] rates = new float[sameResolution.size()];
+                    for (int index = 0; index < sameResolution.size(); index++) {
+                        rates[index] = sameResolution.get(index).getRefreshRate();
+                    }
+                    float bestRate = FrameRatePolicy.bestRate(
+                            activeMode.getRefreshRate(), frameRate, rates);
+                    Display.Mode bestMode = null;
+                    for (Display.Mode mode : sameResolution) {
+                        if (Math.abs(mode.getRefreshRate() - bestRate) >= 0.001f) continue;
+                        bestMode = mode;
+                        if (mode.getModeId() == activeMode.getModeId()) break;
+                    }
+                    if (bestMode != null && bestMode.getModeId() != activeMode.getModeId()) {
                         Window window = activity.getWindow();
                         WindowManager.LayoutParams layoutParams = window.getAttributes();
-
-                        if (modeBest == null)
-                            modeBest = modeTop;
-
-                        switchingModes = !(modeBest.getModeId() == activeMode.getModeId());
-                        if (switchingModes) {
-                            layoutParams.preferredDisplayModeId = modeBest.getModeId();
-                            window.setAttributes(layoutParams);
-                        }
+                        layoutParams.preferredDisplayModeId = bestMode.getModeId();
+                        window.setAttributes(layoutParams);
+                        switchingModes = true;
                     }
                 }
             }
-
-            if (!switchingModes) {
-                playIfCan(activity, play);
-            }
-        });
-    }
-
-    static void playIfCan(final PlayerActivity activity, boolean play) {
-        if (play) {
-            if (PlayerActivity.player != null)
-                PlayerActivity.player.play();
-            if (activity.playerView != null)
-                activity.playerView.hideController();
+        } catch (RuntimeException error) {
+            error.printStackTrace();
         }
+        if (!switchingModes) activity.frameRateSettled();
+        return switchingModes;
     }
 
     public static boolean alternativeChooser(PlayerActivity activity, Uri initialUri, boolean video) {
@@ -651,39 +626,74 @@ class Utils {
     }
 
     public static Uri convertInputStreamToUTF(Context context, Uri subtitleUri, InputStream inputStream) {
+        return convertInputStreamToUTF(context, subtitleUri, inputStream, null);
+    }
+
+    /** Converts subtitles to UTF-8 and keeps remote files locally for later player rebuilds. */
+    public static Uri convertInputStreamToUTF(Context context, Uri subtitleUri,
+                                               InputStream inputStream, String preferredName) {
+        if (inputStream == null || subtitleUri == null) return null;
         try {
             DecodedInputStreamReader decodedInputStreamReader = Chardet.decode(inputStream, StandardCharsets.UTF_8);
             Charset charset = decodedInputStreamReader.charset();
-            if (!StandardCharsets.UTF_8.equals(charset)) {
-                String filename = subtitleUri.getPath();
-                filename = filename.substring(filename.lastIndexOf("/") + 1);
+            boolean remote = isSupportedNetworkUri(subtitleUri);
+            if (!StandardCharsets.UTF_8.equals(charset) || remote) {
+                String filename = preferredName;
+                if (filename == null || filename.trim().isEmpty()) {
+                    filename = subtitleUri.getLastPathSegment();
+                }
+                if (filename == null || filename.trim().isEmpty()) filename = "subtitle";
+                if (filename.toLowerCase(Locale.US).endsWith(".gz")) {
+                    filename = filename.substring(0, filename.length() - 3);
+                }
+                filename = new File(filename).getName();
+                if (filename.isEmpty() || ".".equals(filename) || "..".equals(filename)) {
+                    filename = "subtitle";
+                }
+                if (!filename.contains(".")) filename += ".srt";
                 final File file = new File(context.getCacheDir(), filename);
-                final BufferedReader bufferedReader = new BufferedReader(decodedInputStreamReader);
-                final BufferedWriter bufferedWriter = new BufferedWriter(new FileWriter(file));
-                char[] buffer = new char[512];
-                int num;
-                int pass = 0;
                 boolean success = true;
-                while ((num = bufferedReader.read(buffer)) != -1) {
-                    bufferedWriter.write(buffer, 0, num);
-                    pass++;
-                    if (pass * 512 > 2_000_000) {
-                        success = false;
-                        break;
+                try (BufferedReader reader = new BufferedReader(decodedInputStreamReader);
+                     BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+                    char[] buffer = new char[512];
+                    int total = 0;
+                    int count;
+                    while ((count = reader.read(buffer)) != -1) {
+                        total += count;
+                        if (total > 2_000_000) {
+                            success = false;
+                            break;
+                        }
+                        writer.write(buffer, 0, count);
                     }
                 }
-                bufferedWriter.close();
-                bufferedReader.close();
                 if (success) {
+                    trimSubtitleCache(context.getCacheDir());
                     subtitleUri = Uri.fromFile(file);
                 } else {
-                    subtitleUri = null;
+                    file.delete();
+                    if (!remote) subtitleUri = null;
                 }
+            } else {
+                decodedInputStreamReader.close();
             }
         } catch (IOException e) {
             e.printStackTrace();
         }
         return subtitleUri;
+    }
+
+    private static final int SUBTITLE_CACHE_KEEP = 20;
+
+    private static void trimSubtitleCache(File cacheDir) {
+        File[] files = cacheDir.listFiles((dir, name) ->
+                name.startsWith("subs.") && name.endsWith(".srt"));
+        if (files == null || files.length <= SUBTITLE_CACHE_KEEP) return;
+        java.util.Arrays.sort(files, (left, right) ->
+                Long.compare(left.lastModified(), right.lastModified()));
+        for (int index = 0; index < files.length - SUBTITLE_CACHE_KEEP; index++) {
+            files[index].delete();
+        }
     }
 
     public static boolean isPiPSupported(Context context) {
@@ -844,20 +854,28 @@ class Utils {
         return frameRate;
     }
 
-    public static boolean switchFrameRate(final PlayerActivity activity, final Uri uri, final boolean play) {
+    public static boolean switchFrameRate(final PlayerActivity activity, final Uri uri) {
         // preferredDisplayModeId only available on SDK 23+
         // ExoPlayer already uses Surface.setFrameRate() on Android 11+
         if (Build.VERSION.SDK_INT >= 23) {
             if (activity.frameRateSwitchThread != null) {
                 activity.frameRateSwitchThread.interrupt();
             }
-            activity.frameRateSwitchThread = new Thread(() -> {
+            Thread worker = new Thread(() -> {
+                Thread self = Thread.currentThread();
                 float frameRate = getFrameRate(activity, uri);
-                Utils.handleFrameRate(activity, frameRate, play);
+                if (self.isInterrupted()) return;
+                activity.runOnUiThread(() -> {
+                    if (activity.frameRateSwitchThread != self || self.isInterrupted()) return;
+                    Utils.handleFrameRate(activity, frameRate);
+                    activity.frameRateSwitchThread = null;
+                });
             });
-            activity.frameRateSwitchThread.start();
+            activity.frameRateSwitchThread = worker;
+            worker.start();
             return true;
         } else {
+            activity.frameRateSettled();
             return false;
         }
     }

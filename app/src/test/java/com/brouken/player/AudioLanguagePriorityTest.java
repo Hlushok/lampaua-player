@@ -20,14 +20,14 @@ public class AudioLanguagePriorityTest {
 
     @Test public void selectsFirstPreferredLanguageThatExists() {
         List<TrackMetadata> tracks = Arrays.asList(
-                new TrackMetadata(1, "Deutsch", "ger", TrackMetadata.Type.AUDIO),
-                new TrackMetadata(2, "English", "en-US", TrackMetadata.Type.AUDIO));
+                new TrackMetadata(1, "Deutsch", "ger", TrackMetadata.Type.AUDIO, 0f),
+                new TrackMetadata(2, "English", "en-US", TrackMetadata.Type.AUDIO, 0f));
         assertEquals(1, AudioLanguagePriority.select(Arrays.asList("ukr", "eng"), tracks));
     }
 
     @Test public void fallsBackToFirstTrackWhenNothingMatches() {
         List<TrackMetadata> tracks = Arrays.asList(
-                new TrackMetadata(1, "Deutsch", "deu", TrackMetadata.Type.AUDIO));
+                new TrackMetadata(1, "Deutsch", "deu", TrackMetadata.Type.AUDIO, 0f));
         assertEquals(0, AudioLanguagePriority.select(Arrays.asList("ukr"), tracks));
     }
 }

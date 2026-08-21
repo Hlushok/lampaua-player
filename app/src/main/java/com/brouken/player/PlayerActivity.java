@@ -22,10 +22,13 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.UriPermission;
 import android.content.pm.ActivityInfo;
+import android.content.res.ColorStateList;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.Icon;
 import android.hardware.display.DisplayManager;
@@ -41,6 +44,9 @@ import android.os.Parcelable;
 import android.os.SystemClock;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
 import android.text.TextUtils;
 import android.util.Base64;
 import android.util.DisplayMetrics;
@@ -56,11 +62,12 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
-import android.view.accessibility.CaptioningManager;
 import android.window.OnBackInvokedDispatcher;
 import android.widget.FrameLayout;
 import android.widget.BaseAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.EditText;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageButton;
 import android.widget.ImageView;
@@ -89,12 +96,15 @@ import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 import androidx.media3.common.audio.AudioProcessor;
+import androidx.media3.common.util.Util;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.datasource.HttpDataSource;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlaybackException;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.Renderer;
 import androidx.media3.exoplayer.SeekParameters;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
 import androidx.media3.exoplayer.audio.AudioSink;
@@ -102,8 +112,11 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink;
 import androidx.media3.exoplayer.audio.ForwardingAudioSink;
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+import androidx.media3.exoplayer.text.TextOutput;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
 import androidx.media3.extractor.DefaultExtractorsFactory;
+import androidx.media3.extractor.text.DefaultSubtitleParserFactory;
+import androidx.media3.extractor.text.SubtitleParser;
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory;
 import androidx.media3.extractor.ts.TsExtractor;
 import androidx.media3.session.MediaSession;
@@ -123,10 +136,18 @@ import com.brouken.player.update.Updater;
 import com.brouken.player.skip.SkipController;
 import com.brouken.player.skip.SkipPolicy;
 import com.brouken.player.skip.SkipSegment;
+import com.brouken.player.together.Relay;
+import com.brouken.player.together.Room;
+import com.brouken.player.together.RoomAction;
+import com.brouken.player.together.SessionCodec;
+import com.brouken.player.together.TogetherManager;
 import com.bumptech.glide.Glide;
 import com.getkeepsafe.taptargetview.TapTarget;
 import com.getkeepsafe.taptargetview.TapTargetView;
 import com.google.android.material.snackbar.Snackbar;
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.qrcode.QRCodeWriter;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -139,15 +160,20 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.Collections;
+import java.util.Formatter;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class PlayerActivity extends Activity {
 
@@ -175,7 +201,6 @@ public class PlayerActivity extends Activity {
     public static boolean controllerVisible;
     public static boolean controllerVisibleFully;
     public static Snackbar snackbar;
-    private ExoPlaybackException errorToShow;
     public static int boostLevel = 0;
     public static boolean systemVolume = true;
     public static float playerVolume = 100f;
@@ -192,7 +217,6 @@ public class PlayerActivity extends Activity {
     private static final int REQUEST_CHOOSER_VIDEO_MEDIASTORE = 20;
     private static final int REQUEST_CHOOSER_SUBTITLE_MEDIASTORE = 21;
     private static final int REQUEST_SETTINGS = 100;
-    private static final int REQUEST_SYSTEM_CAPTIONS = 200;
     public static final int CONTROLLER_TIMEOUT = 3500;
     private static final String ACTION_MEDIA_CONTROL = "media_control";
     private static final String EXTRA_CONTROL_TYPE = "control_type";
@@ -204,8 +228,13 @@ public class PlayerActivity extends Activity {
     private static final long STALL_CHECK_INTERVAL_MS = 1_500L;
     private static final long STALL_TIMEOUT_MS = 10_000L;
     private static final long STABLE_PLAYBACK_MS = 15_000L;
-    private static final long LIVE_RECOVERY_FORGET_MS = 60_000L;
-    private static final int MAX_LIVE_RECOVERIES = 2;
+    private static final long SWIPE_UNLOCK_TIMEOUT_MS = 3_000L;
+    private static final long FRAME_RATE_SWITCH_TIMEOUT_MS = 1_500L;
+    private static final long CHROME_FADE_MS = 250L;
+    private static final long SUBTITLE_MISS_TTL_MS = 30 * 60 * 1000L;
+    private static final double SUBTITLE_OFFSET_MAX_SEC = 30.0;
+    private static final double SUBTITLE_OFFSET_STEP_SEC = 0.5;
+    private static final Map<String, Long> subtitleSearchMisses = new ConcurrentHashMap<>();
 
     private CoordinatorLayout coordinatorLayout;
     private TextView titleView;
@@ -217,8 +246,10 @@ public class PlayerActivity extends Activity {
     private ImageButton buttonLock;
     private ImageButton buttonRotation;
     private ImageButton buttonTools;
+    private ImageButton buttonTogether;
     private ImageButton buttonUpdate;
     private ImageButton buttonAppSettings;
+    private ImageButton exoSubtitle;
     private UpdateInfo pendingUpdate;
     private SwipeToUnlockView swipeToUnlock;
     private ImageButton exoSettings;
@@ -268,11 +299,31 @@ public class PlayerActivity extends Activity {
     boolean playbackFinished;
     final HashMap<String, String> apiHeaders = new HashMap<>();
     private LampaPlaylist lampaPlaylist;
+    private String subtitleSearchStarted;
+    private String subtitleSearchSuppressed;
+    private Thread subtitleSearchThread;
+    private volatile int subtitleSearchGeneration;
+    private double subtitleOffsetSec;
+    private SubtitleOffset subtitleOffset;
+    private SubtitleTimeline subtitleTimeline;
+    private Uri subtitleTimelineUri;
+    private Uri paintedSubtitleUri;
+    private AlertDialog subtitleOffsetDialog;
     private boolean switchingPlaylistItem;
+    private boolean inPip;
     private boolean playlistCurrentRecorded;
     private String playlistPlaybackKey;
     private boolean playlistPlaybackEverReady;
     private boolean lampaIptv;
+    private TextView roomPill;
+    private TextView roomMessage;
+    private TextView statsView;
+    private TextView speedBoostIndicator;
+    private Drawable speedBoostIconForward;
+    private Drawable speedBoostIconRewind;
+    private TogetherManager together;
+    private boolean applyingRoomMedia;
+    private boolean awaitingRoomMedia;
     private boolean alternateStreamTypeTried;
     private boolean decoderQualityFallbackTried;
     private boolean decoderCompatibilityMode;
@@ -285,7 +336,9 @@ public class PlayerActivity extends Activity {
     private TrackGroup selectedVideoTrackGroup;
     private int selectedVideoTrackIndex = -1;
     private CustomDefaultTrackNameProvider trackNameProvider;
-    private final List<TrackMetadata> containerTracks = new ArrayList<>();
+    private Dv7Converter dv7Converter;
+    private final Map<String, List<TrackMetadata>> containerTracks = new ConcurrentHashMap<>();
+    private final Map<String, Long> contentLengths = new ConcurrentHashMap<>();
     private final Map<String, String> resolvedTrackNames = new HashMap<>();
     private int av1DroppedFrames;
     private int totalDroppedFrames;
@@ -310,16 +363,17 @@ public class PlayerActivity extends Activity {
     private long stablePlaybackStartedAt;
     private long stablePlaybackStartPosition = C.TIME_UNSET;
     private boolean playbackEverReady;
-    private final Runnable loadTimeoutRunnable = () -> {
-        if (player == null || player.getPlaybackState() != Player.STATE_BUFFERING || !haveMedia) return;
-        PlaybackRecoveryPolicy.FailureKind kind = Utils.isSupportedNetworkUri(mPrefs.mediaUri)
-                ? (playbackEverReady ? PlaybackRecoveryPolicy.FailureKind.STALL_MIDSTREAM
-                : PlaybackRecoveryPolicy.FailureKind.NETWORK_READ)
-                : PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE;
-        if (!recoverPlayback(kind)) {
-            stopPlaybackAfterRecoveryFailure(kind, null);
+    private boolean controllerChromeVisible;
+    private final Map<View, Boolean> auxiliaryChromeTargets = new WeakHashMap<>();
+    private long loadWatchdogBytes;
+    private final Runnable loadTimeoutRunnable = this::reportLoadWatchdog;
+    private final Runnable sourceRetryRunnable = () -> {
+        if (alive && player != null && player.getPlaybackState() == Player.STATE_IDLE) {
+            player.prepare();
         }
     };
+    private final Runnable swipeHider = this::hideSwipeToUnlock;
+    private final Runnable frameRateGiveUpRunnable = this::frameRateSettled;
     private final Runnable stallWatchdogRunnable = new Runnable() {
         @Override public void run() {
             if (player == null || !player.isPlaying()) return;
@@ -334,7 +388,7 @@ public class PlayerActivity extends Activity {
                         : (playbackEverReady && position - stablePlaybackStartPosition >= 2_000
                         ? PlaybackRecoveryPolicy.FailureKind.STALL_MIDSTREAM
                         : PlaybackRecoveryPolicy.FailureKind.STALL_AT_START);
-                if (!recoverPlayback(kind)) stopPlaybackAfterRecoveryFailure(kind, null);
+                if (!recoverPlayback(kind)) stopPlaybackAfterRecoveryFailure(kind, null, null);
                 return;
             }
             playerView.postDelayed(this, STALL_CHECK_INTERVAL_MS);
@@ -346,9 +400,8 @@ public class PlayerActivity extends Activity {
         if (SystemClock.elapsedRealtime() - stablePlaybackStartedAt >= STABLE_PLAYBACK_MS
                 && progress >= 5_000) {
             sourceRecoveryAttempts = 0;
-            if (SystemClock.elapsedRealtime() - lastLiveRecoveryAt >= LIVE_RECOVERY_FORGET_MS) {
-                liveRecoveryAttempts = 0;
-            }
+            liveRecoveryAttempts = LiveRecoveryPolicy.effectiveAttempts(liveRecoveryAttempts,
+                    SystemClock.elapsedRealtime(), lastLiveRecoveryAt);
         }
     };
     private final AudioRecoveryState audioRecoveryState = new AudioRecoveryState();
@@ -386,12 +439,23 @@ public class PlayerActivity extends Activity {
             };
     private final TrackNameParsingDataSource.Listener trackNameListener =
             new TrackNameParsingDataSource.Listener() {
-                @Override public void onMetadataParsed(List<TrackMetadata> tracks) {
-                    runOnUiThread(() -> onContainerMetadata(tracks));
+                @Override public void onMetadataParsed(Uri originalUri,
+                                                       List<TrackMetadata> tracks) {
+                    if (originalUri == null || tracks == null || tracks.isEmpty()) return;
+                    containerTracks.put(originalUri.toString(),
+                            Collections.unmodifiableList(new ArrayList<>(tracks)));
+                    runOnUiThread(() -> onContainerMetadata(originalUri));
                 }
 
-                @Override public boolean isMetadataParsed() {
-                    return !containerTracks.isEmpty();
+                @Override public boolean isMetadataParsed(Uri originalUri) {
+                    return originalUri != null
+                            && containerTracks.containsKey(originalUri.toString());
+                }
+
+                @Override public void onContentLength(Uri originalUri, long length) {
+                    if (originalUri != null && length > 0) {
+                        contentLengths.put(originalUri.toString(), length);
+                    }
                 }
 
                 @Override public void onMediaTypeResolved(Uri requestedUri, String mimeType) {
@@ -519,14 +583,19 @@ public class PlayerActivity extends Activity {
         final Intent launchIntent = getIntent();
         final String action = launchIntent.getAction();
         final String type = launchIntent.getType();
+        final Room.Invite launchRoomInvite = roomInviteFromIntent(launchIntent);
+        awaitingRoomMedia = launchRoomInvite != null;
 
         if ("com.lampaua.player.action.SHORTCUT_VIDEOS".equals(action)) {
             openFile(Utils.getMoviesFolderUri());
+        } else if (launchRoomInvite != null) {
+            // The room sends its media session after the relay connection is established.
         } else if (Intent.ACTION_SEND.equals(action) && "text/plain".equals(type)) {
             String text = launchIntent.getStringExtra(Intent.EXTRA_TEXT);
             if (text != null) {
                 final Uri parsedUri = Uri.parse(text);
                 if (parsedUri.isAbsolute()) {
+                    resetSubtitleSessionForMediaChange();
                     mPrefs.updateMedia(this, parsedUri, null);
                     focusPlay = true;
                 }
@@ -550,7 +619,7 @@ public class PlayerActivity extends Activity {
                     apiTitle = bundle.getString(API_TITLE);
                     readApiHeaders(bundle);
                 }
-
+                resetSubtitleSessionForMediaChange();
                 mPrefs.updateMedia(this, uri, type);
 
                 readApiSubtitles(bundle);
@@ -570,13 +639,18 @@ public class PlayerActivity extends Activity {
             focusPlay = true;
         }
 
-        readLampaPlaylist(launchIntent);
+        if (launchRoomInvite == null) {
+            readLampaPlaylist(launchIntent);
+        }
 
         coordinatorLayout = findViewById(R.id.coordinatorLayout);
         mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         playerView = findViewById(R.id.video_view);
         exoPlayPause = findViewById(R.id.exo_play_pause);
         loadingProgressBar = findViewById(R.id.loading);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            loadingProgressBar.setDefaultFocusHighlightEnabled(false);
+        }
         loadingRateView = new TextView(this);
         loadingRateView.setTextColor(Color.WHITE);
         loadingRateView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
@@ -685,6 +759,12 @@ public class PlayerActivity extends Activity {
         buttonTools.setContentDescription(getString(R.string.player_tools));
         buttonTools.setOnClickListener(view -> showPlayerTools());
 
+        buttonTogether = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
+        buttonTogether.setImageResource(R.drawable.ic_together_24dp);
+        buttonTogether.setContentDescription(getString(R.string.together_title));
+        buttonTogether.setVisibility(View.GONE);
+        buttonTogether.setOnClickListener(view -> showTogetherMenu());
+
         if (Utils.isPiPSupported(this)) {
             // TODO: Android 12 improvements:
             // https://developer.android.com/about/versions/12/features/pip-improvements
@@ -743,6 +823,9 @@ public class PlayerActivity extends Activity {
         titleView.setTextDirection(View.TEXT_DIRECTION_LOCALE);
         centerView.addView(titleView);
         setupLampaOverlay(centerView);
+        setupTogetherOverlay();
+        setupHoldSpeedOverlay();
+        setupStatsOverlay();
 
         if (!isTvBox) {
             swipeToUnlock = new SwipeToUnlockView(this);
@@ -751,6 +834,9 @@ public class PlayerActivity extends Activity {
                 locked = false;
                 onLockChanged();
             });
+            swipeToUnlock.setOnStartTouchingListener(() ->
+                    playerView.removeCallbacks(swipeHider));
+            swipeToUnlock.setOnStopTouchingListener(this::rescheduleSwipeHide);
             CoordinatorLayout.LayoutParams swipeParams = new CoordinatorLayout.LayoutParams(
                     Utils.dpToPx(310), ViewGroup.LayoutParams.WRAP_CONTENT);
             swipeParams.gravity = Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM;
@@ -792,6 +878,19 @@ public class PlayerActivity extends Activity {
         }
 
         controlView = playerView.findViewById(R.id.exo_controller);
+        final TextView durationView = playerView.findViewById(R.id.exo_duration);
+        final StringBuilder timeBuilder = new StringBuilder();
+        final Formatter timeFormatter = new Formatter(timeBuilder, Locale.getDefault());
+        controlView.setProgressUpdateListener((position, bufferedPosition) -> {
+            if (durationView == null || player == null || player.isCurrentMediaItemLive()) return;
+            long duration = player.getContentDuration();
+            if (duration == C.TIME_UNSET || duration < 0L) return;
+            long shown = mPrefs != null && mPrefs.timeRemaining
+                    ? Math.max(0L, duration - Math.max(0L, position))
+                    : duration;
+            String value = Util.getStringForTime(timeBuilder, timeFormatter, shown);
+            durationView.setText(mPrefs != null && mPrefs.timeRemaining ? "-" + value : value);
+        });
         controlView.setOnApplyWindowInsetsListener((view, windowInsets) -> {
             if (windowInsets != null) {
                 if (Build.VERSION.SDK_INT >= 31) {
@@ -904,8 +1003,9 @@ public class PlayerActivity extends Activity {
         playerView.setBrightnessControl(mBrightnessControl);
 
         final LinearLayout exoBasicControls = playerView.findViewById(R.id.exo_basic_controls);
-        final ImageButton exoSubtitle = exoBasicControls.findViewById(R.id.exo_subtitle);
+        exoSubtitle = exoBasicControls.findViewById(R.id.exo_subtitle);
         exoBasicControls.removeView(exoSubtitle);
+        exoSubtitle.setVisibility(View.GONE);
 
         exoSettings = exoBasicControls.findViewById(R.id.exo_settings);
         exoBasicControls.removeView(exoSettings);
@@ -920,9 +1020,9 @@ public class PlayerActivity extends Activity {
             return true;
         });
 
+        exoSubtitle.setOnClickListener(view -> showSubtitleDialog());
         exoSubtitle.setOnLongClickListener(v -> {
-            enableRotation();
-            safelyStartActivityForResult(new Intent(Settings.ACTION_CAPTIONING_SETTINGS), REQUEST_SYSTEM_CAPTIONS);
+            openAppSettings("languageSubtitle");
             return true;
         });
 
@@ -947,6 +1047,7 @@ public class PlayerActivity extends Activity {
             controls.addView(buttonRotation);
         }
         controls.addView(exoSettings);
+        controls.addView(buttonTogether);
         controls.addView(buttonTools);
         controls.addView(buttonUpdate);
         controls.addView(buttonAppSettings);
@@ -961,11 +1062,22 @@ public class PlayerActivity extends Activity {
         playerView.setControllerVisibilityListener(new PlayerView.ControllerVisibilityListener() {
             @Override
             public void onVisibilityChanged(int visibility) {
+                boolean wasVisible = controllerVisible;
+                boolean wasFullyVisible = controllerVisibleFully;
                 controllerVisible = visibility == View.VISIBLE;
                 controllerVisibleFully = playerView.isControllerFullyVisible();
+                if (!controllerVisible) {
+                    controllerChromeVisible = false;
+                } else if (controllerVisibleFully || !wasVisible) {
+                    controllerChromeVisible = true;
+                } else if (wasFullyVisible) {
+                    controllerChromeVisible = false;
+                }
                 if (lampaTopPanel != null) {
                     lampaTopPanel.setVisibility(controllerVisible ? View.VISIBLE : View.GONE);
                 }
+                updateRoomBadge();
+                updateStatsPanel();
 
                 if (PlayerActivity.restoreControllerTimeout) {
                     restoreControllerTimeout = false;
@@ -1003,10 +1115,6 @@ public class PlayerActivity extends Activity {
                         //  "Use vertical and horizontal gestures to change brightness, volume and seek in video"
                         mPrefs.markFirstRun();
                     }
-                    if (errorToShow != null) {
-                        showError(errorToShow);
-                        errorToShow = null;
-                    }
                 }
             }
         });
@@ -1042,20 +1150,27 @@ public class PlayerActivity extends Activity {
         pendingUpdate = Updater.pending(this);
         updatePendingButton();
         checkForUpdates(false);
+        if (launchRoomInvite != null) {
+            joinRoom(launchRoomInvite.code, launchRoomInvite.password);
+        }
     }
 
     @Override
     public void onStart() {
         super.onStart();
         alive = true;
-        if (!(isTvBox && Build.VERSION.SDK_INT >= 31)) {
-            updateSubtitleStyle(this);
-        }
+        updateSubtitleStyle(this);
         if (Build.VERSION.SDK_INT >= 31) {
             playerView.removeCallbacks(barsHider);
             Utils.toggleSystemUi(this, playerView, true);
         }
-        initializePlayer();
+        if (!awaitingRoomMedia) {
+            initializePlayer();
+        }
+        if (together != null) {
+            together.resume();
+        }
+        updateRoomBadge();
         registerAudioOutputReceiver();
         updateButtonRotation();
         lampaUiHandler.removeCallbacks(lampaUiTicker);
@@ -1075,9 +1190,6 @@ public class PlayerActivity extends Activity {
             requestPassthroughAudioRestart();
         }
         updateLampaMenuOpacity();
-        if (isTvBox && Build.VERSION.SDK_INT >= 31) {
-            updateSubtitleStyle(this);
-        }
         postPrimaryTvFocus();
     }
 
@@ -1091,6 +1203,7 @@ public class PlayerActivity extends Activity {
     protected void onPause() {
         super.onPause();
         audioRecoveryState.onPause();
+        if (playerView != null) playerView.cancelHoldSpeed();
         savePlayer();
     }
 
@@ -1098,14 +1211,28 @@ public class PlayerActivity extends Activity {
     public void onStop() {
         super.onStop();
         alive = false;
+        if (together != null) {
+            together.suspend();
+        }
         if (Build.VERSION.SDK_INT >= 31) {
             playerView.removeCallbacks(barsHider);
         }
         playerView.setCustomErrorMessage(null);
         playerView.removeCallbacks(sleepTimerRunnable);
         lampaUiHandler.removeCallbacks(lampaUiTicker);
+        fadeAuxiliaryChrome(statsView, false, true);
+        fadeAuxiliaryChrome(roomPill, false, true);
         unregisterAudioOutputReceiver();
         releasePlayer(false);
+    }
+
+    @Override
+    protected void onDestroy() {
+        hideSwipeToUnlock();
+        if (together != null) {
+            together.leave();
+        }
+        super.onDestroy();
     }
 
     private void registerAudioOutputReceiver() {
@@ -1169,6 +1296,9 @@ public class PlayerActivity extends Activity {
 
     @Override
     public void finish() {
+        if (together != null) {
+            together.leave();
+        }
         if (intentReturnResult) {
             Intent intent = new Intent("com.mxtech.intent.result.VIEW");
             intent.putExtra(API_END_BY, playbackFinished ? "playback_completion" : "user");
@@ -1209,54 +1339,23 @@ public class PlayerActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         backExitGuard.reset();
-
-        if (intent != null) {
-            final String action = intent.getAction();
-            final String type = intent.getType();
-            final Uri uri = intent.getData();
-
-            if (Intent.ACTION_VIEW.equals(action) && uri != null) {
-                if (SubtitleUtils.isSubtitle(uri, type)) {
-                    handleSubtitles(uri);
-                } else {
-                    lampaPlaylist = null;
-                    if (buttonPlaylist != null) buttonPlaylist.setVisibility(View.GONE);
-                    resetApiAccess();
-                    final Bundle bundle = intent.getExtras();
-                    if (bundle != null) {
-                        apiAccess = bundle.containsKey(API_POSITION) || bundle.containsKey(API_RETURN_RESULT)
-                                || bundle.containsKey(API_SUBS) || bundle.containsKey(API_SUBS_ENABLE)
-                                || bundle.containsKey(API_HEADERS);
-                        if (apiAccess) {
-                            mPrefs.setPersistent(false);
-                        } else if (bundle.containsKey(API_TITLE)) {
-                            apiAccessPartial = true;
-                        }
-                        apiTitle = bundle.getString(API_TITLE);
-                        intentReturnResult = bundle.getBoolean(API_RETURN_RESULT);
-                        readApiHeaders(bundle);
-                        readApiSubtitles(bundle);
-                    }
-                    mPrefs.updateMedia(this, uri, type);
-                    if (bundle != null && bundle.containsKey(API_POSITION)) {
-                        mPrefs.updatePosition((long) bundle.getInt(API_POSITION));
-                    }
-                    if (apiSubs.isEmpty()) {
-                        searchSubtitles();
-                    }
-                    readLampaPlaylist(intent);
-                }
-                focusPlay = true;
-                initializePlayer();
-            } else if (Intent.ACTION_SEND.equals(action) && "text/plain".equals(type)) {
-                String text = intent.getStringExtra(Intent.EXTRA_TEXT);
-                if (text != null) {
-                    final Uri parsedUri = Uri.parse(text);
-                    if (parsedUri.isAbsolute()) {
-                        mPrefs.updateMedia(this, parsedUri, null);
-                        focusPlay = true;
-                        initializePlayer();
-                    }
+        if (intent == null) {
+            return;
+        }
+        if (handleRoomIntent(intent)) {
+            return;
+        }
+        final String action = intent.getAction();
+        if (Intent.ACTION_VIEW.equals(action) && intent.getData() != null) {
+            applyViewIntent(intent, true);
+        } else if (Intent.ACTION_SEND.equals(action)
+                && "text/plain".equals(intent.getType())) {
+            final String text = intent.getStringExtra(Intent.EXTRA_TEXT);
+            if (text != null) {
+                final Uri parsedUri = Uri.parse(text.trim());
+                if (parsedUri.isAbsolute()) {
+                    final Intent view = new Intent(Intent.ACTION_VIEW).setData(parsedUri);
+                    applyViewIntent(view, true);
                 }
             }
         }
@@ -1491,10 +1590,14 @@ public class PlayerActivity extends Activity {
     @Override
     public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, Configuration newConfig) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        inPip = isInPictureInPictureMode;
 
         if (isInPictureInPictureMode) {
+            playerView.cancelHoldSpeed();
+            setSpeedBoostIndicatorVisible(false);
             // On Android TV it is required to hide controller in this PIP change callback
             playerView.hideController();
+            hideSwipeToUnlock();
             setSubtitleTextSizePiP();
             playerView.setScale(1.f);
             mReceiver = new BroadcastReceiver() {
@@ -1528,9 +1631,68 @@ public class PlayerActivity extends Activity {
             if (player != null) {
                 if (player.isPlaying())
                     Utils.toggleSystemUi(this, playerView, false);
-                else
+                else if (!locked)
                     playerView.showController();
             }
+            if (locked) showSwipeToUnlock();
+        }
+        updateRoomBadge();
+        updateStatsPanel();
+    }
+
+    private void applyViewIntent(final Intent intent, final boolean initialize) {
+        final Uri uri = intent == null ? null : intent.getData();
+        if (uri == null) {
+            return;
+        }
+        final String type = intent.getType();
+        if (SubtitleUtils.isSubtitle(uri, type)) {
+            handleSubtitles(uri);
+            focusPlay = true;
+            if (initialize) {
+                initializePlayer();
+            }
+            return;
+        }
+        if (!applyingRoomMedia && together != null && together.isActive()) {
+            together.leave();
+        }
+        cancelSubtitleSearch();
+        awaitingRoomMedia = false;
+        setIntent(intent);
+        lampaPlaylist = null;
+        if (buttonPlaylist != null) {
+            buttonPlaylist.setVisibility(View.GONE);
+        }
+        resetApiAccess();
+        final Bundle bundle = intent.getExtras();
+        if (bundle != null) {
+            apiAccess = bundle.containsKey(API_POSITION) || bundle.containsKey(API_RETURN_RESULT)
+                    || bundle.containsKey(API_SUBS) || bundle.containsKey(API_SUBS_ENABLE)
+                    || bundle.containsKey(API_HEADERS);
+            if (apiAccess) {
+                mPrefs.setPersistent(false);
+            } else if (bundle.containsKey(API_TITLE)) {
+                apiAccessPartial = true;
+            }
+            apiTitle = bundle.getString(API_TITLE);
+            intentReturnResult = bundle.getBoolean(API_RETURN_RESULT);
+            readApiHeaders(bundle);
+            readApiSubtitles(bundle);
+        }
+        resetSubtitleSessionForMediaChange();
+        mPrefs.updateMedia(this, uri, type);
+        if (bundle != null && bundle.containsKey(API_POSITION)) {
+            mPrefs.updatePosition((long) bundle.getInt(API_POSITION));
+        }
+        if (apiSubs.isEmpty()) {
+            searchSubtitles();
+        }
+        readLampaPlaylist(intent);
+        focusPlay = true;
+        updateRoomBadge();
+        if (initialize) {
+            initializePlayer();
         }
     }
 
@@ -1715,6 +1877,7 @@ public class PlayerActivity extends Activity {
         ArrayList<String> seasons = stringValues(intent, "video_list.season");
         ArrayList<String> episodes = stringValues(intent, "video_list.episode");
         ArrayList<String> imdbIds = stringValues(intent, "video_list.imdb_id");
+        ArrayList<String> tmdbIds = stringValues(intent, "video_list.tmdb_id");
         ArrayList<String> ids = stringValues(intent, "video_list.id");
         ArrayList<Bundle> subtitleBundles = bundleValues(intent, "video_list.subtitles");
         JSONArray items = new JSONArray();
@@ -1736,6 +1899,7 @@ public class PlayerActivity extends Activity {
                 if (!item.has("title")) putIndexedText(item, "title", filenames, i);
                 putIndexedText(item, "thumbnail", thumbnails, i);
                 putIndexedText(item, "imdb_id", imdbIds, i);
+                putIndexedPositiveInt(item, "tmdb_id", tmdbIds, i);
                 putIndexedText(item, "id", ids, i);
                 putIndexedPositiveInt(item, "season", seasons, i);
                 putIndexedPositiveInt(item, "episode", episodes, i);
@@ -1893,6 +2057,7 @@ public class PlayerActivity extends Activity {
 
     private void applyPlaylistItem(LampaPlaylist.Item item, boolean preserveMissingExtras) {
         if (item == null || !item.isResolved()) return;
+        cancelSubtitleSearch();
         if (timeBar != null) timeBar.setSkipSegments(0, null, null);
         apiAccess = true;
         apiAccessPartial = false;
@@ -1911,9 +2076,13 @@ public class PlayerActivity extends Activity {
                 apiSubs.add(SubtitleUtils.buildSubtitle(this, uri, label, i == 0));
             }
         }
-        mPrefs.updateMedia(this, Uri.parse(item.url), "video/*");
         String resumeKey = item.resumeKey();
-        if (!resumeKey.equals(playlistPlaybackKey)) {
+        boolean mediaChanged = !resumeKey.equals(playlistPlaybackKey);
+        Uri previousSubtitle = mediaChanged ? null : mPrefs.subtitleUri;
+        if (mediaChanged) resetSubtitleSessionForMediaChange();
+        mPrefs.updateMedia(this, Uri.parse(item.url), "video/*");
+        if (previousSubtitle != null) mPrefs.updateSubtitle(previousSubtitle);
+        if (mediaChanged) {
             playlistPlaybackKey = resumeKey;
             playlistPlaybackEverReady = false;
         }
@@ -2077,11 +2246,19 @@ public class PlayerActivity extends Activity {
     }
 
     private void openAppSettings() {
+        openAppSettings(null);
+    }
+
+    private void openAppSettings(String scrollToKey) {
         Intent intent = new Intent(this, SettingsActivity.class);
+        if (scrollToKey != null) {
+            intent.putExtra(SettingsActivity.EXTRA_SCROLL_TO, scrollToKey);
+        }
         ArrayList<String> languages = new ArrayList<>();
         if (player != null) {
             for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
-                if (group.getType() != C.TRACK_TYPE_AUDIO) continue;
+                if (group.getType() != C.TRACK_TYPE_AUDIO
+                        && group.getType() != C.TRACK_TYPE_TEXT) continue;
                 for (int index = 0; index < group.length; index++) {
                     String language = AudioLanguagePriority.normalize(
                             group.getTrackFormat(index).language);
@@ -2130,26 +2307,883 @@ public class PlayerActivity extends Activity {
         }
     }
 
+    private void applySubtitleOffset(double sec) {
+        subtitleOffsetSec = Math.max(-SUBTITLE_OFFSET_MAX_SEC,
+                Math.min(SUBTITLE_OFFSET_MAX_SEC, sec));
+        if (subtitleOffset != null) subtitleOffset.setOffsetSec(subtitleOffsetSec);
+    }
+
+    private void showSubtitleOffsetDialog() {
+        if (player == null) return;
+        if (subtitleOffsetDialog != null) subtitleOffsetDialog.dismiss();
+        subtitleOffsetDialog = OffsetPanel.create(this,
+                getString(R.string.subtitle_offset_title),
+                SUBTITLE_OFFSET_MAX_SEC, SUBTITLE_OFFSET_STEP_SEC,
+                subtitleOffsetSec, this::applySubtitleOffset);
+        subtitleOffsetDialog.setIcon(R.drawable.ic_subtitle_offset_24dp);
+        subtitleOffsetDialog.setOnDismissListener(ignored -> subtitleOffsetDialog = null);
+        subtitleOffsetDialog.show();
+        styleUaAlertDialog(subtitleOffsetDialog, false);
+    }
+
+    private boolean hasActiveSubtitle() {
+        return player != null && (paintedSubtitleUri != null
+                || player.getCurrentTracks().isTypeSelected(C.TRACK_TYPE_TEXT));
+    }
+
     private void showPlayerTools() {
         String timerSummary = sleepTimer.isAtMediaEnd()
                 ? getString(R.string.sleep_timer_end_of_item)
                 : sleepTimer.remainingMs() > 0 ? Utils.formatMilis(sleepTimer.remainingMs()) : null;
-        String[] items = {
-                getString(R.string.sleep_timer_title)
-                        + (timerSummary == null ? "" : "  \u00B7  " + timerSummary),
-                getString(R.string.playback_statistics_title)
-        };
+        final List<String> items = new ArrayList<>();
+        final List<Runnable> actions = new ArrayList<>();
+        items.add(getString(R.string.sleep_timer_title)
+                + (timerSummary == null ? "" : "  \u00B7  " + timerSummary));
+        actions.add(this::showSleepTimerMenu);
+        if (hasActiveSubtitle()) {
+            items.add(getString(R.string.subtitle_offset_title)
+                    + (Math.abs(subtitleOffsetSec) < 0.001 ? ""
+                    : "  \u00B7  " + OffsetPanel.format(subtitleOffsetSec)));
+            actions.add(this::showSubtitleOffsetDialog);
+        }
+        items.add(getString(R.string.playback_statistics_title));
+        actions.add(this::showPlaybackStatistics);
+        if (togetherAvailable()) {
+            final String summary = togetherSummary();
+            items.add(getString(R.string.together_title)
+                    + (summary == null ? "" : "  \u00B7  " + summary));
+            actions.add(this::showTogetherMenu);
+        }
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle(R.string.player_tools)
-                .setItems(items, (selected, which) -> {
+                .setItems(items.toArray(new String[0]), (selected, which) -> {
                     selected.dismiss();
-                    if (which == 0) showSleepTimerMenu();
-                    else showPlaybackStatistics();
+                    actions.get(which).run();
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .create();
         dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
         dialog.show();
+    }
+
+    private void setupTogetherOverlay() {
+        final int gold = Color.rgb(240, 183, 38);
+        roomPill = new TextView(this);
+        roomPill.setTextColor(Color.WHITE);
+        roomPill.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        roomPill.setGravity(Gravity.CENTER_VERTICAL);
+        roomPill.setCompoundDrawablesWithIntrinsicBounds(
+                R.drawable.ic_together_24dp, 0, 0, 0);
+        roomPill.setCompoundDrawablePadding(Utils.dpToPx(7));
+        roomPill.setPadding(Utils.dpToPx(12), Utils.dpToPx(6),
+                Utils.dpToPx(12), Utils.dpToPx(6));
+        roomPill.setBackground(lampaBackground(Color.argb(225, 4, 18, 40), gold, 9));
+        roomPill.setVisibility(View.GONE);
+        final FrameLayout.LayoutParams pillParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.START | Gravity.BOTTOM);
+        pillParams.setMargins(Utils.dpToPx(22), 0, 0, Utils.dpToPx(88));
+        playerView.addView(roomPill, pillParams);
+
+        roomMessage = new TextView(this);
+        roomMessage.setTextColor(Color.WHITE);
+        roomMessage.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        roomMessage.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        roomMessage.setGravity(Gravity.CENTER);
+        roomMessage.setPadding(Utils.dpToPx(16), Utils.dpToPx(8),
+                Utils.dpToPx(16), Utils.dpToPx(8));
+        roomMessage.setBackground(lampaBackground(Color.argb(225, 4, 18, 40), gold, 9));
+        roomMessage.setVisibility(View.GONE);
+        final FrameLayout.LayoutParams messageParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM);
+        messageParams.bottomMargin = Utils.dpToPx(132);
+        playerView.addView(roomMessage, messageParams);
+    }
+
+    private void setupHoldSpeedOverlay() {
+        final int gold = Color.rgb(211, 165, 24);
+        speedBoostIndicator = new TextView(this);
+        speedBoostIndicator.setText("2.0\u00D7");
+        speedBoostIndicator.setTextColor(Color.WHITE);
+        speedBoostIndicator.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        speedBoostIndicator.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        speedBoostIndicator.setGravity(Gravity.CENTER_VERTICAL);
+        speedBoostIndicator.setPadding(Utils.dpToPx(14), Utils.dpToPx(9),
+                Utils.dpToPx(14), Utils.dpToPx(9));
+        speedBoostIndicator.setClickable(false);
+        speedBoostIndicator.setFocusable(false);
+        speedBoostIndicator.setBackground(lampaBackground(
+                Color.argb(238, 4, 18, 40), gold, 10));
+
+        speedBoostIconForward = ContextCompat.getDrawable(
+                this, R.drawable.exo_icon_fastforward);
+        speedBoostIconRewind = ContextCompat.getDrawable(
+                this, R.drawable.exo_icon_rewind);
+        final int iconSize = Utils.dpToPx(18);
+        if (speedBoostIconForward != null) {
+            speedBoostIconForward.setBounds(0, 0, iconSize, iconSize);
+        }
+        if (speedBoostIconRewind != null) {
+            speedBoostIconRewind.setBounds(0, 0, iconSize, iconSize);
+        }
+        speedBoostIndicator.setCompoundDrawablePadding(Utils.dpToPx(7));
+        speedBoostIndicator.setCompoundDrawableTintList(ColorStateList.valueOf(gold));
+
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        params.topMargin = Utils.dpToPx(28);
+        speedBoostIndicator.setVisibility(View.GONE);
+        playerView.addView(speedBoostIndicator, params);
+    }
+
+    private void setupStatsOverlay() {
+        statsView = new TextView(this);
+        statsView.setTextColor(Color.WHITE);
+        statsView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        statsView.setTypeface(Typeface.MONOSPACE);
+        statsView.setLineSpacing(Utils.dpToPx(1), 1f);
+        statsView.setPadding(Utils.dpToPx(12), Utils.dpToPx(9),
+                Utils.dpToPx(12), Utils.dpToPx(9));
+        statsView.setMaxWidth(Utils.dpToPx(360));
+        statsView.setBackground(lampaBackground(
+                Color.argb(232, 4, 18, 40), Color.rgb(240, 183, 38), 9));
+        statsView.setAlpha(0f);
+        statsView.setVisibility(View.GONE);
+
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.START | Gravity.CENTER_VERTICAL);
+        params.leftMargin = Utils.dpToPx(22);
+        playerView.addView(statsView, params);
+    }
+
+    private void fadeAuxiliaryChrome(View view, boolean visible, boolean immediate) {
+        if (view == null) return;
+        Boolean previousTarget = auxiliaryChromeTargets.get(view);
+        if (Objects.equals(previousTarget, visible)
+                && !(immediate && !visible && view.getVisibility() != View.GONE)) return;
+        auxiliaryChromeTargets.put(view, visible);
+        view.animate().cancel();
+
+        if (visible) {
+            if (view.getVisibility() != View.VISIBLE) {
+                view.setAlpha(0f);
+                view.setVisibility(View.VISIBLE);
+            }
+            if (immediate) {
+                view.setAlpha(1f);
+            } else {
+                view.animate().alpha(1f).setDuration(CHROME_FADE_MS).start();
+            }
+            return;
+        }
+
+        if (immediate || view.getVisibility() != View.VISIBLE) {
+            view.setAlpha(0f);
+            view.setVisibility(View.GONE);
+            return;
+        }
+        view.animate().alpha(0f).setDuration(CHROME_FADE_MS).withEndAction(() -> {
+            if (Boolean.FALSE.equals(auxiliaryChromeTargets.get(view))) {
+                view.setVisibility(View.GONE);
+            }
+        }).start();
+    }
+
+    void setSpeedBoostIndicator(float speed, boolean rewind) {
+        if (speedBoostIndicator == null) return;
+        speedBoostIndicator.setText(String.format(Locale.US, "%.1f\u00D7", speed));
+        speedBoostIndicator.setCompoundDrawablesRelative(
+                rewind ? speedBoostIconRewind : null,
+                null,
+                rewind ? null : speedBoostIconForward,
+                null);
+        setSpeedBoostIndicatorVisible(true);
+    }
+
+    void setSpeedBoostIndicatorVisible(boolean visible) {
+        if (speedBoostIndicator != null) {
+            speedBoostIndicator.setVisibility(
+                    visible && !inPip && !locked ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private Uri currentPlayingUri() {
+        if (player != null) {
+            final MediaItem item = player.getCurrentMediaItem();
+            if (item != null && item.localConfiguration != null) {
+                return item.localConfiguration.uri;
+            }
+        }
+        return mPrefs == null ? null : mPrefs.mediaUri;
+    }
+
+    private boolean togetherAvailable() {
+        if (together != null && together.isActive()) {
+            return true;
+        }
+        return Utils.isSupportedNetworkUri(currentPlayingUri());
+    }
+
+    private String togetherSummary() {
+        if (together == null || !together.isActive()) {
+            return null;
+        }
+        final String name = together.roomName();
+        final String defaultName = getString(R.string.together_room_default_name, together.code());
+        return TextUtils.isEmpty(name) || defaultName.equals(name)
+                ? getString(R.string.together_badge, together.code(), together.peers())
+                : getString(R.string.together_badge_named,
+                        name, together.code(), together.peers());
+    }
+
+    private void showTogetherMenu() {
+        final List<String> labels = new ArrayList<>();
+        final List<Runnable> actions = new ArrayList<>();
+        if (together != null && together.isActive()) {
+            labels.add(getString(R.string.together_share));
+            actions.add(this::shareInvite);
+            labels.add(getString(R.string.together_leave));
+            actions.add(this::leaveRoom);
+        } else {
+            if (Utils.isSupportedNetworkUri(currentPlayingUri())) {
+                labels.add(getString(R.string.together_create));
+                actions.add(this::createRoom);
+            }
+            labels.add(getString(R.string.together_find));
+            actions.add(this::findRooms);
+            labels.add(getString(R.string.together_enter_code));
+            actions.add(this::askRoomCode);
+        }
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.together_title)
+                .setItems(labels.toArray(new String[0]), (selected, which) -> {
+                    selected.dismiss();
+                    actions.get(which).run();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+        dialog.show();
+    }
+
+    private void findRooms() {
+        Relay.setBase(mPrefs.togetherRelay);
+        Toast.makeText(this, R.string.together_searching, Toast.LENGTH_SHORT).show();
+        TogetherManager.discover(rooms -> {
+            if (isFinishing() || isDestroyed()) {
+                return;
+            }
+            if (rooms.isEmpty()) {
+                showSnack(getString(R.string.together_none_found), null);
+                return;
+            }
+            final String[] labels = new String[rooms.size()];
+            for (int i = 0; i < rooms.size(); i++) {
+                final JSONObject room = rooms.get(i);
+                final String title = room.optString("title", "").isEmpty()
+                        ? room.optString("name", room.optString("id"))
+                        : room.optString("title");
+                labels[i] = title + "\n" + getString(R.string.together_room_summary,
+                        room.optString("owner", ""), room.optInt("members", 1));
+            }
+            final AlertDialog dialog = new AlertDialog.Builder(this)
+                    .setTitle(R.string.together_find)
+                    .setItems(labels, (selected, which) -> {
+                        final JSONObject room = rooms.get(which);
+                        final String code = room.optString("id");
+                        if (room.optInt("pwd") == 1) {
+                            askRoomPassword(code);
+                        } else {
+                            joinRoom(code, "");
+                        }
+                    })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .create();
+            dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+            dialog.show();
+        });
+    }
+
+    private void askRoomPassword(final String code) {
+        final EditText password = roomPasswordField();
+        password.setText(mPrefs.togetherPassword);
+        password.setSelection(password.length());
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(code)
+                .setView(password)
+                .setPositiveButton(android.R.string.ok,
+                        (selected, which) -> joinRoom(code, password.getText().toString()))
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, true));
+        dialog.show();
+    }
+
+    private EditText roomPasswordField() {
+        final EditText password = new EditText(this);
+        password.setSingleLine(true);
+        password.setHint(R.string.together_password_hint);
+        password.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        return password;
+    }
+
+    private void createRoom() {
+        final JSONObject session = sessionDescription();
+        if (session == null) {
+            return;
+        }
+        final String code = Room.newCode();
+        final JSONObject card = roomCard();
+        final String suggested = card == null || card.optString("title", "").isEmpty()
+                ? getString(R.string.together_room_default_name, code)
+                : card.optString("title");
+
+        final EditText name = new EditText(this);
+        name.setSingleLine(true);
+        name.setHint(R.string.together_room_name_hint);
+        name.setText(suggested);
+        name.setSelection(name.length());
+        final EditText password = roomPasswordField();
+        password.setText(mPrefs.togetherPassword);
+        final CheckBox listed = new CheckBox(this);
+        listed.setText(R.string.together_public);
+        listed.setChecked(mPrefs.togetherPublic);
+        final TextView warning = new TextView(this);
+        warning.setText(R.string.together_public_needs_password);
+        warning.setTextColor(Color.rgb(240, 183, 38));
+        warning.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        warning.setVisibility(View.GONE);
+
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        final int padding = Utils.dpToPx(18);
+        fields.setPadding(padding, 0, padding, 0);
+        fields.addView(name);
+        fields.addView(password);
+        fields.addView(listed);
+        fields.addView(warning);
+
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.together_create_title, code))
+                .setView(fields)
+                .setPositiveButton(android.R.string.ok, (selected, which) -> {
+                    mPrefs.updateTogetherPublic(listed.isChecked());
+                    openRoom(code, name.getText().toString().trim(),
+                            password.getText().toString(), session);
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> {
+            styleUaAlertDialog(dialog, true);
+            final Runnable validate = () -> {
+                final boolean invalid = listed.isChecked() && password.length() == 0;
+                warning.setVisibility(invalid ? View.VISIBLE : View.GONE);
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(!invalid);
+            };
+            listed.setOnCheckedChangeListener((button, checked) -> validate.run());
+            password.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence value, int start,
+                                                        int count, int after) { }
+                @Override public void onTextChanged(CharSequence value, int start,
+                                                     int before, int count) { }
+                @Override public void afterTextChanged(Editable value) {
+                    validate.run();
+                }
+            });
+            validate.run();
+        });
+        dialog.show();
+    }
+
+    private void openRoom(final String code, final String name, final String password,
+                          final JSONObject session) {
+        ensureTogether();
+        together.create(code, password, mPrefs.togetherPublic,
+                name.isEmpty() ? getString(R.string.together_room_default_name, code) : name,
+                session, roomNick());
+        copyToClipboard(together.invite());
+        if (isTvBox) {
+            showInviteQr(together.invite());
+        } else {
+            showSnack(getString(R.string.together_created, together.code()), null);
+        }
+    }
+
+    private void askRoomCode() {
+        final EditText code = new EditText(this);
+        code.setSingleLine(true);
+        code.setHint("ABC234");
+        code.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        final EditText password = roomPasswordField();
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        final int padding = Utils.dpToPx(18);
+        fields.setPadding(padding, 0, padding, 0);
+        fields.addView(code);
+        fields.addView(password);
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.together_join)
+                .setView(fields)
+                .setPositiveButton(android.R.string.ok, (selected, which) -> {
+                    final String entered = code.getText().toString().trim()
+                            .toUpperCase(Locale.US);
+                    if (Room.isCode(entered)) {
+                        joinRoom(entered, password.getText().toString());
+                    } else {
+                        showSnack(getString(R.string.together_code_invalid), null);
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, true));
+        dialog.show();
+    }
+
+    private void joinRoom(final String code, final String password) {
+        ensureTogether();
+        together.join(code, password, roomNick());
+    }
+
+    private String roomNick() {
+        return TextUtils.isEmpty(mPrefs.togetherNick) ? Build.MODEL : mPrefs.togetherNick;
+    }
+
+    private void leaveRoom() {
+        if (together != null) {
+            together.leave();
+        }
+    }
+
+    private Room.Invite roomInviteFromIntent(final Intent intent) {
+        if (intent == null) {
+            return null;
+        }
+        Room.Invite invite = Room.inviteFrom(intent.getData());
+        if (invite != null) {
+            return invite;
+        }
+        if (!Intent.ACTION_SEND.equals(intent.getAction())
+                || !"text/plain".equals(intent.getType())) {
+            return null;
+        }
+        final String text = intent.getStringExtra(Intent.EXTRA_TEXT);
+        if (TextUtils.isEmpty(text)) {
+            return null;
+        }
+        try {
+            invite = Room.inviteFrom(Uri.parse(text.trim()));
+        } catch (RuntimeException ignored) {
+            // A plain code or encoded invite is handled below.
+        }
+        return invite != null ? invite : Room.inviteFrom(text.trim());
+    }
+
+    private boolean handleRoomIntent(final Intent intent) {
+        final Room.Invite invite = roomInviteFromIntent(intent);
+        if (invite == null) {
+            return false;
+        }
+        awaitingRoomMedia = player == null || !haveMedia;
+        joinRoom(invite.code, invite.password);
+        return true;
+    }
+
+    private JSONObject sessionDescription() {
+        final Uri uri = currentPlayingUri();
+        if (!Utils.isSupportedNetworkUri(uri)) {
+            return null;
+        }
+        try {
+            final JSONObject session = new JSONObject().put("uri", uri.toString());
+            if (!TextUtils.isEmpty(mPrefs.mediaType)) {
+                session.put("type", mPrefs.mediaType);
+            }
+            final Intent current = getIntent();
+            if (current != null && current.getExtras() != null) {
+                final Bundle extras = new Bundle(current.getExtras());
+                extras.remove(API_RETURN_RESULT);
+                extras.remove(API_END_BY);
+                extras.remove(API_DURATION);
+                extras.remove(LampaPlaylist.EXTRA_PLAYBACK_RESULTS);
+                if (extras.containsKey(API_POSITION) && player != null
+                        && player.isCurrentMediaItemSeekable()) {
+                    extras.putInt(API_POSITION,
+                            (int) Math.max(0, player.getCurrentPosition()));
+                }
+                if (lampaPlaylist != null && !lampaPlaylist.isEmpty()) {
+                    extras.putInt(LampaPlaylist.EXTRA_PLAYLIST_INDEX,
+                            lampaPlaylist.getCurrentIndex());
+                    extras.putString(LampaPlaylist.EXTRA_CURRENT_URL, uri.toString());
+                }
+                session.put("extras", SessionCodec.toJson(extras));
+            }
+            final JSONObject card = roomCard();
+            if (card != null) {
+                session.put("title", card.optString("title", ""));
+                session.put("poster", card.optString("poster", ""));
+            }
+            return session;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private JSONObject roomCard() {
+        final Uri uri = currentPlayingUri();
+        if (!Utils.isSupportedNetworkUri(uri)) {
+            return null;
+        }
+        final LampaPlaylist.Item item = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
+        String title = item == null ? apiTitle : item.displayTitle(lampaPlaylist.getCurrentIndex());
+        if (TextUtils.isEmpty(title)) {
+            title = Utils.getFileName(this, uri);
+        }
+        String poster = item == null ? null : item.thumbnail;
+        if (TextUtils.isEmpty(poster) && getIntent() != null) {
+            poster = getIntent().getStringExtra("thumbnail");
+        }
+        if (!TextUtils.isEmpty(poster)) {
+            try {
+                if (!Utils.isSupportedNetworkUri(Uri.parse(poster))) {
+                    poster = "";
+                }
+            } catch (RuntimeException ignored) {
+                poster = "";
+            }
+        }
+        final int tmdb = item == null ? getIntent().getIntExtra("tmdb_id", -1) : item.tmdbId;
+        final String mediaType = item == null
+                ? getIntent().getStringExtra("media_type") : item.mediaType;
+        final boolean series = item != null && item.season > 0
+                || mediaType != null && !"movie".equalsIgnoreCase(mediaType);
+        try {
+            return new JSONObject()
+                    .put("url", uri.toString())
+                    .put("title", title == null ? "" : title)
+                    .put("poster", poster == null ? "" : poster)
+                    .put("tmdb", Math.max(0, tmdb))
+                    .put("source", "tmdb")
+                    .put("type", series ? "tv" : "movie");
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private void openSession(final JSONObject session) {
+        final String uriText = session == null ? null : session.optString("uri", null);
+        if (TextUtils.isEmpty(uriText)) {
+            return;
+        }
+        final Uri uri = Uri.parse(uriText);
+        if (!Utils.isSupportedNetworkUri(uri)) {
+            return;
+        }
+        final Intent intent = new Intent(Intent.ACTION_VIEW).setData(uri);
+        final String type = session.optString("type", null);
+        if (!TextUtils.isEmpty(type)) {
+            intent.setType(type);
+        }
+        final JSONObject encodedExtras = session.optJSONObject("extras");
+        if (encodedExtras != null) {
+            final Bundle extras = SessionCodec.toBundle(encodedExtras);
+            extras.remove(API_RETURN_RESULT);
+            extras.remove(LampaPlaylist.EXTRA_PLAYBACK_RESULTS);
+            intent.putExtras(extras);
+        } else {
+            final String title = session.optString("title", null);
+            final String poster = session.optString("poster", null);
+            if (!TextUtils.isEmpty(title)) {
+                intent.putExtra(API_TITLE, title);
+            }
+            if (!TextUtils.isEmpty(poster)) {
+                intent.putExtra("thumbnail", poster);
+            }
+        }
+        applyingRoomMedia = true;
+        awaitingRoomMedia = false;
+        try {
+            applyViewIntent(intent, false);
+            final long roomPosition = together == null ? -1L : together.roomPositionMs();
+            if (roomPosition >= 0L) {
+                mPrefs.updatePosition(roomPosition);
+            }
+            if (alive) {
+                initializePlayer();
+            }
+        } finally {
+            applyingRoomMedia = false;
+        }
+    }
+
+    private void syncRoomPlaylistStep(final boolean automatic) {
+        if (applyingRoomMedia || together == null || !together.isActive()) {
+            return;
+        }
+        final JSONObject session = sessionDescription();
+        if (session == null) {
+            together.leave();
+        } else if (together.isOwner()) {
+            together.changeMedia(session);
+        } else if (automatic) {
+            together.mediaStepped(session);
+        } else {
+            together.leave();
+        }
+    }
+
+    private void shareInvite() {
+        final String invite = together == null ? null : together.invite();
+        if (invite == null) {
+            return;
+        }
+        copyToClipboard(invite);
+        final Intent share = new Intent(Intent.ACTION_SEND)
+                .setType("text/plain")
+                .putExtra(Intent.EXTRA_TEXT, invite);
+        if (isTvBox || getPackageManager().queryIntentActivities(share, 0).isEmpty()) {
+            showInviteQr(invite);
+            return;
+        }
+        try {
+            startActivity(Intent.createChooser(share, getString(R.string.together_share)));
+        } catch (RuntimeException ignored) {
+            showInviteQr(invite);
+        }
+    }
+
+    private void showInviteQr(final String invite) {
+        copyToClipboard(invite);
+        final DisplayMetrics metrics = getResources().getDisplayMetrics();
+        final int size = Math.max(Utils.dpToPx(220), Math.min(Utils.dpToPx(620),
+                Math.round(Math.min(metrics.widthPixels, metrics.heightPixels) * 0.58f)));
+        final Bitmap qr = createQrBitmap(invite, size);
+        if (qr == null) {
+            showSnack(getString(R.string.together_created,
+                    together == null ? "" : together.code()), null);
+            return;
+        }
+        final ImageView image = new ImageView(this);
+        image.setImageBitmap(qr);
+        image.setAdjustViewBounds(true);
+        image.setBackgroundColor(Color.WHITE);
+        final int padding = Utils.dpToPx(14);
+        image.setPadding(padding, padding, padding, padding);
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.together_qr_title,
+                        together == null ? "" : together.code()))
+                .setMessage(R.string.together_qr_hint)
+                .setView(image)
+                .setPositiveButton(android.R.string.ok, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, true));
+        dialog.show();
+    }
+
+    private Bitmap createQrBitmap(final String value, final int size) {
+        try {
+            final BitMatrix matrix = new QRCodeWriter().encode(
+                    value, BarcodeFormat.QR_CODE, size, size);
+            final int[] pixels = new int[size * size];
+            for (int y = 0; y < size; y++) {
+                final int offset = y * size;
+                for (int x = 0; x < size; x++) {
+                    pixels[offset + x] = matrix.get(x, y) ? Color.BLACK : Color.WHITE;
+                }
+            }
+            return Bitmap.createBitmap(pixels, size, size, Bitmap.Config.ARGB_8888);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private void copyToClipboard(final String value) {
+        final android.content.ClipboardManager clipboard =
+                (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboard != null && value != null) {
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", value));
+        }
+    }
+
+    private void ensureTogether() {
+        Relay.setBase(mPrefs.togetherRelay);
+        Room.setInvitePage(mPrefs.togetherInvitePage);
+        if (together == null) {
+            together = new TogetherManager(togetherHost());
+        }
+    }
+
+    private void updateRoomBadge() {
+        final boolean active = together != null && together.isActive();
+        if (buttonTogether != null) {
+            buttonTogether.setVisibility(togetherAvailable() ? View.VISIBLE : View.GONE);
+        }
+        if (roomPill != null) {
+            final boolean visible = active && controllerChromeVisible && !inPip && !locked;
+            if (visible) {
+                roomPill.setText(together.connected()
+                        ? getString(R.string.together_badge, together.code(), together.peers())
+                        : getString(together.everConnected()
+                                ? R.string.together_offline : R.string.together_connecting,
+                                together.code()));
+                roomPill.setTextColor(together.connected()
+                        ? Color.WHITE : Color.rgb(240, 183, 38));
+            }
+            fadeAuxiliaryChrome(roomPill, visible, inPip || locked);
+        }
+        if (roomMessage != null) {
+            final String waiting = active ? together.waitingFor() : null;
+            final boolean visible = active && !inPip && !locked
+                    && (together.holding() || waiting != null);
+            if (visible) {
+                roomMessage.setText(together.holding()
+                        ? getString(R.string.together_hold)
+                        : getString(R.string.together_waiting,
+                                TextUtils.isEmpty(waiting)
+                                        ? getString(R.string.together_act_somebody) : waiting));
+            }
+            roomMessage.setVisibility(visible ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void updateStatsPanel() {
+        if (statsView == null) return;
+        boolean visible = mPrefs != null && mPrefs.showStats && player != null
+                && controllerChromeVisible && !inPip && !locked;
+        if (visible) statsView.setText(playbackStatisticsSnapshot().render(playbackStatisticsLabels()));
+        fadeAuxiliaryChrome(statsView, visible, inPip || locked);
+    }
+
+    private void announceRoomAction(final String nick, final RoomAction action) {
+        if (playerView == null || inPip || locked) {
+            return;
+        }
+        final int message;
+        switch (action) {
+            case PAUSED:
+                message = R.string.together_act_paused;
+                break;
+            case RESUMED:
+                message = R.string.together_act_resumed;
+                break;
+            case LEFT:
+                message = R.string.together_act_left;
+                break;
+            default:
+                message = R.string.together_act_seeked;
+                break;
+        }
+        Utils.showText(playerView, getString(message,
+                TextUtils.isEmpty(nick) ? getString(R.string.together_act_somebody) : nick),
+                3_500L);
+    }
+
+    private TogetherManager.Host togetherHost() {
+        return new TogetherManager.Host() {
+            @Override public boolean ready() {
+                return player != null && haveMedia;
+            }
+
+            @Override public boolean scrubbing() {
+                return isScrubbing || playerView.isSpeedBoosting()
+                        || playerView.isSeekGesture();
+            }
+
+            @Override public long positionMs() {
+                return player == null ? 0L : Math.max(0L, player.getCurrentPosition());
+            }
+
+            @Override public boolean playWhenReady() {
+                return player != null && player.getPlayWhenReady()
+                        && player.getPlaybackState() != Player.STATE_ENDED;
+            }
+
+            @Override public float speed() {
+                return player == null ? 1f : player.getPlaybackParameters().speed;
+            }
+
+            @Override public boolean buffering() {
+                return player != null && player.getPlaybackState() == Player.STATE_BUFFERING;
+            }
+
+            @Override public boolean ended() {
+                return player != null && player.getPlaybackState() == Player.STATE_ENDED;
+            }
+
+            @Override public long durationMs() {
+                if (player == null || player.getDuration() == C.TIME_UNSET) {
+                    return 0L;
+                }
+                return Math.max(0L, player.getDuration());
+            }
+
+            @Override public String playingUri() {
+                final Uri uri = currentPlayingUri();
+                return uri == null ? null : uri.toString();
+            }
+
+            @Override public long bufferedAheadMs() {
+                return player == null ? 0L : Math.max(0L, player.getTotalBufferedDuration());
+            }
+
+            @Override public void applyPlay(final boolean play) {
+                if (player != null) {
+                    player.setPlayWhenReady(play);
+                }
+            }
+
+            @Override public void applySeek(final long positionMs) {
+                if (player != null) {
+                    player.setSeekParameters(SeekParameters.EXACT);
+                    player.seekTo(positionMs);
+                }
+            }
+
+            @Override public void applySpeed(final float speed) {
+                if (player != null) {
+                    player.setPlaybackSpeed(speed);
+                }
+            }
+
+            @Override public void onRoomChanged() {
+                updateRoomBadge();
+            }
+
+            @Override public void onRoomAction(final String nick, final RoomAction action) {
+                announceRoomAction(nick, action);
+            }
+
+            @Override public JSONObject sessionDescription() {
+                return PlayerActivity.this.sessionDescription();
+            }
+
+            @Override public JSONObject roomCard() {
+                return PlayerActivity.this.roomCard();
+            }
+
+            @Override public void openSession(final JSONObject session) {
+                PlayerActivity.this.openSession(session);
+            }
+
+            @Override public void onJoinFailed() {
+                final boolean resumeRememberedMedia = awaitingRoomMedia;
+                awaitingRoomMedia = false;
+                showSnack(getString(R.string.together_no_room), null);
+                if (resumeRememberedMedia && alive && player == null) {
+                    initializePlayer();
+                }
+            }
+
+            @Override public void onHoldLifted() {
+                if (playerView != null && !inPip && !locked) {
+                    Utils.showText(playerView, getString(R.string.together_go), 3_500L);
+                }
+            }
+        };
     }
 
     private void showSleepTimerMenu() {
@@ -2222,15 +3256,21 @@ public class PlayerActivity extends Activity {
 
     private void showPlaybackStatistics() {
         if (player == null) return;
+        PlaybackStatistics.Snapshot snapshot = playbackStatisticsSnapshot();
+        PlaybackReportActivity.show(this, getString(R.string.playback_statistics_title),
+                snapshot.render(playbackStatisticsLabels()), playbackReport(null));
+    }
+
+    private PlaybackStatistics.Snapshot playbackStatisticsSnapshot() {
         Format video = player.getVideoFormat();
         Format audio = player.getAudioFormat();
-        PlaybackStatistics.Snapshot snapshot = new PlaybackStatistics.Snapshot(
+        return new PlaybackStatistics.Snapshot(
                 mediaContainerLabel(),
                 video == null ? 0 : video.width,
                 video == null ? 0 : video.height,
                 video == null ? null : shortCodec(video.sampleMimeType),
-                video == null ? 0 : video.frameRate,
-                video == null ? 0 : video.bitrate,
+                videoFrameRate(),
+                videoBitrate(),
                 player.getTotalBufferedDuration(),
                 videoDecoderName,
                 audio == null ? audioDecoderName : shortCodec(audio.sampleMimeType)
@@ -2238,7 +3278,10 @@ public class PlayerActivity extends Activity {
                         + (audioDecoderName == null ? "" : " \u00B7 " + audioDecoderName),
                 currentTransferBitrate(),
                 totalDroppedFrames);
-        PlaybackStatistics.Labels labels = new PlaybackStatistics.Labels(
+    }
+
+    private PlaybackStatistics.Labels playbackStatisticsLabels() {
+        return new PlaybackStatistics.Labels(
                 getString(R.string.playback_stats_container),
                 getString(R.string.playback_stats_video),
                 getString(R.string.playback_stats_fps),
@@ -2248,13 +3291,118 @@ public class PlayerActivity extends Activity {
                 getString(R.string.playback_stats_decoder),
                 getString(R.string.playback_stats_audio),
                 getString(R.string.playback_stats_dropped_frames));
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(R.string.playback_statistics_title)
-                .setMessage(snapshot.render(labels))
-                .setPositiveButton(android.R.string.ok, null)
-                .create();
-        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, true));
-        dialog.show();
+    }
+
+    private void showPlaybackReport(String title, String summary, Throwable error) {
+        String detail = summary;
+        String root = DiagnosticReport.rootMessage(error);
+        if (!root.isEmpty()) detail = root;
+        PlaybackReportActivity.show(this, title, detail, playbackReport(error));
+    }
+
+    private String playbackReport(Throwable error) {
+        StringBuilder report = new StringBuilder(2048);
+        String media = currentMediaKey();
+        report.append("Media: ").append(DiagnosticReport.sanitizeNetworkUri(media)).append('\n');
+        report.append("Container: ").append(mediaContainerLabel()).append('\n');
+        if (player == null) {
+            report.append("Player: released\n");
+        } else {
+            long duration = player.getDuration();
+            report.append("State: ").append(playbackStateName(player.getPlaybackState()))
+                    .append(", playWhenReady=").append(player.getPlayWhenReady())
+                    .append(", isPlaying=").append(player.isPlaying()).append('\n');
+            report.append("Position: ").append(reportTime(player.getCurrentPosition()))
+                    .append(" / ").append(reportTime(duration))
+                    .append(", buffered=").append(reportTime(player.getTotalBufferedDuration()))
+                    .append('\n');
+            report.append(String.format(Locale.US, "Speed: %.2fx%n",
+                    player.getPlaybackParameters().speed));
+            Format video = player.getVideoFormat();
+            Format audio = player.getAudioFormat();
+            report.append("Video: ").append(video == null ? "(none)" : Format.toLogString(video))
+                    .append('\n');
+            report.append("Audio: ").append(audio == null ? "(none)" : Format.toLogString(audio))
+                    .append('\n');
+        }
+        report.append("Video decoder: ").append(emptyReportValue(videoDecoderName)).append('\n');
+        report.append("Audio decoder: ").append(emptyReportValue(audioDecoderName)).append('\n');
+        report.append(String.format(Locale.US,
+                "Bitrate: video=%.2f Mbps, transfer=%.2f Mbps, estimate=%.2f Mbps%n",
+                videoBitrate() / 1_000_000f, currentTransferBitrate() / 1_000_000f,
+                bandwidthBitrate / 1_000_000f));
+        report.append("Dropped frames: ").append(totalDroppedFrames).append('\n');
+        report.append("Source: iptv=").append(lampaIptv)
+                .append(", playlist=").append(lampaPlaylist != null)
+                .append(", externalApi=").append(apiAccess || apiAccessPartial).append('\n');
+        report.append("Recovery: source=").append(sourceRecoveryAttempts)
+                .append(", compatibility=").append(compatibilityRecoveryAttempts)
+                .append(", live=").append(liveRecoveryAttempts)
+                .append(", alternateStream=").append(alternateStreamTypeTried)
+                .append(", lowerQuality=").append(decoderQualityFallbackTried)
+                .append(", decoderCompatibility=").append(decoderCompatibilityMode)
+                .append('\n');
+        report.append("Dolby Vision: mapProfile7=").append(mPrefs != null && mPrefs.mapDV7ToHevc)
+                .append(", forceHevc=").append(forceHevcForDolbyVision)
+                .append(", status=").append(dv7Converter == null
+                        ? "inactive" : emptyReportValue(dv7Converter.status())).append('\n');
+        if (together != null && together.isActive()) {
+            report.append("Watch Together: active, connected=").append(together.connected())
+                    .append(", peers=").append(together.peers()).append('\n');
+        }
+        if (error != null) {
+            report.append("\nError: ").append(error.getClass().getName()).append('\n');
+            report.append("Root message: ").append(DiagnosticReport.rootMessage(error)).append('\n');
+            report.append("\nStack trace:\n").append(DiagnosticReport.stackTrace(error));
+        }
+        return DiagnosticReport.sanitizeText(report.toString());
+    }
+
+    private String playbackStateName(int state) {
+        switch (state) {
+            case Player.STATE_BUFFERING:
+                return "BUFFERING";
+            case Player.STATE_READY:
+                return "READY";
+            case Player.STATE_ENDED:
+                return "ENDED";
+            case Player.STATE_IDLE:
+            default:
+                return "IDLE";
+        }
+    }
+
+    private String reportTime(long timeMs) {
+        return timeMs == C.TIME_UNSET || timeMs < 0 ? "unknown" : Utils.formatMilis(timeMs);
+    }
+
+    private String emptyReportValue(String value) {
+        return value == null || value.trim().isEmpty() ? "(none)" : value;
+    }
+
+    private float videoFrameRate() {
+        Format format = player == null ? null : player.getVideoFormat();
+        return format != null && format.frameRate > 0f
+                ? format.frameRate : containerFrameRate();
+    }
+
+    private float containerFrameRate() {
+        for (TrackMetadata metadata : currentContainerTracks()) {
+            if (metadata.type == TrackMetadata.Type.VIDEO && metadata.frameRate > 0f) {
+                return metadata.frameRate;
+            }
+        }
+        return 0f;
+    }
+
+    private long videoBitrate() {
+        Format format = player == null ? null : player.getVideoFormat();
+        if (format != null && format.bitrate > 0) return format.bitrate;
+        String key = currentMediaKey();
+        Long length = key == null ? null : contentLengths.get(key);
+        long duration = player == null ? C.TIME_UNSET : player.getDuration();
+        return length == null || duration == C.TIME_UNSET ? 0L
+                : PlaybackStatistics.averageBitrate(length, duration);
     }
 
     private String mediaContainerLabel() {
@@ -2264,6 +3412,7 @@ public class PlayerActivity extends Activity {
         if (value.contains(".m3u8")) return "HLS";
         if (value.contains(".mpd") || value.contains("/ytdl/manifest?")) return "DASH";
         if (value.contains(".mkv")) return "MKV";
+        if (value.contains(".avi")) return "AVI";
         if (value.contains(".ts")) return "TS";
         if (value.contains(".mp4")) return "MP4";
         return "VIDEO";
@@ -2328,6 +3477,7 @@ public class PlayerActivity extends Activity {
         else if (path.contains(".mpd") || mediaUrl.contains("/ytdl/manifest?")) parts.add("DASH");
         else if (path.contains(".ts")) parts.add("TS");
         else if (path.contains(".mkv")) parts.add("MKV");
+        else if (path.contains(".avi")) parts.add("AVI");
         else parts.add("VIDEO");
         if (video != null) {
             parts.addAll(MediaFormatLabel.videoParts(video));
@@ -2339,16 +3489,30 @@ public class PlayerActivity extends Activity {
         lampaTopDetails.setText(TextUtils.join(" · ", parts));
     }
 
-    private void onContainerMetadata(List<TrackMetadata> tracks) {
-        containerTracks.clear();
-        containerTracks.addAll(tracks);
+    private String currentMediaKey() {
+        MediaItem item = player == null ? null : player.getCurrentMediaItem();
+        if (item != null && item.localConfiguration != null
+                && item.localConfiguration.uri != null) {
+            return item.localConfiguration.uri.toString();
+        }
+        return mPrefs == null || mPrefs.mediaUri == null ? null : mPrefs.mediaUri.toString();
+    }
+
+    private List<TrackMetadata> currentContainerTracks() {
+        String key = currentMediaKey();
+        List<TrackMetadata> tracks = key == null ? null : containerTracks.get(key);
+        return tracks == null ? Collections.emptyList() : tracks;
+    }
+
+    private void onContainerMetadata(Uri originalUri) {
+        if (originalUri == null || !originalUri.toString().equals(currentMediaKey())) return;
         resolveTrackNames();
         updateLampaTrackDetails();
     }
 
     private void resolveTrackNames() {
         resolvedTrackNames.clear();
-        if (player == null || containerTracks.isEmpty()) {
+        if (player == null || currentContainerTracks().isEmpty()) {
             if (trackNameProvider != null) trackNameProvider.setTrackNames(resolvedTrackNames);
             return;
         }
@@ -2359,7 +3523,7 @@ public class PlayerActivity extends Activity {
 
     private void resolveTrackNames(int mediaTrackType, TrackMetadata.Type metadataType) {
         ArrayList<TrackMetadata> candidates = new ArrayList<>();
-        for (TrackMetadata metadata : containerTracks) {
+        for (TrackMetadata metadata : currentContainerTracks()) {
             if (metadata.type == metadataType && metadata.name != null
                     && !metadata.name.trim().isEmpty()) candidates.add(metadata);
         }
@@ -2418,6 +3582,7 @@ public class PlayerActivity extends Activity {
         }
         updateLampaSkipUi();
         updateTransferRateUi();
+        updateStatsPanel();
     }
 
     private void updateTransferRateUi() {
@@ -2652,6 +3817,9 @@ public class PlayerActivity extends Activity {
             lampaSkipButton.requestFocus();
         } else if (target == TvFocusPolicy.Target.PLAY_PAUSE) {
             exoPlayPause.requestFocus();
+        } else if (isTvBox && playerView.isControllerFullyVisible()
+                && loadingProgressBar != null && loadingProgressBar.isShown()) {
+            parkFocusOnLoadingRing();
         }
     }
 
@@ -2681,7 +3849,7 @@ public class PlayerActivity extends Activity {
                 if (lampaPlaylist != null && lampaPlaylist.hasNext()) {
                     skipUndoPlaylistIndex = lampaPlaylist.getCurrentIndex();
                     skipPlaylistAdvance = true;
-                    playRelativeEpisode(1);
+                    playRelativeEpisode(1, true);
                 }
                 break;
             case RESTORE_POSITION:
@@ -2706,10 +3874,14 @@ public class PlayerActivity extends Activity {
     }
 
     private void playRelativeEpisode(int offset) {
+        playRelativeEpisode(offset, false);
+    }
+
+    private void playRelativeEpisode(int offset, boolean automatic) {
         if (lampaPlaylist == null) return;
         int target = lampaPlaylist.getCurrentIndex() + offset;
         if (target >= 0 && target < lampaPlaylist.size()) {
-            playPlaylistIndex(target, offset > 0);
+            playPlaylistIndex(target, automatic);
         }
     }
 
@@ -3387,6 +4559,7 @@ public class PlayerActivity extends Activity {
                 skipPlaylistAdvance = false;
                 switchingPlaylistItem = false;
                 initializePlayer();
+                syncRoomPlaylistStep(outgoingEnded);
                 lampaPlaylist.preResolveNext();
             }
 
@@ -3472,6 +4645,7 @@ public class PlayerActivity extends Activity {
                 }
 
                 mPrefs.setPersistent(true);
+                resetSubtitleSessionForMediaChange();
                 mPrefs.updateMedia(this, uri, data.getType());
 
                 if (requestCode == REQUEST_CHOOSER_VIDEO) {
@@ -3505,6 +4679,8 @@ public class PlayerActivity extends Activity {
                 }
             }
         } else if (requestCode == REQUEST_SETTINGS) {
+            cancelSubtitleSearch();
+            subtitleSearchSuppressed = null;
             mPrefs.loadUserPreferences();
             systemVolume = mPrefs.systemVolume;
             playerVolume = mPrefs.playerVolume;
@@ -3516,9 +4692,12 @@ public class PlayerActivity extends Activity {
             }
             Utils.applyPlayerVolume();
             Utils.applyBoost();
+            applyPreferredTextLanguages();
             updateSubtitleStyle(this);
             updateLampaSegmentMarkers();
             updateLampaSkipUi();
+            updateStatsPanel();
+            if (player != null) maybeSearchSubtitlesOnline(player.getCurrentTracks());
             if (mPrefs.skipEnabled && mPrefs.skipFetchOnline && player != null
                     && lampaPlaylist != null && player.getDuration() > 0) {
                 LampaPlaylist.Item item = lampaPlaylist.getCurrent();
@@ -3544,7 +4723,580 @@ public class PlayerActivity extends Activity {
         // Convert subtitles to UTF-8 if necessary
         SubtitleUtils.clearCache(this);
         uri = Utils.convertToUTF(this, uri);
+        suppressAutomaticSubtitleSearch();
+        clearSubtitleTimeline();
         mPrefs.updateSubtitle(uri);
+    }
+
+    /** Paints a new external subtitle without re-opening the current video or torrent stream. */
+    boolean addSubtitleTrack(Uri subtitleUri) {
+        if (player == null || subtitleUri == null) return false;
+        MediaItem current = player.getCurrentMediaItem();
+        if (current == null || subtitleUri.equals(paintedSubtitleUri)
+                || containsSubtitle(current, subtitleUri)) {
+            return false;
+        }
+        paintSubtitle(subtitleUri);
+        return true;
+    }
+
+    /** Adapted from Just+ Player PR #130 by Oleksandr Zhyzhchenko (Unlicense). */
+    private void paintSubtitle(Uri subtitleUri) {
+        paintedSubtitleUri = subtitleUri;
+        subtitleTimelineUri = subtitleUri;
+        subtitleTimeline = null;
+        if (subtitleOffset != null) subtitleOffset.setTimeline(null);
+        updateSubtitleButton();
+
+        String mimeType = SubtitleUtils.getSubtitleMime(subtitleUri);
+        Thread worker = new Thread(() -> {
+            SubtitleTimeline loaded = SubtitleTimeline.load(this, subtitleUri, mimeType);
+            runOnUiThread(() -> {
+                if (!subtitleUri.equals(paintedSubtitleUri)) return;
+                if (loaded == null) {
+                    paintedSubtitleUri = null;
+                    subtitleTimelineUri = null;
+                    attachSubtitleTrack(subtitleUri);
+                    return;
+                }
+                subtitleTimeline = loaded;
+                if (subtitleOffset != null) subtitleOffset.setTimeline(loaded);
+                updateSubtitleButton();
+            });
+        }, "SubtitleTimeline");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /** Parser fallback: attach as a real track, preserving the current item and position. */
+    private void attachSubtitleTrack(Uri subtitleUri) {
+        if (player == null) return;
+        int index = player.getCurrentMediaItemIndex();
+        int count = player.getMediaItemCount();
+        if (index < 0 || index >= count) return;
+        MediaItem current = player.getMediaItemAt(index);
+        if (containsSubtitle(current, subtitleUri)) return;
+        MediaItem updated = withSubtitle(current,
+                SubtitleUtils.buildSubtitle(this, subtitleUri, null, true));
+        long position = player.getCurrentPosition();
+        List<MediaItem> items = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            items.add(i == index ? updated : player.getMediaItemAt(i));
+        }
+        player.setMediaItems(items, index, position);
+        player.prepare();
+    }
+
+    private void updateSubtitleButton() {
+        if (exoSubtitle == null) return;
+        boolean hasSubtitles = subtitleWithoutTrack() != null;
+        boolean selected = paintedSubtitleUri != null;
+        if (player != null) {
+            for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+                if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+                for (int index = 0; index < group.length; index++) {
+                    if (!isPhantomClosedCaption(group.getTrackFormat(index))) {
+                        hasSubtitles = true;
+                        if (group.isTrackSelected(index)) selected = true;
+                    }
+                }
+            }
+        }
+        exoSubtitle.setVisibility(hasSubtitles ? View.VISIBLE : View.GONE);
+        Utils.setButtonEnabled(this, exoSubtitle, hasSubtitles);
+        exoSubtitle.setSelected(selected);
+    }
+
+    private void showSubtitleDialog() {
+        if (player == null) return;
+        boolean textEnabled = player.getCurrentTracks().isTypeSelected(C.TRACK_TYPE_TEXT);
+        boolean painting = paintedSubtitleUri != null;
+        Uri fileOnly = subtitleWithoutTrack();
+        List<String> labels = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        int checked = !textEnabled && !painting ? 0 : -1;
+
+        labels.add(getString(R.string.pref_subtitle_none));
+        actions.add(this::disableSubtitles);
+        if (fileOnly != null) {
+            if (painting) checked = labels.size();
+            labels.add(subtitleFileLabel(fileOnly));
+            actions.add(() -> {
+                suppressAutomaticSubtitleSearch();
+                addSubtitleTrack(fileOnly);
+            });
+        }
+
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            TrackGroup trackGroup = group.getMediaTrackGroup();
+            for (int index = 0; index < group.length; index++) {
+                Format format = group.getTrackFormat(index);
+                if (!group.isTrackSupported(index) || isPhantomClosedCaption(format)) continue;
+                if (!painting && group.isTrackSelected(index)) checked = labels.size();
+                String label = trackNameProvider == null
+                        ? format.label : trackNameProvider.getTrackName(format);
+                if (label == null || label.trim().isEmpty()) {
+                    label = displaySubtitleLanguage(format.language);
+                }
+                final int selectedIndex = index;
+                labels.add(label == null || label.trim().isEmpty()
+                        ? getString(R.string.pref_subtitle_header) : label);
+                actions.add(() -> applySubtitle(trackGroup, selectedIndex));
+            }
+        }
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.pref_subtitle_header)
+                .setSingleChoiceItems(labels.toArray(new String[0]), checked, (selected, which) -> {
+                    actions.get(which).run();
+                    selected.dismiss();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+        dialog.show();
+    }
+
+    private void clearSubtitleTimeline() {
+        paintedSubtitleUri = null;
+        subtitleTimeline = null;
+        subtitleTimelineUri = null;
+        if (subtitleOffset != null) subtitleOffset.setTimeline(null);
+    }
+
+    private void resetSubtitleSessionForMediaChange() {
+        subtitleOffsetSec = 0;
+        subtitleSearchSuppressed = null;
+        clearSubtitleTimeline();
+        if (subtitleOffsetDialog != null) {
+            subtitleOffsetDialog.dismiss();
+            subtitleOffsetDialog = null;
+        }
+    }
+
+    private void clearPaintedSubtitle() {
+        if (paintedSubtitleUri == null) return;
+        clearSubtitleTimeline();
+        updateSubtitleButton();
+    }
+
+    private void updateSubtitleTimeline(Tracks tracks) {
+        MediaItem.SubtitleConfiguration selected = selectedSideloadedSubtitle(tracks);
+        if (selected == null) {
+            if (paintedSubtitleUri == null) clearSubtitleTimeline();
+            return;
+        }
+        if (selected.uri.equals(subtitleTimelineUri)) {
+            if (subtitleOffset != null && subtitleTimeline != null) {
+                subtitleOffset.setTimeline(subtitleTimeline);
+            }
+            return;
+        }
+        subtitleTimelineUri = selected.uri;
+        subtitleTimeline = null;
+        if (subtitleOffset != null) subtitleOffset.setTimeline(null);
+        Uri uri = selected.uri;
+        String mimeType = selected.mimeType == null
+                ? SubtitleUtils.getSubtitleMime(uri) : selected.mimeType;
+        Thread worker = new Thread(() -> {
+            SubtitleTimeline loaded = SubtitleTimeline.load(this, uri, mimeType);
+            runOnUiThread(() -> {
+                if (!uri.equals(subtitleTimelineUri)) return;
+                subtitleTimeline = loaded;
+                if (subtitleOffset != null) subtitleOffset.setTimeline(loaded);
+            });
+        }, "SubtitleTimeline");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private MediaItem.SubtitleConfiguration selectedSideloadedSubtitle(Tracks tracks) {
+        if (player == null) return null;
+        MediaItem item = player.getCurrentMediaItem();
+        if (item == null || item.localConfiguration == null) return null;
+        List<MediaItem.SubtitleConfiguration> configurations =
+                item.localConfiguration.subtitleConfigurations;
+        for (Tracks.Group group : tracks.getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            for (int index = 0; index < group.length; index++) {
+                if (!group.isTrackSelected(index)) continue;
+                String formatId = group.getTrackFormat(index).id;
+                for (MediaItem.SubtitleConfiguration configuration : configurations) {
+                    if (carriesUri(formatId, configuration.uri)) return configuration;
+                }
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static boolean carriesUri(String formatId, Uri uri) {
+        if (formatId == null || uri == null) return false;
+        String text = uri.toString();
+        return formatId.equals(text) || formatId.endsWith(":" + text);
+    }
+
+    private Uri subtitleWithoutTrack() {
+        Uri uri = mPrefs == null ? null : mPrefs.subtitleUri;
+        if (uri == null || player == null || !Utils.fileExists(this, uri)) return null;
+        MediaItem item = player.getCurrentMediaItem();
+        if (item != null && containsSubtitle(item, uri)) return null;
+        return uri;
+    }
+
+    private String subtitleFileLabel(Uri uri) {
+        String language = SubtitleUtils.getSubtitleLanguage(uri);
+        if (language != null) {
+            String display = displaySubtitleLanguage(Util.normalizeLanguageCode(language));
+            if (display != null && !display.trim().isEmpty()) return display;
+        }
+        return Utils.getFileName(this, uri);
+    }
+
+    private void disableSubtitles() {
+        if (player == null) return;
+        suppressAutomaticSubtitleSearch();
+        clearPaintedSubtitle();
+        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                .build());
+    }
+
+    private void applySubtitle(TrackGroup group, int index) {
+        if (player == null || group == null) return;
+        suppressAutomaticSubtitleSearch();
+        clearPaintedSubtitle();
+        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                .setOverrideForType(new TrackSelectionOverride(
+                        group, Collections.singletonList(index)))
+                .build());
+    }
+
+    private void suppressAutomaticSubtitleSearch() {
+        cancelSubtitleSearch();
+        MediaId id = currentMediaId();
+        subtitleSearchSuppressed = id.isEmpty() ? null : id.key();
+    }
+
+    private MediaItem.SubtitleConfiguration rememberedSubtitle() {
+        if (mPrefs.subtitleUri == null || !Utils.fileExists(this, mPrefs.subtitleUri)) {
+            return null;
+        }
+        return SubtitleUtils.buildSubtitle(this, mPrefs.subtitleUri, null, true);
+    }
+
+    private static MediaItem withSubtitle(MediaItem item,
+                                           MediaItem.SubtitleConfiguration subtitle) {
+        List<MediaItem.SubtitleConfiguration> subtitles = new ArrayList<>();
+        if (item.localConfiguration != null) {
+            subtitles.addAll(item.localConfiguration.subtitleConfigurations);
+        }
+        if (!containsSubtitle(subtitles, subtitle.uri)) subtitles.add(subtitle);
+        return item.buildUpon().setSubtitleConfigurations(subtitles).build();
+    }
+
+    private static boolean containsSubtitle(MediaItem item, Uri uri) {
+        return item.localConfiguration != null
+                && containsSubtitle(item.localConfiguration.subtitleConfigurations, uri);
+    }
+
+    private static boolean containsSubtitle(
+            List<MediaItem.SubtitleConfiguration> subtitles, Uri uri) {
+        for (MediaItem.SubtitleConfiguration subtitle : subtitles) {
+            if (subtitle.uri.equals(uri)) return true;
+        }
+        return false;
+    }
+
+    private void cancelSubtitleSearch() {
+        subtitleSearchGeneration++;
+        subtitleSearchStarted = null;
+        if (subtitleSearchThread != null) {
+            subtitleSearchThread.interrupt();
+            subtitleSearchThread = null;
+        }
+    }
+
+    private void maybeSearchSubtitlesOnline(Tracks tracks) {
+        if (player == null || !mPrefs.subtitleSearch || tracks.getGroups().isEmpty()
+                || player.getPlaybackState() == Player.STATE_IDLE) {
+            return;
+        }
+        List<String> preferred = AudioLanguagePriority.parse(mPrefs.languageSubtitle);
+        if (preferred.isEmpty()) return;
+
+        Set<String> present = new HashSet<>();
+        for (Tracks.Group group : tracks.getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            for (int index = 0; index < group.length; index++) {
+                Format format = group.getTrackFormat(index);
+                if (isPhantomClosedCaption(format)) continue;
+                String language = AudioLanguagePriority.normalize(format.language);
+                if (language != null) present.add(language);
+            }
+        }
+        List<String> wanted = SubtitleLanguagePolicy.missing(
+                preferred, present, mPrefs.subtitleSearchStrict);
+        if (wanted.isEmpty()) return;
+
+        MediaId id = currentMediaId();
+        String sources = enabledSubtitleSources();
+        if (id.isEmpty() || sources.isEmpty() || id.key().equals(subtitleSearchSuppressed)) return;
+        boolean translateUkrainian = wanted.contains(UkrainianSubtitlePolicy.SEARCH_LANGUAGE)
+                && UkrainianSubtitlePolicy.enabled(
+                mPrefs.subtitleAutoTranslateUkrainian, preferred);
+        List<String> direct = translateUkrainian
+                ? UkrainianSubtitlePolicy.directLanguages(preferred) : wanted;
+        List<String> fallback = translateUkrainian
+                ? UkrainianSubtitlePolicy.fallbackLanguages(preferred)
+                : Collections.emptyList();
+        String mode = translateUkrainian ? "auto-ukr|" + fallback : "direct";
+        String key = id.key() + "|" + direct + "|" + sources + "|" + mode;
+        if (key.equals(subtitleSearchStarted)) return;
+        Long missedAt = subtitleSearchMisses.get(key);
+        if (missedAt != null && System.currentTimeMillis() - missedAt < SUBTITLE_MISS_TTL_MS) {
+            return;
+        }
+
+        String cachePrefix = "subs." + id.key().replaceAll("[^A-Za-z0-9]", "-");
+        for (String language : direct) {
+            File cached = new File(getCacheDir(), cachePrefix + "." + language + ".srt");
+            if (cached.isFile() && cached.length() > 0) {
+                cached.setLastModified(System.currentTimeMillis());
+                cancelSubtitleSearch();
+                subtitleSearchStarted = key;
+                attachSearchedSubtitle(subtitleSearchGeneration, id,
+                        Uri.fromFile(cached), language);
+                return;
+            }
+        }
+
+        cancelSubtitleSearch();
+        subtitleSearchStarted = key;
+        int generation = subtitleSearchGeneration;
+        Thread worker = new Thread(() -> {
+            try {
+                if (translateUkrainian) {
+                    searchAndTranslateUkrainian(generation, id, key, cachePrefix,
+                            preferred, fallback);
+                } else {
+                    searchOriginalSubtitles(generation, id, key, cachePrefix, direct);
+                }
+            } catch (Throwable error) {
+                Utils.log("subtitles: search failed " + error.getClass().getSimpleName());
+            }
+        }, "SubtitleSearch");
+        worker.setDaemon(true);
+        subtitleSearchThread = worker;
+        worker.start();
+    }
+
+    private void searchOriginalSubtitles(int generation, MediaId id, String key,
+                                         String cachePrefix, List<String> wanted) {
+        AtomicBoolean answered = new AtomicBoolean();
+        SubtitleSearch.Result found = SubtitleSearch.find(id, wanted, mPrefs, result -> {
+            if (generation != subtitleSearchGeneration
+                    || Thread.currentThread().isInterrupted()) return false;
+            Uri file = downloadSubtitle(result,
+                    cachePrefix + "." + result.language + ".srt");
+            if (file == null) return false;
+            runOnUiThread(() -> attachSearchedSubtitle(
+                    generation, id, file, result.language));
+            return true;
+        }, answered);
+        if (found == null && answered.get() && !Thread.currentThread().isInterrupted()
+                && generation == subtitleSearchGeneration) {
+            subtitleSearchMisses.put(key, System.currentTimeMillis());
+        }
+    }
+
+    private void searchAndTranslateUkrainian(int generation, MediaId id, String key,
+                                             String cachePrefix, List<String> preferred,
+                                             List<String> fallback) {
+        for (String source : fallback) {
+            String translatedName = UkrainianSubtitlePolicy.translatedCacheName(
+                    cachePrefix, source);
+            if (translatedName == null) continue;
+            File cached = new File(getCacheDir(), translatedName);
+            if (UkrainianSubtitleTranslator.isUsableCache(cached)) {
+                cached.setLastModified(System.currentTimeMillis());
+                runOnUiThread(() -> attachTranslatedSubtitle(
+                        generation, id, Uri.fromFile(cached)));
+                return;
+            }
+            if (cached.exists()) cached.delete();
+        }
+
+        AtomicBoolean directAnswered = new AtomicBoolean();
+        SubtitleSearch.Result direct = SubtitleSearch.find(id,
+                UkrainianSubtitlePolicy.directLanguages(preferred), mPrefs, result -> {
+                    if (generation != subtitleSearchGeneration
+                            || Thread.currentThread().isInterrupted()) return false;
+                    Uri file = downloadSubtitle(result,
+                            cachePrefix + "." + UkrainianSubtitlePolicy.SEARCH_LANGUAGE + ".srt");
+                    if (file == null) return false;
+                    runOnUiThread(() -> attachSearchedSubtitle(generation, id, file,
+                            UkrainianSubtitlePolicy.SEARCH_LANGUAGE));
+                    return true;
+                }, directAnswered);
+        if (direct != null || generation != subtitleSearchGeneration
+                || Thread.currentThread().isInterrupted()) {
+            return;
+        }
+        if (!directAnswered.get()) {
+            runOnUiThread(() -> {
+                if (generation == subtitleSearchGeneration
+                        && key.equals(subtitleSearchStarted)) {
+                    subtitleSearchStarted = null;
+                }
+            });
+            return;
+        }
+
+        AtomicBoolean foreignAnswered = new AtomicBoolean();
+        AtomicBoolean translationAttempted = new AtomicBoolean();
+        AtomicBoolean progressShown = new AtomicBoolean();
+        SubtitleSearch.Result translated = SubtitleSearch.find(id, fallback, mPrefs, result -> {
+            if (generation != subtitleSearchGeneration
+                    || Thread.currentThread().isInterrupted()) return false;
+            String source = UkrainianSubtitlePolicy.normalizeIso3(result.language);
+            String translatedName = UkrainianSubtitlePolicy.translatedCacheName(
+                    cachePrefix, source);
+            if (translatedName == null) return false;
+            Uri downloaded = downloadSubtitle(result,
+                    cachePrefix + ".source." + source + ".srt");
+            File sourceFile = localSubtitleFile(downloaded);
+            if (sourceFile == null) return false;
+            translationAttempted.set(true);
+            if (progressShown.compareAndSet(false, true)) {
+                showSubtitleTranslationNotice(
+                        generation, id, R.string.subtitle_translate_progress);
+            }
+            File target = new File(getCacheDir(), translatedName);
+            if (!UkrainianSubtitleTranslator.translate(sourceFile, target, source,
+                    new GoogleSubtitleTranslationTransport())) {
+                return false;
+            }
+            if (generation != subtitleSearchGeneration
+                    || Thread.currentThread().isInterrupted()) return false;
+            runOnUiThread(() -> attachTranslatedSubtitle(
+                    generation, id, Uri.fromFile(target)));
+            return true;
+        }, foreignAnswered);
+
+        if (translated != null || generation != subtitleSearchGeneration
+                || Thread.currentThread().isInterrupted()) {
+            return;
+        }
+        if (translationAttempted.get()) {
+            showSubtitleTranslationNotice(
+                    generation, id, R.string.subtitle_translate_failed);
+        } else if (foreignAnswered.get()) {
+            subtitleSearchMisses.put(key, System.currentTimeMillis());
+        }
+    }
+
+    private Uri downloadSubtitle(SubtitleSearch.Result result, String cacheName) {
+        List<Uri> urls = new ArrayList<>(result.urls.size());
+        for (String url : result.urls) urls.add(Uri.parse(url));
+        return new SubtitleFetcher(this, urls, cacheName).fetchNow();
+    }
+
+    private static File localSubtitleFile(Uri uri) {
+        return uri != null && ContentResolver.SCHEME_FILE.equals(uri.getScheme())
+                && uri.getPath() != null ? new File(uri.getPath()) : null;
+    }
+
+    private void showSubtitleTranslationNotice(int generation, MediaId id, int message) {
+        runOnUiThread(() -> {
+            if (generation == subtitleSearchGeneration && player != null
+                    && currentMediaId().sameAs(id)) {
+                Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void attachSearchedSubtitle(int generation, MediaId id, Uri file, String language) {
+        if (generation != subtitleSearchGeneration || player == null
+                || !currentMediaId().sameAs(id)) {
+            return;
+        }
+        mPrefs.updateSubtitle(file);
+        if (addSubtitleTrack(file)) {
+            Toast.makeText(this, getString(R.string.subtitle_search_found,
+                    displaySubtitleLanguage(language)), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void attachTranslatedSubtitle(int generation, MediaId id, Uri file) {
+        if (generation != subtitleSearchGeneration || player == null
+                || !mPrefs.subtitleSearch || !mPrefs.subtitleAutoTranslateUkrainian
+                || !currentMediaId().sameAs(id)) {
+            return;
+        }
+        mPrefs.updateSubtitle(file);
+        if (addSubtitleTrack(file)) {
+            Toast.makeText(this, R.string.subtitle_translate_success,
+                    Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private String enabledSubtitleSources() {
+        return (mPrefs.subtitleSourceRest ? "1" : "")
+                + (mPrefs.subtitleSourceStremio ? "2" : "")
+                + (mPrefs.subtitleSourceShegu ? "3" : "")
+                + (mPrefs.subtitleSourceOpenSubtitles ? "4" : "");
+    }
+
+    private static String displaySubtitleLanguage(String language) {
+        List<String> codes = OpenSubtitles.toIso639_1(Collections.singletonList(language));
+        if (codes.isEmpty()) return language;
+        return Locale.forLanguageTag(codes.get(0)).getDisplayLanguage();
+    }
+
+    private MediaId currentMediaId() {
+        LampaPlaylist.Item item = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
+        if (item != null) {
+            return new MediaId(item.imdbId,
+                    item.tmdbId > 0 ? String.valueOf(item.tmdbId) : null,
+                    item.season, item.episode);
+        }
+        Bundle extras = getIntent() == null ? null : getIntent().getExtras();
+        return new MediaId(firstExtra(extras, "lampaua.imdb_id", "imdb_id"),
+                firstExtra(extras, "lampaua.tmdb_id", "tmdb_id"),
+                positiveExtra(extras, "lampaua.season", "season"),
+                positiveExtra(extras, "lampaua.episode", "episode"));
+    }
+
+    private static String firstExtra(Bundle extras, String... keys) {
+        if (extras == null) return null;
+        for (String key : keys) {
+            Object value = extras.get(key);
+            if (value != null && !String.valueOf(value).trim().isEmpty()) {
+                return String.valueOf(value).trim();
+            }
+        }
+        return null;
+    }
+
+    private static int positiveExtra(Bundle extras, String... keys) {
+        String value = firstExtra(extras, keys);
+        if (value == null) return -1;
+        try {
+            int parsed = Integer.parseInt(value);
+            return parsed > 0 ? parsed : -1;
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
+    }
+
+    private static boolean isPhantomClosedCaption(Format format) {
+        return MimeTypes.APPLICATION_CEA608.equals(format.sampleMimeType)
+                && format.accessibilityChannel == Format.NO_VALUE;
     }
 
     private static final class TrackingAudioSink extends ForwardingAudioSink {
@@ -3582,7 +5334,18 @@ public class PlayerActivity extends Activity {
         }
     }
 
+    private void applyPreferredTextLanguages() {
+        if (trackSelector == null) return;
+        List<String> languages = AudioLanguagePriority.parse(mPrefs.languageSubtitle);
+        trackSelector.setParameters(trackSelector.buildUponParameters()
+                // Subtitles only start automatically when they match the user's ordered list.
+                .setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                .setPreferredTextLanguages(languages.toArray(new String[0])));
+    }
+
     public void initializePlayer() {
+        cancelFrameRateSwitchWait();
+        play = false;
         boolean isNetworkUri = Utils.isSupportedNetworkUri(mPrefs.mediaUri);
         haveMedia = mPrefs.mediaUri != null;
         av1DroppedFrames = 0;
@@ -3593,7 +5356,6 @@ public class PlayerActivity extends Activity {
         transferSampleAt = SystemClock.elapsedRealtime();
         videoDecoderName = null;
         audioDecoderName = null;
-        containerTracks.clear();
         resolvedTrackNames.clear();
         if (trackNameProvider != null) trackNameProvider.setTrackNames(resolvedTrackNames);
 
@@ -3633,20 +5395,12 @@ public class PlayerActivity extends Activity {
             trackSelector.setParameters(trackSelector.buildUponParameters()
                     .setPreferredAudioLanguages(preferredAudioLanguages.toArray(new String[0])));
         }
-        final CaptioningManager captioningManager = (CaptioningManager) getSystemService(Context.CAPTIONING_SERVICE);
-        if (!captioningManager.isEnabled()) {
-            trackSelector.setParameters(trackSelector.buildUponParameters()
-                    .setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-            );
-        }
-        Locale locale = captioningManager.getLocale();
-        if (locale != null) {
-            trackSelector.setParameters(trackSelector.buildUponParameters()
-                    .setPreferredTextLanguage(locale.getISO3Language())
-            );
-        }
+        applyPreferredTextLanguages();
+        // Keep the same parser factory when Dv7Converter replaces MatroskaExtractor.
+        final SubtitleParser.Factory subtitleParserFactory = new DefaultSubtitleParserFactory();
         // https://github.com/google/ExoPlayer/issues/8571
         DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory()
+                .setSubtitleParserFactory(subtitleParserFactory)
                 .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS)
                 .setTsExtractorTimestampSearchBytes(1500 * TsExtractor.TS_PACKET_SIZE);
         int decoderPriority = mPrefs.decoderPriority;
@@ -3674,6 +5428,31 @@ public class PlayerActivity extends Activity {
                         sink, audioRecoveryState.blockedPassthroughMimeTypes());
                 return audioSink;
             }
+
+            @Override
+            protected void buildTextRenderers(Context context, TextOutput output,
+                                              Looper outputLooper, int extensionRendererMode,
+                                              ArrayList<Renderer> out) {
+                SubtitleOffset offset = new SubtitleOffset(output, outputLooper,
+                        new SubtitleOffset.Position() {
+                            @Override public long currentMs() {
+                                return player == null ? C.TIME_UNSET : player.getCurrentPosition();
+                            }
+
+                            @Override public boolean playing() {
+                                return player != null && player.isPlaying();
+                            }
+                        });
+                offset.setOffsetSec(subtitleOffsetSec);
+                offset.setTimeline(subtitleTimeline);
+                subtitleOffset = offset;
+                int first = out.size();
+                super.buildTextRenderers(context, offset, outputLooper,
+                        extensionRendererMode, out);
+                for (int index = first; index < out.size(); index++) {
+                    out.set(index, offset.wrap(out.get(index)));
+                }
+            }
         };
         @SuppressLint("WrongConstant") DefaultRenderersFactory renderersFactory = baseRenderersFactory
                 .setExtensionRendererMode(decoderPriority)
@@ -3687,9 +5466,17 @@ public class PlayerActivity extends Activity {
                             secure, tunneling));
         }
 
+        final boolean convertDv7 = !mPrefs.mapDV7ToHevc && !forceHevcForDolbyVision;
+        dv7Converter = convertDv7
+                ? new Dv7Converter(extractorsFactory, subtitleParserFactory)
+                : null;
+        final androidx.media3.extractor.ExtractorsFactory activeExtractorsFactory =
+                convertDv7 ? dv7Converter : extractorsFactory;
+
         ExoPlayer.Builder playerBuilder = new ExoPlayer.Builder(this, renderersFactory)
                 .setTrackSelector(trackSelector)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(this, extractorsFactory));
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(
+                        this, activeExtractorsFactory));
 
         if (optimize4k) {
             playerBuilder.setLoadControl(new DefaultLoadControl.Builder()
@@ -3715,7 +5502,7 @@ public class PlayerActivity extends Activity {
                 DataSource.Factory metadataDataSource = new TrackNameParsingDataSource.Factory(
                         inspectedDataSource, trackNameListener);
                 playerBuilder.setMediaSourceFactory(new DefaultMediaSourceFactory(
-                        metadataDataSource, extractorsFactory));
+                        metadataDataSource, activeExtractorsFactory));
             }
         }
 
@@ -3761,6 +5548,7 @@ public class PlayerActivity extends Activity {
         playerView.setControllerShowTimeoutMs(-1);
 
         locked = false;
+        hideSwipeToUnlock();
 
         if (haveMedia) {
             if (isNetworkUri) {
@@ -3797,11 +5585,14 @@ public class PlayerActivity extends Activity {
                         .build();
                 mediaItemBuilder.setMediaMetadata(mediaMetadata);
             }
-            if (apiAccess && apiSubs.size() > 0) {
-                mediaItemBuilder.setSubtitleConfigurations(apiSubs);
-            } else if (mPrefs.subtitleUri != null && Utils.fileExists(this, mPrefs.subtitleUri)) {
-                MediaItem.SubtitleConfiguration subtitle = SubtitleUtils.buildSubtitle(this, mPrefs.subtitleUri, null, true);
-                mediaItemBuilder.setSubtitleConfigurations(Collections.singletonList(subtitle));
+            List<MediaItem.SubtitleConfiguration> startingSubtitles = new ArrayList<>();
+            if (apiAccess) startingSubtitles.addAll(apiSubs);
+            MediaItem.SubtitleConfiguration remembered = rememberedSubtitle();
+            if (remembered != null && !containsSubtitle(startingSubtitles, remembered.uri)) {
+                startingSubtitles.add(remembered);
+            }
+            if (!startingSubtitles.isEmpty()) {
+                mediaItemBuilder.setSubtitleConfigurations(startingSubtitles);
             }
             player.setMediaItem(mediaItemBuilder.build(), mPrefs.getPosition());
 
@@ -3884,10 +5675,12 @@ public class PlayerActivity extends Activity {
                     }
                 }
                 mPrefs.updateMeta(getSelectedTrack(C.TRACK_TYPE_AUDIO),
-                        getSelectedTrack(C.TRACK_TYPE_TEXT),
+                        paintedSubtitleUri != null ? null : getSelectedTrack(C.TRACK_TYPE_TEXT),
                         playerView.getResizeMode(),
                         playerView.getVideoSurfaceView().getScaleX(),
-                        player.getPlaybackParameters().speed);
+                        together != null && together.isActive()
+                                ? together.userSpeed()
+                                : player.getPlaybackParameters().speed);
             }
         }
     }
@@ -3897,7 +5690,11 @@ public class PlayerActivity extends Activity {
     }
 
     public void releasePlayer(boolean save) {
+        cancelFrameRateSwitchWait();
+        cancelSubtitleSearch();
+        play = false;
         cancelPlaybackWatchdogs();
+        hideSwipeToUnlock();
         if (playerView != null) {
             playerView.removeCallbacks(audioRestartRunnable);
         }
@@ -3906,6 +5703,9 @@ public class PlayerActivity extends Activity {
         if (save) {
             savePlayer();
         }
+        // A rebuild restores the remembered file as a real Media3 track. Keep the parsed
+        // timeline so the new renderer can reuse it without another file read.
+        paintedSubtitleUri = null;
 
         if (player != null) {
             notifyAudioSessionUpdate(false);
@@ -3925,6 +5725,7 @@ public class PlayerActivity extends Activity {
             audioSink = null;
             boostProcessor = null;
         }
+        subtitleOffset = null;
         titleView.setVisibility(View.GONE);
         updateButtons(false);
     }
@@ -4006,8 +5807,14 @@ public class PlayerActivity extends Activity {
         }
 
         @Override
+        public void onRenderedFirstFrame() {
+            frameRendered = true;
+        }
+
+        @Override
         public void onPositionDiscontinuity(Player.PositionInfo oldPosition,
                                             Player.PositionInfo newPosition, int reason) {
+            if (subtitleOffset != null) subtitleOffset.clear();
             if (reason == Player.DISCONTINUITY_REASON_SEEK
                     && oldPosition.mediaItemIndex == newPosition.mediaItemIndex) {
                 audioRecoveryState.onSeek();
@@ -4024,6 +5831,7 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onIsPlayingChanged(boolean isPlaying) {
+            if (subtitleOffset != null) subtitleOffset.wake();
             playerView.setKeepScreenOn(isPlaying);
 
             if (Utils.isPiPSupported(PlayerActivity.this)) {
@@ -4050,6 +5858,7 @@ public class PlayerActivity extends Activity {
 
             if (!isPlaying) {
                 PlayerActivity.locked = false;
+                hideSwipeToUnlock();
                 playerView.removeCallbacks(stallWatchdogRunnable);
             } else {
                 audioRecoveryState.onResume();
@@ -4079,7 +5888,7 @@ public class PlayerActivity extends Activity {
             if (state == Player.STATE_READY) {
                 resetResolverResponseState();
                 frameRendered = true;
-                playerView.removeCallbacks(loadTimeoutRunnable);
+                cancelLoadWatchdog();
                 playbackWaitStartedAt = 0L;
                 playbackEverReady = true;
                 stablePlaybackStartedAt = SystemClock.elapsedRealtime();
@@ -4159,32 +5968,23 @@ public class PlayerActivity extends Activity {
 
                                     @Override
                                     public void onDisplayChanged(int displayId) {
-                                        if (play) {
-                                            play = false;
-                                            displayManager.unregisterDisplayListener(this);
-                                            if (player != null) {
-                                                player.play();
-                                            }
-                                            if (playerView != null) {
-                                                playerView.hideController();
-                                            }
-                                        }
+                                        frameRateSettled();
                                     }
                                 };
                             }
                             displayManager.registerDisplayListener(displayListener, null);
                         }
-                        switched = Utils.switchFrameRate(PlayerActivity.this, mPrefs.mediaUri, play);
+                        float rate = videoFrameRate();
+                        switched = rate > 0f
+                                ? Utils.handleFrameRate(PlayerActivity.this, rate)
+                                : Utils.switchFrameRate(PlayerActivity.this, mPrefs.mediaUri);
                     }
-                    if (!switched) {
-                        if (displayManager != null) {
-                            displayManager.unregisterDisplayListener(displayListener);
-                        }
-                        if (play) {
-                            play = false;
-                            player.play();
-                            playerView.hideController();
-                        }
+                    if (switched) {
+                        playerView.removeCallbacks(frameRateGiveUpRunnable);
+                        playerView.postDelayed(frameRateGiveUpRunnable,
+                                FRAME_RATE_SWITCH_TIMEOUT_MS);
+                    } else if (!mPrefs.frameRateMatching) {
+                        frameRateSettled();
                     }
 
                     updateLoading(false);
@@ -4198,10 +5998,11 @@ public class PlayerActivity extends Activity {
                 }
             } else if (state == Player.STATE_BUFFERING) {
                 if (playbackWaitStartedAt == 0L) playbackWaitStartedAt = SystemClock.elapsedRealtime();
-                playerView.removeCallbacks(loadTimeoutRunnable);
-                playerView.postDelayed(loadTimeoutRunnable, VIDEO_LOAD_TIMEOUT_MS);
+                armLoadWatchdog();
             } else if (state == Player.STATE_ENDED) {
                 cancelPlaybackWatchdogs();
+                locked = false;
+                hideSwipeToUnlock();
                 if (sleepTimer.isAtMediaEnd()) {
                     fireSleepTimer();
                     return;
@@ -4231,6 +6032,9 @@ public class PlayerActivity extends Activity {
             }
             resolveTrackNames();
             updateLampaTrackDetails();
+            updateSubtitleTimeline(tracks);
+            if (playerView != null) playerView.post(PlayerActivity.this::updateSubtitleButton);
+            maybeSearchSubtitlesOnline(tracks);
         }
 
         @Override
@@ -4241,7 +6045,7 @@ public class PlayerActivity extends Activity {
             if (error instanceof ExoPlaybackException) {
                 final ExoPlaybackException exoPlaybackException = (ExoPlaybackException) error;
                 if (exoPlaybackException.type == ExoPlaybackException.TYPE_SOURCE) {
-                    if (recoverResolverControlResponse()) return;
+                    if (recoverResolverControlResponse(error)) return;
                     String detectedManifest = consumeDetectedManifestType();
                     if (detectedManifest != null && !detectedManifest.equals(forcedStreamMimeType)) {
                         alternateStreamTypeTried = true;
@@ -4270,11 +6074,14 @@ public class PlayerActivity extends Activity {
                         initializePlayer();
                         return;
                     }
-                    PlaybackRecoveryPolicy.FailureKind kind = Utils.isSupportedNetworkUri(mPrefs.mediaUri)
-                            ? PlaybackRecoveryPolicy.FailureKind.NETWORK_READ
-                            : PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE;
+                    PlaybackRecoveryPolicy.FailureKind kind = classifySourceFailure(error);
+                    if (kind == PlaybackRecoveryPolicy.FailureKind.NETWORK_RESPONSE
+                            || kind == PlaybackRecoveryPolicy.FailureKind.SOURCE_CONFIGURATION) {
+                        showError(exoPlaybackException);
+                        return;
+                    }
                     if (recoverPlayback(kind)) return;
-                    stopPlaybackAfterRecoveryFailure(kind, error.getLocalizedMessage());
+                    stopPlaybackAfterRecoveryFailure(kind, error.getLocalizedMessage(), error);
                     return;
                 }
                 if (error.errorCode == PlaybackException.ERROR_CODE_TIMEOUT) {
@@ -4286,18 +6093,17 @@ public class PlayerActivity extends Activity {
                             ? PlaybackRecoveryPolicy.FailureKind.STALL_MIDSTREAM
                             : PlaybackRecoveryPolicy.FailureKind.STALL_AT_START);
                     if (recoverPlayback(kind)) return;
-                    stopPlaybackAfterRecoveryFailure(kind, error.getLocalizedMessage());
+                    stopPlaybackAfterRecoveryFailure(kind, error.getLocalizedMessage(), error);
                     return;
                 }
                 if (exoPlaybackException.type == ExoPlaybackException.TYPE_RENDERER) {
                     if (recoverPlayback(PlaybackRecoveryPolicy.FailureKind.DECODER)) return;
                 }
-                if (controllerVisible && controllerVisibleFully) {
-                    showError(exoPlaybackException);
-                } else {
-                    errorToShow = exoPlaybackException;
-                }
+                showError(exoPlaybackException);
+                return;
             }
+            showPlaybackReport(getString(R.string.playback_error_report_title),
+                    error.getLocalizedMessage(), error);
         }
     }
 
@@ -4321,7 +6127,7 @@ public class PlayerActivity extends Activity {
         return true;
     }
 
-    private boolean recoverResolverControlResponse() {
+    private boolean recoverResolverControlResponse(Throwable error) {
         if (resolverControlUri == null || player == null) return false;
         MediaItem mediaItem = player.getCurrentMediaItem();
         String currentUri = mediaItem == null || mediaItem.localConfiguration == null
@@ -4330,10 +6136,31 @@ public class PlayerActivity extends Activity {
 
         resolverControlUri = null;
         if (!recoverPlayback(PlaybackRecoveryPolicy.FailureKind.RESOLVER_NOT_READY)) {
-            showSnack(getString(R.string.resolver_not_ready), null);
+            showPlaybackReport(getString(R.string.playback_error_report_title),
+                    getString(R.string.resolver_not_ready), error);
             releasePlayer(false);
         }
         return true;
+    }
+
+    private PlaybackRecoveryPolicy.FailureKind classifySourceFailure(PlaybackException error) {
+        if (!Utils.isSupportedNetworkUri(mPrefs.mediaUri)) {
+            return PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE;
+        }
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof HttpDataSource.InvalidResponseCodeException) {
+                return PlaybackRecoveryPolicy.FailureKind.NETWORK_RESPONSE;
+            }
+        }
+        switch (error.errorCode) {
+            case PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED:
+            case PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED:
+            case PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED:
+            case PlaybackException.ERROR_CODE_IO_NO_PERMISSION:
+                return PlaybackRecoveryPolicy.FailureKind.SOURCE_CONFIGURATION;
+            default:
+                return PlaybackRecoveryPolicy.FailureKind.NETWORK_READ;
+        }
     }
 
     private String consumeDetectedManifestType() {
@@ -4409,32 +6236,77 @@ public class PlayerActivity extends Activity {
 
     private void cancelPlaybackWatchdogs() {
         if (playerView == null) return;
-        playerView.removeCallbacks(loadTimeoutRunnable);
+        cancelLoadWatchdog();
+        playerView.removeCallbacks(sourceRetryRunnable);
         playerView.removeCallbacks(stallWatchdogRunnable);
         playerView.removeCallbacks(stablePlaybackRunnable);
     }
 
+    private void armLoadWatchdog() {
+        cancelLoadWatchdog();
+        loadWatchdogBytes = TrackNameParsingDataSource.bytesRead.get();
+        playerView.postDelayed(loadTimeoutRunnable, VIDEO_LOAD_TIMEOUT_MS);
+    }
+
+    private void cancelLoadWatchdog() {
+        if (playerView != null) playerView.removeCallbacks(loadTimeoutRunnable);
+    }
+
+    private void reportLoadWatchdog() {
+        LoadWatchdogPolicy.SourceKind sourceKind = currentLoadSourceKind();
+        LoadWatchdogPolicy.Action action = LoadWatchdogPolicy.evaluate(
+                player != null && player.getPlaybackState() == Player.STATE_BUFFERING && haveMedia,
+                playbackEverReady, loadWatchdogBytes,
+                TrackNameParsingDataSource.bytesRead.get(), sourceKind);
+        if (action == LoadWatchdogPolicy.Action.IGNORE) return;
+        if (action == LoadWatchdogPolicy.Action.REARM) {
+            armLoadWatchdog();
+            return;
+        }
+
+        int message = sourceKind == LoadWatchdogPolicy.SourceKind.LOCAL
+                ? R.string.error_local_media_corrupt : R.string.error_playback_stalled;
+        cancelLoadWatchdog();
+        showPlaybackReport(getString(R.string.playback_error_report_title),
+                getString(message), null);
+        player.stop();
+        updateLoading(false);
+        if (lampaPlaylist != null) {
+            updateEpisodeControls();
+            updateLampaTopPanel();
+            playerView.showController();
+        }
+    }
+
+    private LoadWatchdogPolicy.SourceKind currentLoadSourceKind() {
+        if (player != null && player.isCurrentMediaItemLive()) {
+            return LoadWatchdogPolicy.SourceKind.LIVE;
+        }
+        return Utils.isSupportedNetworkUri(mPrefs.mediaUri)
+                ? LoadWatchdogPolicy.SourceKind.NETWORK : LoadWatchdogPolicy.SourceKind.LOCAL;
+    }
+
     private boolean recoverPlayback(PlaybackRecoveryPolicy.FailureKind kind) {
         if (player == null || kind == null) return false;
-        long now = SystemClock.elapsedRealtime();
-        int attempts = sourceRecoveryAttempts;
         if (kind == PlaybackRecoveryPolicy.FailureKind.LIVE_STALL) {
-            if (now - lastLiveRecoveryAt >= LIVE_RECOVERY_FORGET_MS) liveRecoveryAttempts = 0;
-            if (liveRecoveryAttempts >= MAX_LIVE_RECOVERIES) return false;
-            attempts = liveRecoveryAttempts;
+            return rejoinLiveWindow();
         }
 
         boolean lowerAvailable = hasLowerQualityCandidate();
         PlaybackRecoveryPolicy.Action action = PlaybackRecoveryPolicy.decide(
-                kind, playbackEverReady, attempts, compatibilityRecoveryAttempts, lowerAvailable);
+                kind, playbackEverReady, sourceRecoveryAttempts,
+                compatibilityRecoveryAttempts, lowerAvailable);
         switch (action) {
+            case REPREPARE_SOURCE:
+                sourceRecoveryAttempts++;
+                updateLoading(true);
+                Utils.showText(playerView, getString(R.string.playback_recovery_retry), 2500);
+                playerView.removeCallbacks(sourceRetryRunnable);
+                playerView.postDelayed(sourceRetryRunnable, Math.min(3_000L,
+                        600L * Math.max(1, sourceRecoveryAttempts)));
+                return true;
             case RETRY_SOURCE:
-                if (kind == PlaybackRecoveryPolicy.FailureKind.LIVE_STALL) {
-                    liveRecoveryAttempts++;
-                    lastLiveRecoveryAt = now;
-                } else {
-                    sourceRecoveryAttempts++;
-                }
+                sourceRecoveryAttempts++;
                 savePlayer();
                 restorePlayState = player.getPlayWhenReady();
                 updateLoading(true);
@@ -4444,8 +6316,7 @@ public class PlayerActivity extends Activity {
                                 : R.string.playback_recovery_retry), 2500);
                 String retryKey = playbackRecoveryKey;
                 long delay = Math.min(3_000L, 600L * Math.max(1,
-                        kind == PlaybackRecoveryPolicy.FailureKind.LIVE_STALL
-                                ? liveRecoveryAttempts : sourceRecoveryAttempts));
+                        sourceRecoveryAttempts));
                 playerView.postDelayed(() -> {
                     if (isFinishing() || isDestroyed() || switchingPlaylistItem
                             || !Objects.equals(retryKey, playbackRecoveryKey)) return;
@@ -4472,6 +6343,27 @@ public class PlayerActivity extends Activity {
         }
     }
 
+    private boolean rejoinLiveWindow() {
+        if (player == null || !player.isCurrentMediaItemLive()) return false;
+        long now = SystemClock.elapsedRealtime();
+        liveRecoveryAttempts = LiveRecoveryPolicy.effectiveAttempts(
+                liveRecoveryAttempts, now, lastLiveRecoveryAt);
+        if (!LiveRecoveryPolicy.canRejoin(liveRecoveryAttempts, now, lastLiveRecoveryAt)) {
+            return false;
+        }
+
+        boolean resume = player.getPlayWhenReady();
+        liveRecoveryAttempts++;
+        lastLiveRecoveryAt = now;
+        updateLoading(true);
+        Utils.showText(playerView, getString(R.string.playback_recovery_retry), 2500);
+        player.seekToDefaultPosition();
+        player.prepare();
+        player.setPlayWhenReady(resume);
+        armLoadWatchdog();
+        return true;
+    }
+
     private int currentVideoHeight() {
         Format format = player == null ? null : player.getVideoFormat();
         return format == null || format.height <= 0 ? Integer.MAX_VALUE : format.height;
@@ -4495,11 +6387,12 @@ public class PlayerActivity extends Activity {
     }
 
     private void stopPlaybackAfterRecoveryFailure(PlaybackRecoveryPolicy.FailureKind kind,
-                                                  String detail) {
+                                                  String detail, Throwable error) {
         cancelPlaybackWatchdogs();
         int message = kind == PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE
                 ? R.string.error_local_media_corrupt : R.string.error_playback_stalled;
-        showSnack(getString(message), detail);
+        showPlaybackReport(getString(R.string.playback_error_report_title),
+                detail == null || detail.trim().isEmpty() ? getString(message) : detail, error);
         releasePlayer(false);
     }
 
@@ -4837,26 +6730,8 @@ public class PlayerActivity extends Activity {
     }
 
     void showError(ExoPlaybackException error) {
-        final String errorGeneral = error.getLocalizedMessage();
-        String errorDetailed;
-
-        switch (error.type) {
-            case ExoPlaybackException.TYPE_SOURCE:
-                errorDetailed = error.getSourceException().getLocalizedMessage();
-                break;
-            case ExoPlaybackException.TYPE_RENDERER:
-                errorDetailed = error.getRendererException().getLocalizedMessage();
-                break;
-            case ExoPlaybackException.TYPE_UNEXPECTED:
-                errorDetailed = error.getUnexpectedException().getLocalizedMessage();
-                break;
-            case ExoPlaybackException.TYPE_REMOTE:
-            default:
-                errorDetailed = errorGeneral;
-                break;
-        }
-
-        showSnack(errorGeneral, errorDetailed);
+        showPlaybackReport(getString(R.string.playback_error_report_title),
+                error == null ? null : error.getLocalizedMessage(), error);
     }
 
     void showSnack(final String textPrimary, final String textSecondary) {
@@ -4911,20 +6786,18 @@ public class PlayerActivity extends Activity {
     }
 
     void updateSubtitleStyle(final Context context) {
-        final CaptioningManager captioningManager = (CaptioningManager) getSystemService(Context.CAPTIONING_SERVICE);
         final SubtitleView subtitleView = playerView.getSubtitleView();
         final boolean isTablet = Utils.isTablet(context);
-        subtitlesScale = SubtitleUtils.normalizeFontScale(captioningManager.getFontScale(), isTvBox || isTablet);
+        subtitlesScale = SubtitleUtils.normalizeFontScale(
+                mPrefs.subtitleScale, isTvBox || isTablet);
         if (subtitleView != null) {
-            final CaptioningManager.CaptionStyle userStyle = captioningManager.getUserStyle();
-            final CaptionStyleCompat userStyleCompat = CaptionStyleCompat.createFromCaptionStyle(userStyle);
             final CaptionStyleCompat captionStyle = new CaptionStyleCompat(
-                    userStyle.hasForegroundColor() ? userStyleCompat.foregroundColor : Color.WHITE,
-                    userStyle.hasBackgroundColor() ? userStyleCompat.backgroundColor : Color.TRANSPARENT,
-                    userStyle.hasWindowColor() ? userStyleCompat.windowColor : Color.TRANSPARENT,
-                    userStyle.hasEdgeType() ? userStyleCompat.edgeType : CaptionStyleCompat.EDGE_TYPE_OUTLINE,
-                    userStyle.hasEdgeColor() ? userStyleCompat.edgeColor : Color.BLACK,
-                    Typeface.create(userStyleCompat.typeface != null ? userStyleCompat.typeface : Typeface.DEFAULT,
+                    mPrefs.subtitleTextColor,
+                    mPrefs.subtitleBackgroundColor,
+                    Color.TRANSPARENT,
+                    mPrefs.subtitleEdgeType,
+                    mPrefs.subtitleTextColor == Color.BLACK ? Color.WHITE : Color.BLACK,
+                    Typeface.create(Typeface.DEFAULT,
                             mPrefs.subtitleStyleBold ? Typeface.BOLD : Typeface.NORMAL));
             subtitleView.setStyle(captionStyle);
             subtitleView.setApplyEmbeddedStyles(mPrefs.subtitleStyleEmbedded);
@@ -5055,21 +6928,55 @@ public class PlayerActivity extends Activity {
 
     private void updateLoading(final boolean enableLoading) {
         if (enableLoading) {
-            exoPlayPause.setVisibility(View.GONE);
+            boolean playPauseHadFocus = exoPlayPause.hasFocus();
+            exoPlayPause.setVisibility(View.INVISIBLE);
             loadingProgressBar.setVisibility(View.VISIBLE);
+            if (isTvBox && (playPauseHadFocus || focusPlay)) parkFocusOnLoadingRing();
             updateTransferRateUi();
         } else {
+            boolean loadingHadFocus = loadingProgressBar.hasFocus();
+            loadingProgressBar.setFocusable(false);
             loadingProgressBar.setVisibility(View.GONE);
             if (loadingRateView != null) loadingRateView.setVisibility(View.GONE);
             exoPlayPause.setVisibility(View.VISIBLE);
-            boolean shouldFocusPlay = focusPlay;
+            boolean shouldFocusPlay = focusPlay || loadingHadFocus;
             focusPlay = false;
-            if (isTvBox) {
-                postPrimaryTvFocus();
-            } else if (shouldFocusPlay) {
+            if (shouldFocusPlay) {
                 exoPlayPause.requestFocus();
+            } else if (isTvBox && getCurrentFocus() == null) {
+                postPrimaryTvFocus();
             }
         }
+    }
+
+    private void parkFocusOnLoadingRing() {
+        loadingProgressBar.setFocusable(true);
+        loadingProgressBar.requestFocus();
+    }
+
+    void frameRateSettled() {
+        cancelFrameRateSwitchWait();
+        playIfCan();
+    }
+
+    private void cancelFrameRateSwitchWait() {
+        if (playerView != null) playerView.removeCallbacks(frameRateGiveUpRunnable);
+        if (displayManager != null && displayListener != null) {
+            try {
+                displayManager.unregisterDisplayListener(displayListener);
+            } catch (IllegalArgumentException ignored) { }
+        }
+        if (frameRateSwitchThread != null) {
+            frameRateSwitchThread.interrupt();
+            frameRateSwitchThread = null;
+        }
+    }
+
+    private void playIfCan() {
+        if (!play) return;
+        play = false;
+        if (player != null) player.play();
+        if (playerView != null) playerView.hideController();
     }
 
     @RequiresApi(api = Build.VERSION_CODES.O)
@@ -5218,6 +7125,7 @@ public class PlayerActivity extends Activity {
     void skipToNext() {
         if (nextUri != null) {
             releasePlayer();
+            resetSubtitleSessionForMediaChange();
             mPrefs.updateMedia(this, nextUri, null);
             searchSubtitles();
             initializePlayer();
@@ -5348,17 +7256,32 @@ public class PlayerActivity extends Activity {
     }
 
     void showSwipeToUnlock() {
-        if (swipeToUnlock != null && locked) swipeToUnlock.setVisibility(View.VISIBLE);
+        if (swipeToUnlock == null || !locked || inPip) return;
+        swipeToUnlock.setVisibility(View.VISIBLE);
+        rescheduleSwipeHide();
+    }
+
+    private void rescheduleSwipeHide() {
+        if (playerView == null) return;
+        playerView.removeCallbacks(swipeHider);
+        playerView.postDelayed(swipeHider, SWIPE_UNLOCK_TIMEOUT_MS);
+    }
+
+    void hideSwipeToUnlock() {
+        if (playerView != null) playerView.removeCallbacks(swipeHider);
+        if (swipeToUnlock != null) swipeToUnlock.setVisibility(View.GONE);
     }
 
     void onLockChanged() {
         if (locked) {
             playerView.hideController();
             showSwipeToUnlock();
-        } else if (swipeToUnlock != null) {
-            swipeToUnlock.setVisibility(View.GONE);
+        } else {
+            hideSwipeToUnlock();
             playerView.showController();
         }
+        updateRoomBadge();
+        updateStatsPanel();
     }
 
     private void updatebuttonAspectRatioIcon() {

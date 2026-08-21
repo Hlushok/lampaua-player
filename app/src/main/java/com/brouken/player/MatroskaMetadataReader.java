@@ -13,7 +13,7 @@ import java.util.List;
  * player's own reads.
  */
 final class MatroskaMetadataReader {
-    private static final long MAX_TEXT_BYTES = 64 * 1024;
+    private static final int MAX_STRING_BYTES = 64 * 1024;
 
     private MatroskaMetadataReader() {}
 
@@ -45,10 +45,8 @@ final class MatroskaMetadataReader {
     }
 
     private static void parseSegment(EbmlReader reader, List<TrackMetadata> tracks) {
-        long bytesRead = 0L;
-        final long limit = 512 * 1024; // cap the search for Tracks inside Segment
         try {
-            while (bytesRead < limit) {
+            while (true) {
                 final long id = reader.readId();
                 final long s = reader.readSize();
                 if (id == 0x1654AE6BL) { // Tracks
@@ -57,7 +55,6 @@ final class MatroskaMetadataReader {
                 } else {
                     reader.skip(s);
                 }
-                bytesRead += s; // rough estimate
             }
         } catch (Exception ignored) {
         }
@@ -70,7 +67,12 @@ final class MatroskaMetadataReader {
                 final long id = reader.readId();
                 final long s = reader.readSize();
                 if (id == 0xAEL) { // TrackEntry
-                    out.add(parseTrackEntry(reader, s));
+                    TrackMetadata entry = parseTrackEntry(reader, s);
+                    if (entry == null) {
+                        out.clear();
+                        return;
+                    }
+                    out.add(entry);
                 } else {
                     reader.skip(s);
                 }
@@ -86,6 +88,7 @@ final class MatroskaMetadataReader {
         String name = null;
         String lang = "und";
         TrackMetadata.Type type = TrackMetadata.Type.UNKNOWN;
+        float frameRate = 0f;
 
         final long startPos = reader.totalBytesRead;
 
@@ -101,6 +104,9 @@ final class MatroskaMetadataReader {
                     name = reader.readString(s);
                 } else if (id == 0x22B59CL) { // Language
                     lang = reader.readString(s);
+                } else if (id == 0x23E383L) { // DefaultDuration, nanoseconds per frame
+                    long durationNs = reader.readUInt(s);
+                    if (durationNs > 0) frameRate = 1_000_000_000f / durationNs;
                 } else if (id == 0x83L) { // TrackType
                     final int mkvType = (int) reader.readUInt(s);
                     switch (mkvType) {
@@ -113,10 +119,10 @@ final class MatroskaMetadataReader {
                     reader.skip(s);
                 }
             } catch (Exception e) {
-                break;
+                return null;
             }
         }
-        return new TrackMetadata(number, name, lang, type);
+        return new TrackMetadata(number, name, lang, type, frameRate);
     }
 
     private static final class EbmlReader {
@@ -153,7 +159,22 @@ final class MatroskaMetadataReader {
         }
 
         long readId() throws IOException {
-            return readVInt();
+            final int first = readByte();
+            if (first == -1) throw new EOFException();
+            int mask = 0x80;
+            int length = 1;
+            while ((first & mask) == 0) {
+                mask >>= 1;
+                length++;
+                if (length > 4) throw new IOException("Invalid EBML id");
+            }
+            long value = first & 0xffL;
+            for (int i = 1; i < length; i++) {
+                final int b = readByte();
+                if (b == -1) throw new EOFException();
+                value = (value << 8) | (b & 0xffL);
+            }
+            return value;
         }
 
         long readSize() throws IOException {
@@ -178,29 +199,28 @@ final class MatroskaMetadataReader {
         }
 
         String readString(long size) throws IOException {
-            if (size < 0) throw new IOException("Negative EBML string size");
-            final int kept = (int) Math.min(size, MAX_TEXT_BYTES);
-            final byte[] bytes = new byte[kept];
+            if (size < 0 || size > MAX_STRING_BYTES) {
+                throw new IOException("Invalid EBML string size");
+            }
+            final byte[] bytes = new byte[(int) size];
             int read = 0;
-            while (read < kept) {
-                final int r = input.read(bytes, read, kept - read);
+            while (read < size) {
+                final int r = input.read(bytes, read, (int) size - read);
                 if (r == -1) break;
                 read += r;
             }
             totalBytesRead += read;
-            if (size > read) skip(size - read);
+            if (read < size) throw new EOFException();
             return trimTrailingNul(new String(bytes, 0, read, StandardCharsets.UTF_8));
         }
 
         long readUInt(long size) throws IOException {
-            if (size < 0 || size > 8) {
-                skip(Math.max(0, size));
-                throw new IOException("Invalid EBML integer size");
-            }
+            if (size < 0 || size > 8) throw new IOException("Invalid EBML integer size");
             long value = 0L;
             for (int i = 0; i < size; i++) {
                 final int b = readByte();
-                if (b != -1) value = (value << 8) | (b & 0xFFL);
+                if (b == -1) throw new EOFException();
+                value = (value << 8) | (b & 0xFFL);
             }
             return value;
         }

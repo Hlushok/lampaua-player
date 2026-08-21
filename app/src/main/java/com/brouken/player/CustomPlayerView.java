@@ -5,6 +5,7 @@ import android.graphics.Color;
 import android.graphics.Rect;
 import android.media.AudioManager;
 import android.os.Build;
+import android.os.SystemClock;
 import android.util.AttributeSet;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
@@ -15,6 +16,8 @@ import android.widget.TextView;
 
 import androidx.core.view.GestureDetectorCompat;
 import androidx.media3.common.C;
+import androidx.media3.common.Player;
+import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.SeekParameters;
 import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.PlayerView;
@@ -49,10 +52,27 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
     private boolean restorePlayState;
     private boolean canScale = true;
     private boolean isHandledLongPress = false;
+    private static final float SPEED_BOOST = 2f;
+    private static final long REWIND_TICK_MS = 100;
     private boolean speedBoostActive;
     private float speedBeforeBoost = 1f;
+    private float boostAnchorX;
+    private float holdSpeed = SPEED_BOOST;
+    private boolean rewinding;
+    private long rewindPosition;
+    private long rewindLastTime;
+    private final Runnable rewindRunnable = this::rewindTick;
+    private boolean seekGestureActive;
     public long keySeekStart = -1;
     public int volumeUpsInRow = 0;
+
+    boolean isSpeedBoosting() {
+        return speedBoostActive;
+    }
+
+    boolean isSeekGesture() {
+        return seekGestureActive;
+    }
 
     private final ScaleGestureDetector mScaleDetector;
     private float mScaleFactor = 1.f;
@@ -128,15 +148,17 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
                 break;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
+                seekGestureActive = false;
                 if (speedBoostActive) {
-                    speedBoostActive = false;
-                    if (PlayerActivity.player != null) {
-                        PlayerActivity.player.setPlaybackSpeed(speedBeforeBoost);
-                    }
-                    setCustomErrorMessage(null);
+                    finishSpeedBoost();
                 }
                 if (handleTouch) {
                     if (gestureOrientation == Orientation.HORIZONTAL) {
+                        ExoPlayer player = PlayerActivity.player;
+                        if (PlayerActivity.haveMedia && player != null) {
+                            player.setSeekParameters(SeekParameters.DEFAULT);
+                            player.seekTo(seekStart + seekChange);
+                        }
                         setCustomErrorMessage(null);
                     } else {
                         postDelayed(textClearRunnable, isHandledLongPress ? MESSAGE_TIMEOUT_LONG : MESSAGE_TIMEOUT_TOUCH);
@@ -157,6 +179,11 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
                     }
                     break;
                 }
+        }
+
+        if (speedBoostActive && ev.getActionMasked() == MotionEvent.ACTION_MOVE) {
+            updateHoldSpeed(ev.getX());
+            return true;
         }
 
         if (handleTouch)
@@ -205,6 +232,21 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
         return false;
     }
 
+    private void seekGesture(final long position) {
+        if (!(getContext() instanceof PlayerActivity)) return;
+        Player player = PlayerActivity.player;
+        PlayerActivity activity = (PlayerActivity) getContext();
+        if (player == null || !activity.frameRendered) return;
+        activity.frameRendered = false;
+        player.seekTo(position);
+    }
+
+    private boolean holdSpeedGestureOff() {
+        if (!(getContext() instanceof PlayerActivity)) return false;
+        Prefs prefs = ((PlayerActivity) getContext()).mPrefs;
+        return prefs != null && !prefs.holdSpeed;
+    }
+
     @Override
     public boolean onScroll(MotionEvent motionEvent, MotionEvent motionEvent1, float distanceX, float distanceY) {
         if (mScaleDetector.isInProgress() || PlayerActivity.player == null || PlayerActivity.locked)
@@ -244,6 +286,7 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
                 }
 
                 gestureOrientation = Orientation.HORIZONTAL;
+                seekGestureActive = true;
                 long position = 0;
                 float distanceDiff = Math.max(0.5f, Math.min(Math.abs(Utils.pxToDp(distanceX) / 4), 10.f));
 
@@ -253,18 +296,18 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
                             PlayerActivity.player.setSeekParameters(SeekParameters.PREVIOUS_SYNC);
                             seekChange -= SEEK_STEP * distanceDiff;
                             position = seekStart + seekChange;
-                            PlayerActivity.player.seekTo(position);
+                            seekGesture(position);
                         }
                     } else {
                         PlayerActivity.player.setSeekParameters(SeekParameters.NEXT_SYNC);
                         if (seekMax == C.TIME_UNSET) {
                             seekChange += SEEK_STEP * distanceDiff;
                             position = seekStart + seekChange;
-                            PlayerActivity.player.seekTo(position);
+                            seekGesture(position);
                         } else if (seekStart + seekChange + SEEK_STEP < seekMax) {
                             seekChange += SEEK_STEP  * distanceDiff;
                             position = seekStart + seekChange;
-                            PlayerActivity.player.seekTo(position);
+                            seekGesture(position);
                         }
                     }
                     String message = Utils.formatMilisSign(seekChange);
@@ -306,14 +349,118 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
     public void onLongPress(MotionEvent motionEvent) {
         if (PlayerActivity.locked || mScaleDetector.isInProgress()
                 || gestureOrientation != Orientation.UNKNOWN) return;
-        if (!PlayerActivity.haveMedia || getPlayer() == null || !getPlayer().isPlaying()) return;
+        if (!PlayerActivity.haveMedia || getPlayer() == null || !getPlayer().isPlaying()
+                || holdSpeedGestureOff() || Utils.isTvBox(getContext())) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+                && getContext() instanceof PlayerActivity
+                && ((PlayerActivity) getContext()).isInPictureInPictureMode()) return;
         speedBeforeBoost = getPlayer().getPlaybackParameters().speed;
         speedBoostActive = true;
         isHandledLongPress = true;
-        getPlayer().setPlaybackSpeed(2f);
+        boostAnchorX = motionEvent.getX();
+        holdSpeed = SPEED_BOOST;
+        rewinding = false;
+        getPlayer().setPlaybackSpeed(SPEED_BOOST);
         hideController();
         clearIcon();
-        setCustomErrorMessage("2\u00D7");
+        setCustomErrorMessage(null);
+        showHoldSpeed();
+    }
+
+    private void updateHoldSpeed(float x) {
+        Player player = PlayerActivity.player;
+        if (player == null) return;
+        HoldSpeedPolicy.State state = HoldSpeedPolicy.evaluate(
+                Utils.pxToDp(x - boostAnchorX), rewinding);
+        boolean rewind = state.direction == HoldSpeedPolicy.Direction.REWIND;
+        if (rewind == rewinding && state.speed == holdSpeed) return;
+
+        holdSpeed = state.speed;
+        if (rewind != rewinding) {
+            rewinding = rewind;
+            if (rewind) {
+                startRewind();
+            } else {
+                stopRewind();
+            }
+        }
+        if (!rewinding) player.setPlaybackSpeed(holdSpeed);
+        showHoldSpeed();
+    }
+
+    private void showHoldSpeed() {
+        if (getContext() instanceof PlayerActivity) {
+            ((PlayerActivity) getContext()).setSpeedBoostIndicator(holdSpeed, rewinding);
+        }
+    }
+
+    private void startRewind() {
+        ExoPlayer player = PlayerActivity.player;
+        if (player == null) return;
+        seekGestureActive = true;
+        if (player.isPlaying()) {
+            restorePlayState = true;
+            player.pause();
+        }
+        player.setPlaybackSpeed(speedBeforeBoost);
+        player.setSeekParameters(SeekParameters.PREVIOUS_SYNC);
+        rewindPosition = player.getCurrentPosition();
+        rewindLastTime = SystemClock.uptimeMillis();
+        if (!isControllerFullyVisible()) {
+            seekProgress = true;
+            showProgress();
+        }
+        post(rewindRunnable);
+    }
+
+    private void stopRewind() {
+        removeCallbacks(rewindRunnable);
+        ExoPlayer player = PlayerActivity.player;
+        if (player == null) return;
+        player.setSeekParameters(SeekParameters.DEFAULT);
+        player.seekTo(rewindPosition);
+        if (restorePlayState) {
+            restorePlayState = false;
+            player.play();
+        }
+    }
+
+    private void rewindTick() {
+        if (!speedBoostActive || !rewinding || PlayerActivity.player == null) return;
+        long now = SystemClock.uptimeMillis();
+        rewindPosition = Math.max(0L,
+                rewindPosition - (long) ((now - rewindLastTime) * holdSpeed));
+        rewindLastTime = now;
+        seekGesture(rewindPosition);
+        postDelayed(rewindRunnable, REWIND_TICK_MS);
+    }
+
+    void cancelHoldSpeed() {
+        if (speedBoostActive) finishSpeedBoost();
+    }
+
+    private void finishSpeedBoost() {
+        speedBoostActive = false;
+        seekGestureActive = false;
+        removeCallbacks(rewindRunnable);
+        ExoPlayer player = PlayerActivity.player;
+        if (player != null) {
+            player.setSeekParameters(SeekParameters.DEFAULT);
+            if (rewinding) player.seekTo(rewindPosition);
+            player.setPlaybackSpeed(speedBeforeBoost);
+            if (restorePlayState) player.play();
+        }
+        restorePlayState = false;
+        rewinding = false;
+        setCustomErrorMessage(null);
+        if (seekProgress) {
+            seekProgress = false;
+            hideControllerImmediately();
+        }
+        setControllerAutoShow(true);
+        if (getContext() instanceof PlayerActivity) {
+            ((PlayerActivity) getContext()).setSpeedBoostIndicatorVisible(false);
+        }
     }
 
     public void toggleLock() {

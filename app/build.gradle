@@ -12,8 +12,8 @@ android {
         applicationId "com.lampaua.player"
         minSdkVersion 23
         targetSdkVersion 36
-        versionCode 19
-        versionName "1.6.1"
+        versionCode 20
+        versionName "2.0.0"
         if (abiFilter) {
             def abiCodeMap = ["x86": 1, "x86_64": 2, "armeabi-v7a": 3, "arm64-v8a": 4]
             versionCode = versionCode * 10 + abiCodeMap[abiFilter]
@@ -105,6 +105,13 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-rtsp:$media3_version") {
         exclude group: "androidx.media3", module: "media3-exoplayer"
     }
+    // Rewrites Dolby Vision profile 7 metadata to profile 8.1. The app's local
+    // ExoPlayer AAR remains authoritative, so duplicate Media3/Core artifacts
+    // are excluded from this narrowly scoped native helper.
+    implementation("com.suyashbelekar:exoplayerhdrutils:0.3.0") {
+        exclude group: "androidx.media3", module: "media3-exoplayer"
+        exclude group: "androidx.core", module: "core-ktx"
+    }
     implementation "androidx.media3:media3-datasource-rtmp:$media3_version"
     implementation 'androidx.recyclerview:recyclerview:1.4.0'
     implementation 'com.getkeepsafe.taptargetview:taptargetview:1.13.3'
@@ -115,9 +122,11 @@ dependencies {
     implementation 'androidx.preference:preference:1.2.1'
     implementation 'com.squareup.okhttp3:okhttp:5.3.2'
     implementation 'com.github.bumptech.glide:glide:4.16.0'
+    implementation 'com.google.zxing:core:3.5.3'
     implementation 'com.sigpwned:chardet4j:78.1.0'
     implementation project(path: ':doubletapplayerview')
     implementation project(path: ':android-file-chooser')
     implementation fileTree(dir: "libs", include: ["lib-*.aar"])
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
 }

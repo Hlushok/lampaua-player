@@ -24,6 +24,19 @@
             app:useSimpleSummaryProvider="true" />
 
         <SwitchPreferenceCompat
+            app:key="timeRemaining"
+            app:defaultValue="false"
+            app:summaryOn="@string/pref_time_remaining_on"
+            app:summaryOff="@string/pref_time_remaining_off"
+            app:title="@string/pref_time_remaining" />
+
+        <SwitchPreferenceCompat
+            app:key="showStats"
+            app:defaultValue="false"
+            app:summary="@string/pref_show_stats_summary"
+            app:title="@string/pref_show_stats" />
+
+        <SwitchPreferenceCompat
             app:key="systemVolume"
             app:defaultValue="true"
             app:summaryOn="@string/pref_system_volume_on"
@@ -49,6 +62,13 @@
             app:defaultValue="true"
             app:summary="@string/pref_brightness_gestures_summary"
             app:title="@string/pref_brightness_gestures" />
+
+        <SwitchPreferenceCompat
+            app:key="holdSpeed"
+            app:defaultValue="true"
+            app:summaryOn="@string/pref_hold_speed_on"
+            app:summaryOff="@string/pref_hold_speed_off"
+            app:title="@string/pref_hold_speed" />
 
         <SwitchPreferenceCompat
             app:key="frameRateMatching"
@@ -125,26 +145,143 @@
 
     <PreferenceCategory app:title="@string/pref_subtitle_header">
 
-        <SwitchPreferenceCompat
-            app:key="subtitleStyleEmbedded"
-            app:defaultValue="true"
-            android:summaryOn="@string/pref_subtitle_style_embedded_on"
-            android:summaryOff="@string/pref_subtitle_style_embedded_off"
-            app:title="@string/pref_subtitle_style_embedded" />
-
-        <SwitchPreferenceCompat
-            app:key="subtitleStyleBold"
-            app:defaultValue="false"
-            android:summaryOn="@string/pref_subtitle_style_bold_on"
-            android:summaryOff="@string/pref_subtitle_style_bold_off"
-            app:title="@string/pref_subtitle_style_bold" />
-
         <Preference
-            app:title="@string/pref_captioning_preferences">
-            <intent android:action="android.settings.CAPTIONING_SETTINGS" />
-        </Preference>
+            app:key="languageSubtitle"
+            app:title="@string/pref_language_subtitle" />
+
+        <SwitchPreferenceCompat
+            app:key="subtitleAutoTranslateUkrainian"
+            app:defaultValue="true"
+            app:summary="@string/pref_subtitle_auto_translate_ukrainian_summary"
+            app:title="@string/pref_subtitle_auto_translate_ukrainian" />
+
+        <PreferenceScreen
+            app:key="subtitleSources"
+            app:summary="@string/pref_subtitle_sources_summary"
+            app:title="@string/pref_subtitle_sources">
+
+            <SwitchPreferenceCompat
+                app:key="subtitleSourceRest"
+                app:defaultValue="true"
+                app:summary="@string/pref_subtitle_source_rest_summary"
+                app:title="@string/pref_subtitle_source_rest" />
+
+            <SwitchPreferenceCompat
+                app:key="subtitleSourceStremio"
+                app:defaultValue="true"
+                app:summary="@string/pref_subtitle_source_stremio_summary"
+                app:title="@string/pref_subtitle_source_stremio" />
+
+            <SwitchPreferenceCompat
+                app:key="subtitleSourceShegu"
+                app:defaultValue="true"
+                app:summary="@string/pref_subtitle_source_shegu_summary"
+                app:title="@string/pref_subtitle_source_shegu" />
+
+            <SwitchPreferenceCompat
+                app:key="subtitleSourceOpenSubtitles"
+                app:defaultValue="true"
+                app:summary="@string/pref_subtitle_source_opensubtitles_summary"
+                app:title="@string/pref_subtitle_source_opensubtitles" />
+
+        </PreferenceScreen>
+
+        <PreferenceScreen
+            app:key="subtitleAppearance"
+            app:summary="@string/pref_subtitle_appearance_summary"
+            app:title="@string/pref_subtitle_appearance">
+
+            <SwitchPreferenceCompat
+                app:key="subtitleStyleEmbedded"
+                app:defaultValue="true"
+                android:summaryOn="@string/pref_subtitle_style_embedded_on"
+                android:summaryOff="@string/pref_subtitle_style_embedded_off"
+                app:title="@string/pref_subtitle_style_embedded" />
+
+            <ListPreference
+                app:key="subtitleScale"
+                app:defaultValue="1.0"
+                app:entries="@array/subtitle_scale_entries"
+                app:entryValues="@array/subtitle_scale_values"
+                app:title="@string/pref_subtitle_scale"
+                app:useSimpleSummaryProvider="true" />
+
+            <ListPreference
+                app:key="subtitleTextColor"
+                app:defaultValue="#FFFFFFFF"
+                app:entries="@array/subtitle_text_color_entries"
+                app:entryValues="@array/subtitle_text_color_values"
+                app:title="@string/pref_subtitle_text_color"
+                app:useSimpleSummaryProvider="true" />
+
+            <ListPreference
+                app:key="subtitleBackground"
+                app:defaultValue="#00000000"
+                app:entries="@array/subtitle_background_entries"
+                app:entryValues="@array/subtitle_background_values"
+                app:title="@string/pref_subtitle_background"
+                app:useSimpleSummaryProvider="true" />
+
+            <ListPreference
+                app:key="subtitleEdge"
+                app:defaultValue="1"
+                app:entries="@array/subtitle_edge_entries"
+                app:entryValues="@array/subtitle_edge_values"
+                app:title="@string/pref_subtitle_edge"
+                app:useSimpleSummaryProvider="true" />
+
+            <SwitchPreferenceCompat
+                app:key="subtitleStyleBold"
+                app:defaultValue="false"
+                android:summaryOn="@string/pref_subtitle_style_bold_on"
+                android:summaryOff="@string/pref_subtitle_style_bold_off"
+                app:title="@string/pref_subtitle_style_bold" />
+
+        </PreferenceScreen>
 
     </PreferenceCategory>
+
+    <PreferenceScreen
+        app:key="togetherSettings"
+        app:summary="@string/pref_together_summary"
+        app:title="@string/together_title">
+
+        <EditTextPreference
+            app:dialogTitle="@string/pref_together_nick"
+            app:key="togetherNick"
+            app:title="@string/pref_together_nick"
+            app:useSimpleSummaryProvider="true" />
+
+        <Preference
+            app:key="togetherNickRandom"
+            app:summary="@string/pref_together_nick_random_summary"
+            app:title="@string/pref_together_nick_random" />
+
+        <EditTextPreference
+            app:dialogMessage="@string/pref_together_password_summary"
+            app:dialogTitle="@string/pref_together_password"
+            app:key="togetherPassword"
+            app:title="@string/pref_together_password" />
+
+        <SwitchPreferenceCompat
+            app:defaultValue="false"
+            app:key="togetherPublic"
+            app:summary="@string/pref_together_public_summary"
+            app:title="@string/together_public" />
+
+        <EditTextPreference
+            app:dialogMessage="@string/pref_together_relay_summary"
+            app:dialogTitle="@string/pref_together_relay"
+            app:key="togetherRelay"
+            app:title="@string/pref_together_relay" />
+
+        <EditTextPreference
+            app:dialogMessage="@string/pref_together_invite_page_summary"
+            app:dialogTitle="@string/pref_together_invite_page"
+            app:key="togetherInvitePage"
+            app:title="@string/pref_together_invite_page" />
+
+    </PreferenceScreen>
 
     <PreferenceCategory app:title="@string/pref_dangerous_header">
 

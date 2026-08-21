@@ -30,7 +30,13 @@ class SubtitleUtils {
     }
 
     public static String getSubtitleLanguage(Uri uri) {
-        final String path = uri.getPath().toLowerCase();
+        return uri == null ? null : getSubtitleLanguageFromPath(uri.getPath());
+    }
+
+    static String getSubtitleLanguageFromPath(String rawPath) {
+        if (rawPath == null) return null;
+        final String path = rawPath.toLowerCase(java.util.Locale.US);
+        if (path.contains(".auto-ukr.") && path.endsWith(".srt")) return "ukr";
 
         if (path.endsWith(".srt")) {
             int last = path.lastIndexOf(".");

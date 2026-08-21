@@ -3,12 +3,19 @@ package com.brouken.player;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Color;
 import android.net.Uri;
 import android.preference.PreferenceManager;
 import android.provider.DocumentsContract;
+import android.view.accessibility.CaptioningManager;
 
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.ui.AspectRatioFrameLayout;
+import androidx.media3.ui.CaptionStyleCompat;
+
+import com.brouken.player.together.AliasGenerator;
+import com.brouken.player.together.Relay;
+import com.brouken.player.together.Room;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -43,12 +50,28 @@ class Prefs {
     private static final String PREF_KEY_ALLOW_SYSTEM_FRAMERATE = "allowSystemFrameRate";
     private static final String PREF_KEY_REPEAT_TOGGLE = "repeatToggle";
     private static final String PREF_KEY_SPEED = "speed";
+    private static final String PREF_KEY_HOLD_SPEED = "holdSpeed";
+    private static final String PREF_KEY_TIME_REMAINING = "timeRemaining";
+    private static final String PREF_KEY_SHOW_STATS = "showStats";
     private static final String PREF_KEY_FILE_ACCESS = "fileAccess";
     private static final String PREF_KEY_DECODER_PRIORITY = "decoderPriority";
     private static final String PREF_KEY_MAP_DV7 = "mapDV7ToHevc";
     private static final String PREF_KEY_LANGUAGE_AUDIO = "languageAudio";
+    private static final String PREF_KEY_LANGUAGE_SUBTITLE = "languageSubtitle";
+    private static final String PREF_KEY_SUBTITLE_SEARCH = "subtitleSearch";
+    private static final String PREF_KEY_SUBTITLE_SEARCH_STRICT = "subtitleSearchStrict";
+    private static final String PREF_KEY_SUBTITLE_AUTO_TRANSLATE_UKRAINIAN =
+            "subtitleAutoTranslateUkrainian";
+    private static final String PREF_KEY_SOURCE_OPENSUBTITLES = "subtitleSourceOpenSubtitles";
+    private static final String PREF_KEY_SOURCE_SHEGU = "subtitleSourceShegu";
+    private static final String PREF_KEY_SOURCE_STREMIO = "subtitleSourceStremio";
+    private static final String PREF_KEY_SOURCE_REST = "subtitleSourceRest";
     private static final String PREF_KEY_SUBTITLE_STYLE_EMBEDDED = "subtitleStyleEmbedded";
     private static final String PREF_KEY_SUBTITLE_STYLE_BOLD = "subtitleStyleBold";
+    private static final String PREF_KEY_SUBTITLE_SCALE = "subtitleScale";
+    private static final String PREF_KEY_SUBTITLE_TEXT_COLOR = "subtitleTextColor";
+    private static final String PREF_KEY_SUBTITLE_BACKGROUND = "subtitleBackground";
+    private static final String PREF_KEY_SUBTITLE_EDGE = "subtitleEdge";
     private static final String PREF_KEY_SKIP_ENABLED = "skipEnabled";
     private static final String PREF_KEY_SKIP_MODE = "skipMode";
     private static final String PREF_KEY_SKIP_MODE_CREDITS = "skipModeCredits";
@@ -58,6 +81,11 @@ class Prefs {
     private static final String PREF_KEY_VOLUME_BOOST = "volumeBoost";
     private static final String PREF_KEY_VOLUME_GESTURES = "volumeGesturesEnabled";
     private static final String PREF_KEY_BRIGHTNESS_GESTURES = "brightnessGesturesEnabled";
+    private static final String PREF_KEY_TOGETHER_NICK = "togetherNick";
+    private static final String PREF_KEY_TOGETHER_PASSWORD = "togetherPassword";
+    private static final String PREF_KEY_TOGETHER_PUBLIC = "togetherPublic";
+    private static final String PREF_KEY_TOGETHER_RELAY = "togetherRelay";
+    private static final String PREF_KEY_TOGETHER_INVITE_PAGE = "togetherInvitePage";
 
     public static final String SKIP_MODE_BRIEF = "brief";
     public static final String SKIP_MODE_FULL = "full";
@@ -79,6 +107,9 @@ class Prefs {
     public Utils.Orientation orientation = Utils.Orientation.UNSPECIFIED;
     public float scale = 1.f;
     public float speed = 1.f;
+    public boolean holdSpeed = true;
+    public boolean timeRemaining = false;
+    public boolean showStats = false;
 
     public String subtitleTrackId;
     public String audioTrackId;
@@ -97,8 +128,21 @@ class Prefs {
     public int decoderPriority = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON;
     public boolean mapDV7ToHevc = false;
     public String languageAudio = "";
+    public String languageSubtitle = "";
+    // Opt-in because searches disclose the title identifiers to third-party services.
+    public boolean subtitleSearch = false;
+    public boolean subtitleSearchStrict = false;
+    public boolean subtitleAutoTranslateUkrainian = true;
+    public boolean subtitleSourceOpenSubtitles = true;
+    public boolean subtitleSourceShegu = true;
+    public boolean subtitleSourceStremio = true;
+    public boolean subtitleSourceRest = true;
     public boolean subtitleStyleEmbedded = true;
     public boolean subtitleStyleBold = false;
+    public float subtitleScale = 1.0f;
+    public int subtitleTextColor = Color.WHITE;
+    public int subtitleBackgroundColor = Color.TRANSPARENT;
+    public int subtitleEdgeType = CaptionStyleCompat.EDGE_TYPE_OUTLINE;
     public boolean skipEnabled = true;
     public String skipMode = SKIP_MODE_FULL;
     public String skipModeCredits = SKIP_MODE_FULL;
@@ -108,6 +152,11 @@ class Prefs {
     public int volumeBoost = 0;
     public boolean volumeGesturesEnabled = true;
     public boolean brightnessGesturesEnabled = true;
+    public String togetherNick = "";
+    public String togetherPassword = "";
+    public boolean togetherPublic = false;
+    public String togetherRelay = "";
+    public String togetherInvitePage = "";
 
     private LinkedHashMap positions;
     private final LinkedHashMap<String, Long> sessionPositions = new LinkedHashMap<>();
@@ -150,6 +199,10 @@ class Prefs {
 
     public void loadUserPreferences() {
         autoPiP = mSharedPreferences.getBoolean(PREF_KEY_AUTO_PIP, autoPiP);
+        holdSpeed = mSharedPreferences.getBoolean(PREF_KEY_HOLD_SPEED, holdSpeed);
+        timeRemaining = mSharedPreferences.getBoolean(
+                PREF_KEY_TIME_REMAINING, timeRemaining);
+        showStats = mSharedPreferences.getBoolean(PREF_KEY_SHOW_STATS, showStats);
         tunneling = mSharedPreferences.getBoolean(PREF_KEY_TUNNELING, tunneling);
         skipSilence = mSharedPreferences.getBoolean(PREF_KEY_SKIP_SILENCE, skipSilence);
         frameRateMatching = mSharedPreferences.getBoolean(PREF_KEY_FRAMERATE_MATCHING, frameRateMatching);
@@ -159,8 +212,28 @@ class Prefs {
         decoderPriority = Integer.parseInt(mSharedPreferences.getString(PREF_KEY_DECODER_PRIORITY, String.valueOf(decoderPriority)));
         mapDV7ToHevc = mSharedPreferences.getBoolean(PREF_KEY_MAP_DV7, mapDV7ToHevc);
         languageAudio = getLanguageAudio(mContext);
+        languageSubtitle = getLanguageSubtitle(mContext);
+        subtitleSearch = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_SEARCH, subtitleSearch);
+        subtitleSearchStrict = mSharedPreferences.getBoolean(
+                PREF_KEY_SUBTITLE_SEARCH_STRICT, subtitleSearchStrict);
+        subtitleAutoTranslateUkrainian = mSharedPreferences.getBoolean(
+                PREF_KEY_SUBTITLE_AUTO_TRANSLATE_UKRAINIAN,
+                subtitleAutoTranslateUkrainian);
+        subtitleSourceOpenSubtitles = mSharedPreferences.getBoolean(
+                PREF_KEY_SOURCE_OPENSUBTITLES, subtitleSourceOpenSubtitles);
+        subtitleSourceShegu = mSharedPreferences.getBoolean(
+                PREF_KEY_SOURCE_SHEGU, subtitleSourceShegu);
+        subtitleSourceStremio = mSharedPreferences.getBoolean(
+                PREF_KEY_SOURCE_STREMIO, subtitleSourceStremio);
+        subtitleSourceRest = mSharedPreferences.getBoolean(
+                PREF_KEY_SOURCE_REST, subtitleSourceRest);
         subtitleStyleEmbedded = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_STYLE_EMBEDDED, subtitleStyleEmbedded);
         subtitleStyleBold = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_STYLE_BOLD, subtitleStyleBold);
+        subtitleScale = readFloat(PREF_KEY_SUBTITLE_SCALE, subtitleScale, 0.25f, 2.0f);
+        subtitleTextColor = readColor(PREF_KEY_SUBTITLE_TEXT_COLOR, subtitleTextColor);
+        subtitleBackgroundColor = readColor(PREF_KEY_SUBTITLE_BACKGROUND,
+                subtitleBackgroundColor);
+        subtitleEdgeType = readInt(PREF_KEY_SUBTITLE_EDGE, subtitleEdgeType, 0, 2);
         skipEnabled = mSharedPreferences.getBoolean(PREF_KEY_SKIP_ENABLED, skipEnabled);
         skipMode = mSharedPreferences.getString(PREF_KEY_SKIP_MODE, skipMode);
         skipModeCredits = mSharedPreferences.getString(PREF_KEY_SKIP_MODE_CREDITS, skipModeCredits);
@@ -180,6 +253,24 @@ class Prefs {
                 PREF_KEY_VOLUME_GESTURES, volumeGesturesEnabled);
         brightnessGesturesEnabled = mSharedPreferences.getBoolean(
                 PREF_KEY_BRIGHTNESS_GESTURES, brightnessGesturesEnabled);
+        togetherPassword = mSharedPreferences.getString(
+                PREF_KEY_TOGETHER_PASSWORD, togetherPassword);
+        togetherPublic = mSharedPreferences.getBoolean(
+                PREF_KEY_TOGETHER_PUBLIC, togetherPublic);
+        togetherRelay = mSharedPreferences.getString(
+                PREF_KEY_TOGETHER_RELAY, togetherRelay);
+        togetherInvitePage = mSharedPreferences.getString(
+                PREF_KEY_TOGETHER_INVITE_PAGE, togetherInvitePage);
+        togetherNick = mSharedPreferences.getString(PREF_KEY_TOGETHER_NICK, "");
+        if (togetherNick == null || togetherNick.trim().isEmpty()) {
+            togetherNick = AliasGenerator.random();
+            mSharedPreferences.edit().putString(PREF_KEY_TOGETHER_NICK, togetherNick).apply();
+        }
+        if (togetherPublic && (togetherPassword == null || togetherPassword.isEmpty())) {
+            updateTogetherPublic(false);
+        }
+        Relay.setBase(togetherRelay);
+        Room.setInvitePage(togetherInvitePage);
     }
 
     public void setLanguageAudio(String languages) {
@@ -207,6 +298,84 @@ class Prefs {
         String normalized = AudioLanguagePriority.serialize(AudioLanguagePriority.parse(languages));
         PreferenceManager.getDefaultSharedPreferences(context).edit()
                 .putString(PREF_KEY_LANGUAGE_AUDIO, normalized).apply();
+    }
+
+    public static String getLanguageSubtitle(Context context) {
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        String stored = preferences.getString(PREF_KEY_LANGUAGE_SUBTITLE, null);
+        if (stored != null) {
+            String normalized = AudioLanguagePriority.serialize(
+                    AudioLanguagePriority.parse(stored));
+            if (!normalized.equals(stored)) {
+                preferences.edit().putString(PREF_KEY_LANGUAGE_SUBTITLE, normalized).apply();
+            }
+            return normalized;
+        }
+
+        CaptioningManager manager =
+                (CaptioningManager) context.getSystemService(Context.CAPTIONING_SERVICE);
+        String migrated = "";
+        if (manager != null && manager.getLocale() != null) {
+            String language = AudioLanguagePriority.normalize(manager.getLocale().toLanguageTag());
+            if (language != null) migrated = language;
+        }
+        preferences.edit().putString(PREF_KEY_LANGUAGE_SUBTITLE, migrated).apply();
+        return migrated;
+    }
+
+    public static void setLanguageSubtitle(Context context, String languages) {
+        String normalized = AudioLanguagePriority.serialize(AudioLanguagePriority.parse(languages));
+        PreferenceManager.getDefaultSharedPreferences(context).edit()
+                .putString(PREF_KEY_LANGUAGE_SUBTITLE, normalized).apply();
+    }
+
+    public static boolean getSubtitleSearch(Context context) {
+        return PreferenceManager.getDefaultSharedPreferences(context)
+                .getBoolean(PREF_KEY_SUBTITLE_SEARCH, false);
+    }
+
+    public static boolean getSubtitleSearchStrict(Context context) {
+        return PreferenceManager.getDefaultSharedPreferences(context)
+                .getBoolean(PREF_KEY_SUBTITLE_SEARCH_STRICT, false);
+    }
+
+    public static void setSubtitleSearch(Context context, boolean enabled, boolean strict) {
+        PreferenceManager.getDefaultSharedPreferences(context).edit()
+                .putBoolean(PREF_KEY_SUBTITLE_SEARCH, enabled)
+                .putBoolean(PREF_KEY_SUBTITLE_SEARCH_STRICT, strict)
+                .apply();
+    }
+
+    private float readFloat(String key, float fallback, float min, float max) {
+        try {
+            float value = Float.parseFloat(mSharedPreferences.getString(key,
+                    String.valueOf(fallback)));
+            return Math.max(min, Math.min(max, value));
+        } catch (RuntimeException ignored) {
+            return fallback;
+        }
+    }
+
+    private int readColor(String key, int fallback) {
+        try {
+            return Color.parseColor(mSharedPreferences.getString(key, colorString(fallback)));
+        } catch (RuntimeException ignored) {
+            return fallback;
+        }
+    }
+
+    private int readInt(String key, int fallback, int min, int max) {
+        try {
+            int value = Integer.parseInt(mSharedPreferences.getString(key,
+                    String.valueOf(fallback)));
+            return Math.max(min, Math.min(max, value));
+        } catch (RuntimeException ignored) {
+            return fallback;
+        }
+    }
+
+    private static String colorString(int color) {
+        return String.format(java.util.Locale.US, "#%08X", color);
     }
 
     public void updateMedia(final Context context, final Uri uri, final String type) {
@@ -284,6 +453,11 @@ class Prefs {
     public void updatePlayerVolume(final int volume) {
         playerVolume = Math.max(0, Math.min(100, volume));
         mSharedPreferences.edit().putInt(PREF_KEY_PLAYER_VOLUME, playerVolume).apply();
+    }
+
+    public void updateTogetherPublic(final boolean value) {
+        togetherPublic = value;
+        mSharedPreferences.edit().putBoolean(PREF_KEY_TOGETHER_PUBLIC, value).apply();
     }
 
     public void markFirstRun() {

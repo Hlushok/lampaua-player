@@ -10,6 +10,7 @@ import android.view.MotionEvent;
 
 import androidx.annotation.Nullable;
 import androidx.media3.ui.DefaultTimeBar;
+import androidx.media3.ui.TimeBar;
 
 import java.lang.reflect.Field;
 
@@ -19,6 +20,9 @@ class CustomDefaultTimeBar extends DefaultTimeBar {
     private Rect progressBar;
     private boolean scrubbing;
     private int scrubbingStartX;
+    private boolean scrubbingNow;
+    private int playheadLeft;
+    private int playheadRight;
     private final Paint skipSegmentPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private long skipDurationMs;
     private long[] skipStartsMs = new long[0];
@@ -53,6 +57,17 @@ class CustomDefaultTimeBar extends DefaultTimeBar {
             e.printStackTrace();
         }
         skipSegmentPaint.setColor(Color.rgb(30, 142, 214));
+        addListener(new OnScrubListener() {
+            @Override public void onScrubStart(TimeBar timeBar, long position) {
+                scrubbingNow = true;
+            }
+
+            @Override public void onScrubMove(TimeBar timeBar, long position) { }
+
+            @Override public void onScrubStop(TimeBar timeBar, long position, boolean canceled) {
+                scrubbingNow = false;
+            }
+        });
     }
 
     void setSkipSegments(long durationMs, long[] startsMs, long[] endsMs) {
@@ -69,19 +84,50 @@ class CustomDefaultTimeBar extends DefaultTimeBar {
 
         int count = Math.min(skipStartsMs.length, skipEndsMs.length);
         float width = progressBar.width();
-        float centerY = progressBar.centerY();
-        float halfHeight = Math.max(Utils.dpToPx(2), progressBar.height() / 2f);
-        float minimumWidth = Utils.dpToPx(3);
+        int minimumWidth = Utils.dpToPx(3);
+        if (scrubberBar == null) {
+            playheadLeft = playheadRight = 0;
+        } else {
+            int radius = playheadRadius();
+            int playheadX = Math.min(Math.max(scrubberBar.right, progressBar.left),
+                    progressBar.right);
+            playheadLeft = playheadX - radius;
+            playheadRight = playheadX + radius;
+        }
         for (int index = 0; index < count; index++) {
             long start = Math.max(0, Math.min(skipDurationMs, skipStartsMs[index]));
             long end = Math.max(start, Math.min(skipDurationMs, skipEndsMs[index]));
             if (end <= start) continue;
-            float left = progressBar.left + width * start / skipDurationMs;
-            float right = progressBar.left + width * end / skipDurationMs;
+            int left = Math.round(progressBar.left + width * start / skipDurationMs);
+            int right = Math.round(progressBar.left + width * end / skipDurationMs);
             if (right - left < minimumWidth) right = Math.min(progressBar.right, left + minimumWidth);
-            canvas.drawRect(left, centerY - halfHeight, right, centerY + halfHeight,
-                    skipSegmentPaint);
+            drawBand(canvas, left, right);
         }
+    }
+
+    private void drawBand(Canvas canvas, int left, int right) {
+        if (right <= left) return;
+        float top = progressBar.centerY() - Math.max(Utils.dpToPx(2), progressBar.height() / 2f);
+        float bottom = progressBar.centerY() + Math.max(Utils.dpToPx(2), progressBar.height() / 2f);
+        if (right > playheadLeft && left < playheadRight) {
+            if (left < playheadLeft) {
+                canvas.drawRect(left, top, playheadLeft, bottom, skipSegmentPaint);
+            }
+            if (right > playheadRight) {
+                canvas.drawRect(playheadRight, top, right, bottom, skipSegmentPaint);
+            }
+            return;
+        }
+        canvas.drawRect(left, top, right, bottom, skipSegmentPaint);
+    }
+
+    private int playheadRadius() {
+        if (scrubbingNow || isFocused()) {
+            return getResources().getDimensionPixelSize(
+                    R.dimen.exo_styled_progress_dragged_thumb_size) / 2;
+        }
+        return isEnabled() ? getResources().getDimensionPixelSize(
+                R.dimen.exo_styled_progress_enabled_thumb_size) / 2 : 0;
     }
 
     @Override

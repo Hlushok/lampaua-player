@@ -7,11 +7,13 @@ final class TrackMetadata {
     final String name;
     final String language;
     final Type type;
+    final float frameRate;
 
-    TrackMetadata(int trackId, String name, String language, Type type) {
+    TrackMetadata(int trackId, String name, String language, Type type, float frameRate) {
         this.trackId = trackId;
         this.name = name;
         this.language = language;
         this.type = type;
+        this.frameRate = frameRate;
     }
 }

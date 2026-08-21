@@ -14,6 +14,8 @@ import android.widget.TextView;
 final class SwipeToUnlockView extends FrameLayout {
     private final ImageView icon;
     private final TextView text;
+    private Runnable onStartTouching;
+    private Runnable onStopTouching;
     private Runnable onUnlock;
     private boolean unlocking;
 
@@ -51,6 +53,14 @@ final class SwipeToUnlockView extends FrameLayout {
         onUnlock = listener;
     }
 
+    void setOnStartTouchingListener(Runnable listener) {
+        onStartTouching = listener;
+    }
+
+    void setOnStopTouchingListener(Runnable listener) {
+        onStopTouching = listener;
+    }
+
     private float maxTranslation() {
         return Math.max(0, getWidth() - getPaddingLeft() - getPaddingRight() - icon.getWidth());
     }
@@ -64,7 +74,10 @@ final class SwipeToUnlockView extends FrameLayout {
     @Override public boolean onTouchEvent(MotionEvent event) {
         if (unlocking) return true;
         float max = maxTranslation();
-        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) return true;
+        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            if (onStartTouching != null) onStartTouching.run();
+            return true;
+        }
         if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
             float translation = Math.max(0, Math.min(max,
                     event.getX() - getPaddingLeft() - icon.getWidth() / 2f));
@@ -83,6 +96,7 @@ final class SwipeToUnlockView extends FrameLayout {
             animator.setDuration(250);
             animator.addUpdateListener(value -> render((float) value.getAnimatedValue()));
             animator.start();
+            if (onStopTouching != null) onStopTouching.run();
             return true;
         }
         return super.onTouchEvent(event);
