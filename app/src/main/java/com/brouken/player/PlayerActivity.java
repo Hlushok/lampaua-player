@@ -312,7 +312,8 @@ public class PlayerActivity extends Activity {
     private TrackGroup selectedVideoTrackGroup;
     private int selectedVideoTrackIndex = -1;
     private CustomDefaultTrackNameProvider trackNameProvider;
-    private final List<TrackMetadata> containerTracks = new ArrayList<>();
+    private final Map<String, List<TrackMetadata>> containerTracks = new ConcurrentHashMap<>();
+    private final Map<String, Long> contentLengths = new ConcurrentHashMap<>();
     private final Map<String, String> resolvedTrackNames = new HashMap<>();
     private int av1DroppedFrames;
     private int totalDroppedFrames;
@@ -406,12 +407,23 @@ public class PlayerActivity extends Activity {
             };
     private final TrackNameParsingDataSource.Listener trackNameListener =
             new TrackNameParsingDataSource.Listener() {
-                @Override public void onMetadataParsed(List<TrackMetadata> tracks) {
-                    runOnUiThread(() -> onContainerMetadata(tracks));
+                @Override public void onMetadataParsed(Uri originalUri,
+                                                       List<TrackMetadata> tracks) {
+                    if (originalUri == null || tracks == null || tracks.isEmpty()) return;
+                    containerTracks.put(originalUri.toString(),
+                            Collections.unmodifiableList(new ArrayList<>(tracks)));
+                    runOnUiThread(() -> onContainerMetadata(originalUri));
                 }
 
-                @Override public boolean isMetadataParsed() {
-                    return !containerTracks.isEmpty();
+                @Override public boolean isMetadataParsed(Uri originalUri) {
+                    return originalUri != null
+                            && containerTracks.containsKey(originalUri.toString());
+                }
+
+                @Override public void onContentLength(Uri originalUri, long length) {
+                    if (originalUri != null && length > 0) {
+                        contentLengths.put(originalUri.toString(), length);
+                    }
                 }
 
                 @Override public void onMediaTypeResolved(Uri requestedUri, String mimeType) {
@@ -3037,7 +3049,7 @@ public class PlayerActivity extends Activity {
                 video == null ? 0 : video.height,
                 video == null ? null : shortCodec(video.sampleMimeType),
                 videoFrameRate(),
-                video == null ? 0 : video.bitrate,
+                videoBitrate(),
                 player.getTotalBufferedDuration(),
                 videoDecoderName,
                 audio == null ? audioDecoderName : shortCodec(audio.sampleMimeType)
@@ -3066,7 +3078,27 @@ public class PlayerActivity extends Activity {
 
     private float videoFrameRate() {
         Format format = player == null ? null : player.getVideoFormat();
-        return format != null && format.frameRate > 0f ? format.frameRate : 0f;
+        return format != null && format.frameRate > 0f
+                ? format.frameRate : containerFrameRate();
+    }
+
+    private float containerFrameRate() {
+        for (TrackMetadata metadata : currentContainerTracks()) {
+            if (metadata.type == TrackMetadata.Type.VIDEO && metadata.frameRate > 0f) {
+                return metadata.frameRate;
+            }
+        }
+        return 0f;
+    }
+
+    private long videoBitrate() {
+        Format format = player == null ? null : player.getVideoFormat();
+        if (format != null && format.bitrate > 0) return format.bitrate;
+        String key = currentMediaKey();
+        Long length = key == null ? null : contentLengths.get(key);
+        long duration = player == null ? C.TIME_UNSET : player.getDuration();
+        return length == null || duration == C.TIME_UNSET ? 0L
+                : PlaybackStatistics.averageBitrate(length, duration);
     }
 
     private String mediaContainerLabel() {
@@ -3076,6 +3108,7 @@ public class PlayerActivity extends Activity {
         if (value.contains(".m3u8")) return "HLS";
         if (value.contains(".mpd") || value.contains("/ytdl/manifest?")) return "DASH";
         if (value.contains(".mkv")) return "MKV";
+        if (value.contains(".avi")) return "AVI";
         if (value.contains(".ts")) return "TS";
         if (value.contains(".mp4")) return "MP4";
         return "VIDEO";
@@ -3140,6 +3173,7 @@ public class PlayerActivity extends Activity {
         else if (path.contains(".mpd") || mediaUrl.contains("/ytdl/manifest?")) parts.add("DASH");
         else if (path.contains(".ts")) parts.add("TS");
         else if (path.contains(".mkv")) parts.add("MKV");
+        else if (path.contains(".avi")) parts.add("AVI");
         else parts.add("VIDEO");
         if (video != null) {
             parts.addAll(MediaFormatLabel.videoParts(video));
@@ -3151,16 +3185,30 @@ public class PlayerActivity extends Activity {
         lampaTopDetails.setText(TextUtils.join(" · ", parts));
     }
 
-    private void onContainerMetadata(List<TrackMetadata> tracks) {
-        containerTracks.clear();
-        containerTracks.addAll(tracks);
+    private String currentMediaKey() {
+        MediaItem item = player == null ? null : player.getCurrentMediaItem();
+        if (item != null && item.localConfiguration != null
+                && item.localConfiguration.uri != null) {
+            return item.localConfiguration.uri.toString();
+        }
+        return mPrefs == null || mPrefs.mediaUri == null ? null : mPrefs.mediaUri.toString();
+    }
+
+    private List<TrackMetadata> currentContainerTracks() {
+        String key = currentMediaKey();
+        List<TrackMetadata> tracks = key == null ? null : containerTracks.get(key);
+        return tracks == null ? Collections.emptyList() : tracks;
+    }
+
+    private void onContainerMetadata(Uri originalUri) {
+        if (originalUri == null || !originalUri.toString().equals(currentMediaKey())) return;
         resolveTrackNames();
         updateLampaTrackDetails();
     }
 
     private void resolveTrackNames() {
         resolvedTrackNames.clear();
-        if (player == null || containerTracks.isEmpty()) {
+        if (player == null || currentContainerTracks().isEmpty()) {
             if (trackNameProvider != null) trackNameProvider.setTrackNames(resolvedTrackNames);
             return;
         }
@@ -3171,7 +3219,7 @@ public class PlayerActivity extends Activity {
 
     private void resolveTrackNames(int mediaTrackType, TrackMetadata.Type metadataType) {
         ArrayList<TrackMetadata> candidates = new ArrayList<>();
-        for (TrackMetadata metadata : containerTracks) {
+        for (TrackMetadata metadata : currentContainerTracks()) {
             if (metadata.type == metadataType && metadata.name != null
                     && !metadata.name.trim().isEmpty()) candidates.add(metadata);
         }
@@ -4620,7 +4668,6 @@ public class PlayerActivity extends Activity {
         transferSampleAt = SystemClock.elapsedRealtime();
         videoDecoderName = null;
         audioDecoderName = null;
-        containerTracks.clear();
         resolvedTrackNames.clear();
         if (trackNameProvider != null) trackNameProvider.setTrackNames(resolvedTrackNames);
 

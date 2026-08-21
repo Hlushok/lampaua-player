@@ -237,4 +237,22 @@ public class ResourceContractTest {
         assertTrue(activity.contains("maybeSearchSubtitlesOnline(tracks)"));
         assertTrue(activity.contains("addSubtitleTrack(Uri subtitleUri)"));
     }
+
+    @Test
+    public void containerMetadataIsBoundedAndScopedToTheCurrentUri() throws Exception {
+        String source = readProjectFile(
+                "src/main/java/com/brouken/player/TrackNameParsingDataSource.java");
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+
+        assertTrue(source.contains("onMetadataParsed(Uri originalUri"));
+        assertTrue(source.contains("isMetadataParsed(Uri originalUri)"));
+        assertTrue(source.contains("onContentLength(Uri originalUri, long length)"));
+        assertFalse(source.contains("PipedInputStream"));
+        assertTrue(activity.contains("currentContainerTracks()"));
+        assertTrue(activity.contains("containerFrameRate()"));
+        assertTrue(activity.contains("contentLengths"));
+        assertTrue(activity.contains("PlaybackStatistics.averageBitrate"));
+        assertTrue(activity.contains("Utils.handleFrameRate(PlayerActivity.this, rate)"));
+    }
 }

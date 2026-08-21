@@ -2,6 +2,7 @@ package com.brouken.player;
 
 import android.net.Uri;
 
+import androidx.media3.common.C;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.ParserException;
 import androidx.media3.datasource.DataSink;
@@ -40,8 +41,9 @@ final class TrackNameParsingDataSource implements DataSource {
 
     /** Receives parsed track metadata on the load thread and reports whether it already has it. */
     interface Listener {
-        void onMetadataParsed(List<TrackMetadata> tracks);
-        boolean isMetadataParsed();
+        void onMetadataParsed(Uri originalUri, List<TrackMetadata> tracks);
+        boolean isMetadataParsed(Uri originalUri);
+        void onContentLength(Uri originalUri, long length);
 
         /**
          * Called (on a load thread) when the real HTTP response for a media item reveals a streaming
@@ -75,7 +77,7 @@ final class TrackNameParsingDataSource implements DataSource {
     @Override
     public long open(DataSpec dataSpec) throws IOException {
         final long length;
-        if (dataSpec.position == 0 && !listener.isMetadataParsed()) {
+        if (dataSpec.position == 0 && !listener.isMetadataParsed(dataSpec.uri)) {
             teeDataSource = new TeeDataSource(upstream, headerSink);
             length = teeDataSource.open(dataSpec);
         } else {
@@ -87,6 +89,13 @@ final class TrackNameParsingDataSource implements DataSource {
         // extensionless resolver that returns HLS), report it so the player can re-prepare as HLS.
         if (dataSpec.position == 0 && dataSpec.uri != null) {
             reportResolvedMediaType(dataSpec.uri);
+            if (dataSpec.length == C.LENGTH_UNSET && length > 0) {
+                try {
+                    listener.onContentLength(dataSpec.uri, length);
+                } catch (Exception ignored) {
+                    // Metadata must never disturb playback.
+                }
+            }
             // A media request answered with a JSON body is a stream-resolver control response (the
             // Lampac "not ready" handshake), never playable media. The resolver sends these headers
             // immediately but then long-polls the body until a read timeout вЂ” so fail now, from the
@@ -240,10 +249,12 @@ final class TrackNameParsingDataSource implements DataSource {
 
     private final class HeaderSink implements DataSink {
         private ContainerHeaderBuffer buffer;
+        private Uri originalUri;
 
         @Override
         public void open(DataSpec dataSpec) {
-            buffer = dataSpec.position == 0 && !listener.isMetadataParsed()
+            originalUri = dataSpec.uri;
+            buffer = dataSpec.position == 0 && !listener.isMetadataParsed(originalUri)
                     ? new ContainerHeaderBuffer() : null;
         }
 
@@ -274,7 +285,7 @@ final class TrackNameParsingDataSource implements DataSource {
             if (bytes == null) return;
             List<TrackMetadata> tracks = ContainerMetadataReader.parse(
                     new ByteArrayInputStream(bytes));
-            if (!tracks.isEmpty()) listener.onMetadataParsed(tracks);
+            if (!tracks.isEmpty()) listener.onMetadataParsed(originalUri, tracks);
         }
     }
 

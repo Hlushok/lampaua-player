@@ -75,5 +75,13 @@ final class PlaybackStatistics {
         }
     }
 
+    static long averageBitrate(long contentLength, long durationMs) {
+        if (contentLength <= 0 || durationMs <= 0) return 0L;
+        double bitrate = contentLength * 8_000d / durationMs;
+        if (Double.isNaN(bitrate) || Double.isInfinite(bitrate)
+                || bitrate >= Long.MAX_VALUE) return Long.MAX_VALUE;
+        return Math.max(0L, (long) bitrate);
+    }
+
     private PlaybackStatistics() {}
 }
