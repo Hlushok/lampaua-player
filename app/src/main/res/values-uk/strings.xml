@@ -46,6 +46,8 @@
     <string name="delete_query">Видалити файл\?</string>
     <string name="delete_confirmation">Видалити</string>
     <string name="pref_title">Налаштування</string>
+    <string name="subtitle_offset_title">Зміщення субтитрів</string>
+    <string name="subtitle_offset_reset">Скинути</string>
     <string name="pref_general_header">Загальні</string>
     <string name="pref_framerate_matching">Автоматичне узгодження частоти кадрів</string>
     <string name="pref_framerate_matching_on">Переключати частоту оновлення екрану відповідно до частоти кадрів відеосигналу</string>

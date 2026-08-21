@@ -60,6 +60,8 @@
     <string name="pref_allow_system_framerate_off">Не менять частоту обновления экрана во время воспроизведения</string>
     <string name="pref_general_header">Общие</string>
     <string name="pref_title">Настройки</string>
+    <string name="subtitle_offset_title">Смещение субтитров</string>
+    <string name="subtitle_offset_reset">Сбросить</string>
     <string name="pref_repeat_toggle">Переключение повтора</string>
     <string name="pref_repeat_toggle_summary">Дополнительное управление, позволяющее бесконечно зацикливать видео (требуется перезапуск приложения)</string>
     <string name="shortcut_videos">Видео</string>
