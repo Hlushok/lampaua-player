@@ -99,6 +99,7 @@ import androidx.media3.common.audio.AudioProcessor;
 import androidx.media3.common.util.Util;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.datasource.HttpDataSource;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlaybackException;
@@ -354,6 +355,11 @@ public class PlayerActivity extends Activity {
     private final Map<View, Boolean> auxiliaryChromeTargets = new WeakHashMap<>();
     private long loadWatchdogBytes;
     private final Runnable loadTimeoutRunnable = this::reportLoadWatchdog;
+    private final Runnable sourceRetryRunnable = () -> {
+        if (alive && player != null && player.getPlaybackState() == Player.STATE_IDLE) {
+            player.prepare();
+        }
+    };
     private final Runnable swipeHider = this::hideSwipeToUnlock;
     private final Runnable frameRateGiveUpRunnable = this::frameRateSettled;
     private final Runnable stallWatchdogRunnable = new Runnable() {
@@ -5603,9 +5609,12 @@ public class PlayerActivity extends Activity {
                         initializePlayer();
                         return;
                     }
-                    PlaybackRecoveryPolicy.FailureKind kind = Utils.isSupportedNetworkUri(mPrefs.mediaUri)
-                            ? PlaybackRecoveryPolicy.FailureKind.NETWORK_READ
-                            : PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE;
+                    PlaybackRecoveryPolicy.FailureKind kind = classifySourceFailure(error);
+                    if (kind == PlaybackRecoveryPolicy.FailureKind.NETWORK_RESPONSE
+                            || kind == PlaybackRecoveryPolicy.FailureKind.SOURCE_CONFIGURATION) {
+                        showError(exoPlaybackException);
+                        return;
+                    }
                     if (recoverPlayback(kind)) return;
                     stopPlaybackAfterRecoveryFailure(kind, error.getLocalizedMessage(), error);
                     return;
@@ -5667,6 +5676,26 @@ public class PlayerActivity extends Activity {
             releasePlayer(false);
         }
         return true;
+    }
+
+    private PlaybackRecoveryPolicy.FailureKind classifySourceFailure(PlaybackException error) {
+        if (!Utils.isSupportedNetworkUri(mPrefs.mediaUri)) {
+            return PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE;
+        }
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof HttpDataSource.InvalidResponseCodeException) {
+                return PlaybackRecoveryPolicy.FailureKind.NETWORK_RESPONSE;
+            }
+        }
+        switch (error.errorCode) {
+            case PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED:
+            case PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED:
+            case PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED:
+            case PlaybackException.ERROR_CODE_IO_NO_PERMISSION:
+                return PlaybackRecoveryPolicy.FailureKind.SOURCE_CONFIGURATION;
+            default:
+                return PlaybackRecoveryPolicy.FailureKind.NETWORK_READ;
+        }
     }
 
     private String consumeDetectedManifestType() {
@@ -5743,6 +5772,7 @@ public class PlayerActivity extends Activity {
     private void cancelPlaybackWatchdogs() {
         if (playerView == null) return;
         cancelLoadWatchdog();
+        playerView.removeCallbacks(sourceRetryRunnable);
         playerView.removeCallbacks(stallWatchdogRunnable);
         playerView.removeCallbacks(stablePlaybackRunnable);
     }
@@ -5802,6 +5832,14 @@ public class PlayerActivity extends Activity {
                 kind, playbackEverReady, sourceRecoveryAttempts,
                 compatibilityRecoveryAttempts, lowerAvailable);
         switch (action) {
+            case REPREPARE_SOURCE:
+                sourceRecoveryAttempts++;
+                updateLoading(true);
+                Utils.showText(playerView, getString(R.string.playback_recovery_retry), 2500);
+                playerView.removeCallbacks(sourceRetryRunnable);
+                playerView.postDelayed(sourceRetryRunnable, Math.min(3_000L,
+                        600L * Math.max(1, sourceRecoveryAttempts)));
+                return true;
             case RETRY_SOURCE:
                 sourceRecoveryAttempts++;
                 savePlayer();

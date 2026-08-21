@@ -4,11 +4,15 @@ import org.junit.Test;
 
 import static com.brouken.player.PlaybackRecoveryPolicy.Action.FAIL;
 import static com.brouken.player.PlaybackRecoveryPolicy.Action.LOWER_QUALITY;
+import static com.brouken.player.PlaybackRecoveryPolicy.Action.REPREPARE_SOURCE;
 import static com.brouken.player.PlaybackRecoveryPolicy.Action.RETRY_COMPATIBILITY;
 import static com.brouken.player.PlaybackRecoveryPolicy.Action.RETRY_SOURCE;
 import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.DECODER;
 import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.LIVE_STALL;
 import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.NETWORK_READ;
+import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.NETWORK_RESPONSE;
+import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.RESOLVER_NOT_READY;
+import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.SOURCE_CONFIGURATION;
 import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE;
 import static org.junit.Assert.assertEquals;
 
@@ -16,12 +20,26 @@ public class PlaybackRecoveryPolicyTest {
 
     @Test
     public void transientNetworkReadGetsThreeAttempts() {
-        assertEquals(RETRY_SOURCE,
+        assertEquals(REPREPARE_SOURCE,
                 PlaybackRecoveryPolicy.decide(NETWORK_READ, false, 0, 0, false));
-        assertEquals(RETRY_SOURCE,
+        assertEquals(REPREPARE_SOURCE,
                 PlaybackRecoveryPolicy.decide(NETWORK_READ, false, 2, 0, false));
         assertEquals(FAIL,
                 PlaybackRecoveryPolicy.decide(NETWORK_READ, false, 3, 0, false));
+    }
+
+    @Test
+    public void resolverRetryStillRebuildsTheSource() {
+        assertEquals(RETRY_SOURCE,
+                PlaybackRecoveryPolicy.decide(RESOLVER_NOT_READY, false, 0, 0, false));
+    }
+
+    @Test
+    public void serverResponsesAndConfigurationErrorsAreNotRetried() {
+        assertEquals(FAIL,
+                PlaybackRecoveryPolicy.decide(NETWORK_RESPONSE, true, 0, 0, true));
+        assertEquals(FAIL,
+                PlaybackRecoveryPolicy.decide(SOURCE_CONFIGURATION, false, 0, 0, true));
     }
 
     @Test

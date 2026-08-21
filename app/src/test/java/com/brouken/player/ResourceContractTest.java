@@ -11,6 +11,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateFactory;
 
 public class ResourceContractTest {
 
@@ -334,5 +336,31 @@ public class ResourceContractTest {
         assertTrue(preferences.contains("app:key=\"showStats\""));
         assertTrue(readme.contains("Oleksandr Zhyzhchenko"));
         assertTrue(readme.contains("just-plus-player/just-plus-player"));
+    }
+
+    @Test
+    public void legacyAndroidTrustsTheCurrentLetsEncryptRoot() throws Exception {
+        String config = readProjectFile("src/main/res/xml/network_security_config.xml");
+        Path certificatePath = projectPath("src/main/res/raw/isrg_root_x1.pem");
+
+        assertTrue(config.contains("<certificates src=\"@raw/isrg_root_x1\" />"));
+        assertTrue(Files.isRegularFile(certificatePath));
+        Certificate certificate;
+        try (java.io.InputStream input = Files.newInputStream(certificatePath)) {
+            certificate = CertificateFactory.getInstance("X.509").generateCertificate(input);
+        }
+        assertEquals("96bcec06264976f37460779acf28c5a7cfe8a3c0aae11a8ffcee05c0bddf08c6",
+                sha256(certificate.getEncoded()));
+    }
+
+    @Test
+    public void transientNetworkReadsKeepTheCurrentPlayerInstance() throws Exception {
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+
+        assertTrue(activity.contains("case REPREPARE_SOURCE:"));
+        assertTrue(activity.contains("sourceRetryRunnable"));
+        assertTrue(activity.contains("HttpDataSource.InvalidResponseCodeException"));
+        assertTrue(activity.contains("player.prepare();"));
     }
 }
