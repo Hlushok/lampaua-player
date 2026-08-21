@@ -116,7 +116,8 @@ final class Mp4MetadataReader {
             }
             remaining -= actualBoxSize;
         }
-        return trackId != -1 ? new TrackMetadata(trackId, trackName, language, type) : null;
+        return trackId != -1 ? new TrackMetadata(
+                trackId, trackName, language, type, 0f) : null;
     }
 
     private static TrackMetadata.Type handlerToType(String hdlrType) {
