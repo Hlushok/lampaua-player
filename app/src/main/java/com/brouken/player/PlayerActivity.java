@@ -104,6 +104,7 @@ import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlaybackException;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.Renderer;
 import androidx.media3.exoplayer.SeekParameters;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
 import androidx.media3.exoplayer.audio.AudioSink;
@@ -111,6 +112,7 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink;
 import androidx.media3.exoplayer.audio.ForwardingAudioSink;
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+import androidx.media3.exoplayer.text.TextOutput;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
 import androidx.media3.extractor.DefaultExtractorsFactory;
 import androidx.media3.extractor.text.DefaultSubtitleParserFactory;
@@ -230,6 +232,8 @@ public class PlayerActivity extends Activity {
     private static final long FRAME_RATE_SWITCH_TIMEOUT_MS = 1_500L;
     private static final long CHROME_FADE_MS = 250L;
     private static final long SUBTITLE_MISS_TTL_MS = 30 * 60 * 1000L;
+    private static final double SUBTITLE_OFFSET_MAX_SEC = 30.0;
+    private static final double SUBTITLE_OFFSET_STEP_SEC = 0.5;
     private static final Map<String, Long> subtitleSearchMisses = new ConcurrentHashMap<>();
 
     private CoordinatorLayout coordinatorLayout;
@@ -245,6 +249,7 @@ public class PlayerActivity extends Activity {
     private ImageButton buttonTogether;
     private ImageButton buttonUpdate;
     private ImageButton buttonAppSettings;
+    private ImageButton exoSubtitle;
     private UpdateInfo pendingUpdate;
     private SwipeToUnlockView swipeToUnlock;
     private ImageButton exoSettings;
@@ -297,6 +302,12 @@ public class PlayerActivity extends Activity {
     private String subtitleSearchStarted;
     private Thread subtitleSearchThread;
     private volatile int subtitleSearchGeneration;
+    private double subtitleOffsetSec;
+    private SubtitleOffset subtitleOffset;
+    private SubtitleTimeline subtitleTimeline;
+    private Uri subtitleTimelineUri;
+    private Uri paintedSubtitleUri;
+    private AlertDialog subtitleOffsetDialog;
     private boolean switchingPlaylistItem;
     private boolean inPip;
     private boolean playlistCurrentRecorded;
@@ -583,6 +594,7 @@ public class PlayerActivity extends Activity {
             if (text != null) {
                 final Uri parsedUri = Uri.parse(text);
                 if (parsedUri.isAbsolute()) {
+                    resetSubtitleSessionForMediaChange();
                     mPrefs.updateMedia(this, parsedUri, null);
                     focusPlay = true;
                 }
@@ -606,7 +618,7 @@ public class PlayerActivity extends Activity {
                     apiTitle = bundle.getString(API_TITLE);
                     readApiHeaders(bundle);
                 }
-
+                resetSubtitleSessionForMediaChange();
                 mPrefs.updateMedia(this, uri, type);
 
                 readApiSubtitles(bundle);
@@ -990,8 +1002,9 @@ public class PlayerActivity extends Activity {
         playerView.setBrightnessControl(mBrightnessControl);
 
         final LinearLayout exoBasicControls = playerView.findViewById(R.id.exo_basic_controls);
-        final ImageButton exoSubtitle = exoBasicControls.findViewById(R.id.exo_subtitle);
+        exoSubtitle = exoBasicControls.findViewById(R.id.exo_subtitle);
         exoBasicControls.removeView(exoSubtitle);
+        exoSubtitle.setVisibility(View.GONE);
 
         exoSettings = exoBasicControls.findViewById(R.id.exo_settings);
         exoBasicControls.removeView(exoSettings);
@@ -1006,6 +1019,7 @@ public class PlayerActivity extends Activity {
             return true;
         });
 
+        exoSubtitle.setOnClickListener(view -> showSubtitleDialog());
         exoSubtitle.setOnLongClickListener(v -> {
             openAppSettings("languageSubtitle");
             return true;
@@ -1665,6 +1679,7 @@ public class PlayerActivity extends Activity {
             readApiHeaders(bundle);
             readApiSubtitles(bundle);
         }
+        resetSubtitleSessionForMediaChange();
         mPrefs.updateMedia(this, uri, type);
         if (bundle != null && bundle.containsKey(API_POSITION)) {
             mPrefs.updatePosition((long) bundle.getInt(API_POSITION));
@@ -2060,9 +2075,13 @@ public class PlayerActivity extends Activity {
                 apiSubs.add(SubtitleUtils.buildSubtitle(this, uri, label, i == 0));
             }
         }
-        mPrefs.updateMedia(this, Uri.parse(item.url), "video/*");
         String resumeKey = item.resumeKey();
-        if (!resumeKey.equals(playlistPlaybackKey)) {
+        boolean mediaChanged = !resumeKey.equals(playlistPlaybackKey);
+        Uri previousSubtitle = mediaChanged ? null : mPrefs.subtitleUri;
+        if (mediaChanged) resetSubtitleSessionForMediaChange();
+        mPrefs.updateMedia(this, Uri.parse(item.url), "video/*");
+        if (previousSubtitle != null) mPrefs.updateSubtitle(previousSubtitle);
+        if (mediaChanged) {
             playlistPlaybackKey = resumeKey;
             playlistPlaybackEverReady = false;
         }
@@ -2287,6 +2306,30 @@ public class PlayerActivity extends Activity {
         }
     }
 
+    private void applySubtitleOffset(double sec) {
+        subtitleOffsetSec = Math.max(-SUBTITLE_OFFSET_MAX_SEC,
+                Math.min(SUBTITLE_OFFSET_MAX_SEC, sec));
+        if (subtitleOffset != null) subtitleOffset.setOffsetSec(subtitleOffsetSec);
+    }
+
+    private void showSubtitleOffsetDialog() {
+        if (player == null) return;
+        if (subtitleOffsetDialog != null) subtitleOffsetDialog.dismiss();
+        subtitleOffsetDialog = OffsetPanel.create(this,
+                getString(R.string.subtitle_offset_title),
+                SUBTITLE_OFFSET_MAX_SEC, SUBTITLE_OFFSET_STEP_SEC,
+                subtitleOffsetSec, this::applySubtitleOffset);
+        subtitleOffsetDialog.setIcon(R.drawable.ic_subtitle_offset_24dp);
+        subtitleOffsetDialog.setOnDismissListener(ignored -> subtitleOffsetDialog = null);
+        subtitleOffsetDialog.show();
+        styleUaAlertDialog(subtitleOffsetDialog, false);
+    }
+
+    private boolean hasActiveSubtitle() {
+        return player != null && (paintedSubtitleUri != null
+                || player.getCurrentTracks().isTypeSelected(C.TRACK_TYPE_TEXT));
+    }
+
     private void showPlayerTools() {
         String timerSummary = sleepTimer.isAtMediaEnd()
                 ? getString(R.string.sleep_timer_end_of_item)
@@ -2296,6 +2339,12 @@ public class PlayerActivity extends Activity {
         items.add(getString(R.string.sleep_timer_title)
                 + (timerSummary == null ? "" : "  \u00B7  " + timerSummary));
         actions.add(this::showSleepTimerMenu);
+        if (hasActiveSubtitle()) {
+            items.add(getString(R.string.subtitle_offset_title)
+                    + (Math.abs(subtitleOffsetSec) < 0.001 ? ""
+                    : "  \u00B7  " + OffsetPanel.format(subtitleOffsetSec)));
+            actions.add(this::showSubtitleOffsetDialog);
+        }
         items.add(getString(R.string.playback_statistics_title));
         actions.add(this::showPlaybackStatistics);
         if (togetherAvailable()) {
@@ -4595,6 +4644,7 @@ public class PlayerActivity extends Activity {
                 }
 
                 mPrefs.setPersistent(true);
+                resetSubtitleSessionForMediaChange();
                 mPrefs.updateMedia(this, uri, data.getType());
 
                 if (requestCode == REQUEST_CHOOSER_VIDEO) {
@@ -4669,23 +4719,250 @@ public class PlayerActivity extends Activity {
         // Convert subtitles to UTF-8 if necessary
         SubtitleUtils.clearCache(this);
         uri = Utils.convertToUTF(this, uri);
+        clearSubtitleTimeline();
         mPrefs.updateSubtitle(uri);
     }
 
-    /** Adds one external subtitle without discarding launcher-provided tracks or the play position. */
+    /** Paints a new external subtitle without re-opening the current video or torrent stream. */
     boolean addSubtitleTrack(Uri subtitleUri) {
         if (player == null || subtitleUri == null) return false;
         MediaItem current = player.getCurrentMediaItem();
-        if (current == null || containsSubtitle(current, subtitleUri)) return false;
+        if (current == null || subtitleUri.equals(paintedSubtitleUri)
+                || containsSubtitle(current, subtitleUri)) {
+            return false;
+        }
+        paintSubtitle(subtitleUri);
+        return true;
+    }
 
+    /** Adapted from Just+ Player PR #130 by Oleksandr Zhyzhchenko (Unlicense). */
+    private void paintSubtitle(Uri subtitleUri) {
+        paintedSubtitleUri = subtitleUri;
+        subtitleTimelineUri = subtitleUri;
+        subtitleTimeline = null;
+        if (subtitleOffset != null) subtitleOffset.setTimeline(null);
+        updateSubtitleButton();
+
+        String mimeType = SubtitleUtils.getSubtitleMime(subtitleUri);
+        Thread worker = new Thread(() -> {
+            SubtitleTimeline loaded = SubtitleTimeline.load(this, subtitleUri, mimeType);
+            runOnUiThread(() -> {
+                if (!subtitleUri.equals(paintedSubtitleUri)) return;
+                if (loaded == null) {
+                    paintedSubtitleUri = null;
+                    subtitleTimelineUri = null;
+                    attachSubtitleTrack(subtitleUri);
+                    return;
+                }
+                subtitleTimeline = loaded;
+                if (subtitleOffset != null) subtitleOffset.setTimeline(loaded);
+                updateSubtitleButton();
+            });
+        }, "SubtitleTimeline");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /** Parser fallback: attach as a real track, preserving the current item and position. */
+    private void attachSubtitleTrack(Uri subtitleUri) {
+        if (player == null) return;
+        int index = player.getCurrentMediaItemIndex();
+        int count = player.getMediaItemCount();
+        if (index < 0 || index >= count) return;
+        MediaItem current = player.getMediaItemAt(index);
+        if (containsSubtitle(current, subtitleUri)) return;
         MediaItem updated = withSubtitle(current,
                 SubtitleUtils.buildSubtitle(this, subtitleUri, null, true));
         long position = player.getCurrentPosition();
-        boolean resume = player.getPlayWhenReady();
-        player.setMediaItems(Collections.singletonList(updated), 0, position);
+        List<MediaItem> items = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            items.add(i == index ? updated : player.getMediaItemAt(i));
+        }
+        player.setMediaItems(items, index, position);
         player.prepare();
-        player.setPlayWhenReady(resume);
-        return true;
+    }
+
+    private void updateSubtitleButton() {
+        if (exoSubtitle == null) return;
+        boolean hasSubtitles = subtitleWithoutTrack() != null;
+        boolean selected = paintedSubtitleUri != null;
+        if (player != null) {
+            for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+                if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+                for (int index = 0; index < group.length; index++) {
+                    if (!isPhantomClosedCaption(group.getTrackFormat(index))) {
+                        hasSubtitles = true;
+                        if (group.isTrackSelected(index)) selected = true;
+                    }
+                }
+            }
+        }
+        exoSubtitle.setVisibility(hasSubtitles ? View.VISIBLE : View.GONE);
+        Utils.setButtonEnabled(this, exoSubtitle, hasSubtitles);
+        exoSubtitle.setSelected(selected);
+    }
+
+    private void showSubtitleDialog() {
+        if (player == null) return;
+        boolean textEnabled = player.getCurrentTracks().isTypeSelected(C.TRACK_TYPE_TEXT);
+        boolean painting = paintedSubtitleUri != null;
+        Uri fileOnly = subtitleWithoutTrack();
+        List<String> labels = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        int checked = !textEnabled && !painting ? 0 : -1;
+
+        labels.add(getString(R.string.pref_subtitle_none));
+        actions.add(this::disableSubtitles);
+        if (fileOnly != null) {
+            if (painting) checked = labels.size();
+            labels.add(subtitleFileLabel(fileOnly));
+            actions.add(() -> addSubtitleTrack(fileOnly));
+        }
+
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            TrackGroup trackGroup = group.getMediaTrackGroup();
+            for (int index = 0; index < group.length; index++) {
+                Format format = group.getTrackFormat(index);
+                if (!group.isTrackSupported(index) || isPhantomClosedCaption(format)) continue;
+                if (!painting && group.isTrackSelected(index)) checked = labels.size();
+                String label = trackNameProvider == null
+                        ? format.label : trackNameProvider.getTrackName(format);
+                if (label == null || label.trim().isEmpty()) {
+                    label = displaySubtitleLanguage(format.language);
+                }
+                final int selectedIndex = index;
+                labels.add(label == null || label.trim().isEmpty()
+                        ? getString(R.string.pref_subtitle_header) : label);
+                actions.add(() -> applySubtitle(trackGroup, selectedIndex));
+            }
+        }
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.pref_subtitle_header)
+                .setSingleChoiceItems(labels.toArray(new String[0]), checked, (selected, which) -> {
+                    actions.get(which).run();
+                    selected.dismiss();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+        dialog.show();
+    }
+
+    private void clearSubtitleTimeline() {
+        paintedSubtitleUri = null;
+        subtitleTimeline = null;
+        subtitleTimelineUri = null;
+        if (subtitleOffset != null) subtitleOffset.setTimeline(null);
+    }
+
+    private void resetSubtitleSessionForMediaChange() {
+        subtitleOffsetSec = 0;
+        clearSubtitleTimeline();
+        if (subtitleOffsetDialog != null) {
+            subtitleOffsetDialog.dismiss();
+            subtitleOffsetDialog = null;
+        }
+    }
+
+    private void clearPaintedSubtitle() {
+        if (paintedSubtitleUri == null) return;
+        clearSubtitleTimeline();
+        updateSubtitleButton();
+    }
+
+    private void updateSubtitleTimeline(Tracks tracks) {
+        MediaItem.SubtitleConfiguration selected = selectedSideloadedSubtitle(tracks);
+        if (selected == null) {
+            if (paintedSubtitleUri == null) clearSubtitleTimeline();
+            return;
+        }
+        if (selected.uri.equals(subtitleTimelineUri)) {
+            if (subtitleOffset != null && subtitleTimeline != null) {
+                subtitleOffset.setTimeline(subtitleTimeline);
+            }
+            return;
+        }
+        subtitleTimelineUri = selected.uri;
+        subtitleTimeline = null;
+        if (subtitleOffset != null) subtitleOffset.setTimeline(null);
+        Uri uri = selected.uri;
+        String mimeType = selected.mimeType == null
+                ? SubtitleUtils.getSubtitleMime(uri) : selected.mimeType;
+        Thread worker = new Thread(() -> {
+            SubtitleTimeline loaded = SubtitleTimeline.load(this, uri, mimeType);
+            runOnUiThread(() -> {
+                if (!uri.equals(subtitleTimelineUri)) return;
+                subtitleTimeline = loaded;
+                if (subtitleOffset != null) subtitleOffset.setTimeline(loaded);
+            });
+        }, "SubtitleTimeline");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private MediaItem.SubtitleConfiguration selectedSideloadedSubtitle(Tracks tracks) {
+        if (player == null) return null;
+        MediaItem item = player.getCurrentMediaItem();
+        if (item == null || item.localConfiguration == null) return null;
+        List<MediaItem.SubtitleConfiguration> configurations =
+                item.localConfiguration.subtitleConfigurations;
+        for (Tracks.Group group : tracks.getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            for (int index = 0; index < group.length; index++) {
+                if (!group.isTrackSelected(index)) continue;
+                String formatId = group.getTrackFormat(index).id;
+                for (MediaItem.SubtitleConfiguration configuration : configurations) {
+                    if (carriesUri(formatId, configuration.uri)) return configuration;
+                }
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static boolean carriesUri(String formatId, Uri uri) {
+        if (formatId == null || uri == null) return false;
+        String text = uri.toString();
+        return formatId.equals(text) || formatId.endsWith(":" + text);
+    }
+
+    private Uri subtitleWithoutTrack() {
+        Uri uri = mPrefs == null ? null : mPrefs.subtitleUri;
+        if (uri == null || player == null || !Utils.fileExists(this, uri)) return null;
+        MediaItem item = player.getCurrentMediaItem();
+        if (item != null && containsSubtitle(item, uri)) return null;
+        return uri;
+    }
+
+    private String subtitleFileLabel(Uri uri) {
+        String language = SubtitleUtils.getSubtitleLanguage(uri);
+        if (language != null) {
+            String display = displaySubtitleLanguage(Util.normalizeLanguageCode(language));
+            if (display != null && !display.trim().isEmpty()) return display;
+        }
+        return Utils.getFileName(this, uri);
+    }
+
+    private void disableSubtitles() {
+        if (player == null) return;
+        clearPaintedSubtitle();
+        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                .build());
+    }
+
+    private void applySubtitle(TrackGroup group, int index) {
+        if (player == null || group == null) return;
+        clearPaintedSubtitle();
+        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                .setOverrideForType(new TrackSelectionOverride(
+                        group, Collections.singletonList(index)))
+                .build());
     }
 
     private MediaItem.SubtitleConfiguration rememberedSubtitle() {
@@ -4996,6 +5273,31 @@ public class PlayerActivity extends Activity {
                         sink, audioRecoveryState.blockedPassthroughMimeTypes());
                 return audioSink;
             }
+
+            @Override
+            protected void buildTextRenderers(Context context, TextOutput output,
+                                              Looper outputLooper, int extensionRendererMode,
+                                              ArrayList<Renderer> out) {
+                SubtitleOffset offset = new SubtitleOffset(output, outputLooper,
+                        new SubtitleOffset.Position() {
+                            @Override public long currentMs() {
+                                return player == null ? C.TIME_UNSET : player.getCurrentPosition();
+                            }
+
+                            @Override public boolean playing() {
+                                return player != null && player.isPlaying();
+                            }
+                        });
+                offset.setOffsetSec(subtitleOffsetSec);
+                offset.setTimeline(subtitleTimeline);
+                subtitleOffset = offset;
+                int first = out.size();
+                super.buildTextRenderers(context, offset, outputLooper,
+                        extensionRendererMode, out);
+                for (int index = first; index < out.size(); index++) {
+                    out.set(index, offset.wrap(out.get(index)));
+                }
+            }
         };
         @SuppressLint("WrongConstant") DefaultRenderersFactory renderersFactory = baseRenderersFactory
                 .setExtensionRendererMode(decoderPriority)
@@ -5218,7 +5520,7 @@ public class PlayerActivity extends Activity {
                     }
                 }
                 mPrefs.updateMeta(getSelectedTrack(C.TRACK_TYPE_AUDIO),
-                        getSelectedTrack(C.TRACK_TYPE_TEXT),
+                        paintedSubtitleUri != null ? null : getSelectedTrack(C.TRACK_TYPE_TEXT),
                         playerView.getResizeMode(),
                         playerView.getVideoSurfaceView().getScaleX(),
                         together != null && together.isActive()
@@ -5246,6 +5548,9 @@ public class PlayerActivity extends Activity {
         if (save) {
             savePlayer();
         }
+        // A rebuild restores the remembered file as a real Media3 track. Keep the parsed
+        // timeline so the new renderer can reuse it without another file read.
+        paintedSubtitleUri = null;
 
         if (player != null) {
             notifyAudioSessionUpdate(false);
@@ -5265,6 +5570,7 @@ public class PlayerActivity extends Activity {
             audioSink = null;
             boostProcessor = null;
         }
+        subtitleOffset = null;
         titleView.setVisibility(View.GONE);
         updateButtons(false);
     }
@@ -5353,6 +5659,7 @@ public class PlayerActivity extends Activity {
         @Override
         public void onPositionDiscontinuity(Player.PositionInfo oldPosition,
                                             Player.PositionInfo newPosition, int reason) {
+            if (subtitleOffset != null) subtitleOffset.clear();
             if (reason == Player.DISCONTINUITY_REASON_SEEK
                     && oldPosition.mediaItemIndex == newPosition.mediaItemIndex) {
                 audioRecoveryState.onSeek();
@@ -5369,6 +5676,7 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onIsPlayingChanged(boolean isPlaying) {
+            if (subtitleOffset != null) subtitleOffset.wake();
             playerView.setKeepScreenOn(isPlaying);
 
             if (Utils.isPiPSupported(PlayerActivity.this)) {
@@ -5569,6 +5877,8 @@ public class PlayerActivity extends Activity {
             }
             resolveTrackNames();
             updateLampaTrackDetails();
+            updateSubtitleTimeline(tracks);
+            if (playerView != null) playerView.post(PlayerActivity.this::updateSubtitleButton);
             maybeSearchSubtitlesOnline(tracks);
         }
 
@@ -6660,6 +6970,7 @@ public class PlayerActivity extends Activity {
     void skipToNext() {
         if (nextUri != null) {
             releasePlayer();
+            resetSubtitleSessionForMediaChange();
             mPrefs.updateMedia(this, nextUri, null);
             searchSubtitles();
             initializePlayer();

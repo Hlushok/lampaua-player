@@ -363,4 +363,21 @@ public class ResourceContractTest {
         assertTrue(activity.contains("HttpDataSource.InvalidResponseCodeException"));
         assertTrue(activity.contains("player.prepare();"));
     }
+
+    @Test
+    public void subtitleOffsetAndHotAttachStayIntegrated() throws Exception {
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+
+        assertTrue(activity.contains("buildTextRenderers(Context context, TextOutput output"));
+        assertTrue(activity.contains("new SubtitleOffset(output, outputLooper"));
+        assertTrue(activity.contains("paintSubtitle(subtitleUri)"));
+        assertTrue(activity.contains("SubtitleTimeline.load"));
+        assertTrue(activity.contains("subtitleOffset.setTimeline"));
+        assertTrue(activity.contains("R.drawable.ic_subtitle_offset_24dp"));
+        assertTrue(activity.contains("showSubtitleDialog()"));
+        assertTrue(activity.contains("attachSubtitleTrack(subtitleUri)"));
+        assertFalse(activity.contains("button_skip_offset"));
+        assertFalse(activity.contains("skipOffsetSec"));
+    }
 }
