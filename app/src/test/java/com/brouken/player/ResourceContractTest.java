@@ -255,4 +255,21 @@ public class ResourceContractTest {
         assertTrue(activity.contains("PlaybackStatistics.averageBitrate"));
         assertTrue(activity.contains("Utils.handleFrameRate(PlayerActivity.this, rate)"));
     }
+
+    @Test
+    public void dolbyVisionProfile7ConversionStaysFailOpen() throws Exception {
+        String build = readProjectFile("build.gradle");
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+
+        assertTrue(build.contains("com.suyashbelekar:exoplayerhdrutils:0.3.0"));
+        assertTrue(build.contains(
+                "exclude group: \"androidx.media3\", module: \"media3-exoplayer\""));
+        assertTrue(build.contains(
+                "exclude group: \"androidx.core\", module: \"core-ktx\""));
+        assertTrue(activity.contains(
+                "!mPrefs.mapDV7ToHevc && !forceHevcForDolbyVision"));
+        assertTrue(activity.contains("new Dv7Converter"));
+        assertFalse(build.contains("io.sentry"));
+    }
 }

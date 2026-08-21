@@ -109,6 +109,8 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
 import androidx.media3.extractor.DefaultExtractorsFactory;
+import androidx.media3.extractor.text.DefaultSubtitleParserFactory;
+import androidx.media3.extractor.text.SubtitleParser;
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory;
 import androidx.media3.extractor.ts.TsExtractor;
 import androidx.media3.session.MediaSession;
@@ -312,6 +314,7 @@ public class PlayerActivity extends Activity {
     private TrackGroup selectedVideoTrackGroup;
     private int selectedVideoTrackIndex = -1;
     private CustomDefaultTrackNameProvider trackNameProvider;
+    private Dv7Converter dv7Converter;
     private final Map<String, List<TrackMetadata>> containerTracks = new ConcurrentHashMap<>();
     private final Map<String, Long> contentLengths = new ConcurrentHashMap<>();
     private final Map<String, String> resolvedTrackNames = new HashMap<>();
@@ -4708,8 +4711,11 @@ public class PlayerActivity extends Activity {
                     .setPreferredAudioLanguages(preferredAudioLanguages.toArray(new String[0])));
         }
         applyPreferredTextLanguages();
+        // Keep the same parser factory when Dv7Converter replaces MatroskaExtractor.
+        final SubtitleParser.Factory subtitleParserFactory = new DefaultSubtitleParserFactory();
         // https://github.com/google/ExoPlayer/issues/8571
         DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory()
+                .setSubtitleParserFactory(subtitleParserFactory)
                 .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS)
                 .setTsExtractorTimestampSearchBytes(1500 * TsExtractor.TS_PACKET_SIZE);
         int decoderPriority = mPrefs.decoderPriority;
@@ -4750,9 +4756,17 @@ public class PlayerActivity extends Activity {
                             secure, tunneling));
         }
 
+        final boolean convertDv7 = !mPrefs.mapDV7ToHevc && !forceHevcForDolbyVision;
+        dv7Converter = convertDv7
+                ? new Dv7Converter(extractorsFactory, subtitleParserFactory)
+                : null;
+        final androidx.media3.extractor.ExtractorsFactory activeExtractorsFactory =
+                convertDv7 ? dv7Converter : extractorsFactory;
+
         ExoPlayer.Builder playerBuilder = new ExoPlayer.Builder(this, renderersFactory)
                 .setTrackSelector(trackSelector)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(this, extractorsFactory));
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(
+                        this, activeExtractorsFactory));
 
         if (optimize4k) {
             playerBuilder.setLoadControl(new DefaultLoadControl.Builder()
@@ -4778,7 +4792,7 @@ public class PlayerActivity extends Activity {
                 DataSource.Factory metadataDataSource = new TrackNameParsingDataSource.Factory(
                         inspectedDataSource, trackNameListener);
                 playerBuilder.setMediaSourceFactory(new DefaultMediaSourceFactory(
-                        metadataDataSource, extractorsFactory));
+                        metadataDataSource, activeExtractorsFactory));
             }
         }
 

@@ -105,6 +105,13 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-rtsp:$media3_version") {
         exclude group: "androidx.media3", module: "media3-exoplayer"
     }
+    // Rewrites Dolby Vision profile 7 metadata to profile 8.1. The app's local
+    // ExoPlayer AAR remains authoritative, so duplicate Media3/Core artifacts
+    // are excluded from this narrowly scoped native helper.
+    implementation("com.suyashbelekar:exoplayerhdrutils:0.3.0") {
+        exclude group: "androidx.media3", module: "media3-exoplayer"
+        exclude group: "androidx.core", module: "core-ktx"
+    }
     implementation "androidx.media3:media3-datasource-rtmp:$media3_version"
     implementation 'androidx.recyclerview:recyclerview:1.4.0'
     implementation 'com.getkeepsafe.taptargetview:taptargetview:1.13.3'
