@@ -349,7 +349,7 @@ public class ResourceContractTest {
         assertTrue(activity.contains("controls.addView(buttonMore)"));
         assertTrue(activity.contains("showMoreMenu()"));
         assertTrue(activity.contains(
-                "setNeutralButton(R.string.subtitle_offset_title"));
+                "new MenuItem(getString(R.string.subtitle_offset_title)"));
         assertTrue(offset.contains("subtitle_offset_earlier"));
         assertTrue(offset.contains("subtitle_offset_later"));
         assertTrue(ukrainian.contains("name=\"subtitle_offset_earlier\""));

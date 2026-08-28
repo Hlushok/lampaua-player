@@ -307,6 +307,8 @@ public class PlayerActivity extends Activity {
     private Uri nextUri;
     private static boolean isTvBox;
     private UiMetrics ui;
+    private Dialog menuDialog;
+    private boolean pickerDialogOpen;
     public static boolean locked = false;
     private Thread nextUriThread;
     public Thread frameRateSwitchThread;
@@ -577,6 +579,9 @@ public class PlayerActivity extends Activity {
     private final SimpleDateFormat lampaClockFormatter = new SimpleDateFormat("HH:mm", Locale.getDefault());
     private LinearLayout lampaTopPanel;
     private LinearLayout lampaHeaderButtons;
+    private FrameLayout lampaTopPreview;
+    private View lampaTopAccent;
+    private LinearLayout lampaTopTimeBlock;
     private ImageView lampaTopThumbnail;
     private TextView lampaEpisodeBadge;
     private TextView lampaTopTitle;
@@ -1213,6 +1218,7 @@ public class PlayerActivity extends Activity {
             displayParent.addView(buttonPiP);
         }
         if (!isTvBox) displayParent.addView(buttonRotation);
+        applyLampaTopLayout();
 
         // Update is adjacent to More; More always terminates the bottom bar.
         controls.addView(buttonUpdate);
@@ -1266,7 +1272,12 @@ public class PlayerActivity extends Activity {
                 }
 
                 // https://developer.android.com/training/system-ui/immersive
-                Utils.toggleSystemUi(PlayerActivity.this, playerView, visibility == View.VISIBLE);
+                if (pickerDialogOpen) {
+                    applyPickerBars();
+                } else {
+                    Utils.toggleSystemUi(PlayerActivity.this, playerView,
+                            visibility == View.VISIBLE);
+                }
                 if (visibility == View.VISIBLE) {
                     requestPrimaryTvFocus();
                 }
@@ -1537,6 +1548,10 @@ public class PlayerActivity extends Activity {
         if (live == this) live = null;
         titleSearchGeneration++;
         hideSwipeToUnlock();
+        if (menuDialog != null) {
+            menuDialog.dismiss();
+            menuDialog = null;
+        }
         if (together != null) {
             together.leave();
         }
@@ -2481,14 +2496,14 @@ public class PlayerActivity extends Activity {
         lampaTopPanel.setPadding(Utils.dpToPx(10), Utils.dpToPx(8), Utils.dpToPx(12), Utils.dpToPx(8));
         lampaTopPanel.setBackground(lampaBackground(lampaMenuColor(4, 18, 40), gold, 10));
 
-        FrameLayout preview = new FrameLayout(this);
-        preview.setPadding(Utils.dpToPx(2), Utils.dpToPx(2), Utils.dpToPx(2), Utils.dpToPx(2));
-        preview.setBackground(lampaBackground(Color.rgb(10, 39, 76),
+        lampaTopPreview = new FrameLayout(this);
+        lampaTopPreview.setPadding(ui.dp(2), ui.dp(2), ui.dp(2), ui.dp(2));
+        lampaTopPreview.setBackground(lampaBackground(Color.rgb(10, 39, 76),
                 Color.rgb(62, 91, 126), 7));
         lampaTopThumbnail = new ImageView(this);
         lampaTopThumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
         lampaTopThumbnail.setBackgroundColor(Color.rgb(10, 32, 64));
-        preview.addView(lampaTopThumbnail, new FrameLayout.LayoutParams(
+        lampaTopPreview.addView(lampaTopThumbnail, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         lampaEpisodeBadge = new TextView(this);
@@ -2497,17 +2512,13 @@ public class PlayerActivity extends Activity {
         lampaEpisodeBadge.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         lampaEpisodeBadge.setGravity(Gravity.CENTER);
         lampaEpisodeBadge.setBackground(lampaBackground(Color.argb(235, 7, 25, 52), gold, 5));
-        preview.addView(lampaEpisodeBadge, new FrameLayout.LayoutParams(
+        lampaTopPreview.addView(lampaEpisodeBadge, new FrameLayout.LayoutParams(
                 Utils.dpToPx(32), Utils.dpToPx(29), Gravity.START | Gravity.TOP));
-        lampaTopPanel.addView(preview, new LinearLayout.LayoutParams(Utils.dpToPx(136), Utils.dpToPx(76)));
+        lampaTopPanel.addView(lampaTopPreview);
 
-        View titleAccent = new View(this);
-        titleAccent.setBackgroundColor(gold);
-        LinearLayout.LayoutParams accentParams = new LinearLayout.LayoutParams(
-                Utils.dpToPx(2), Utils.dpToPx(48));
-        accentParams.setMarginStart(Utils.dpToPx(12));
-        accentParams.setMarginEnd(Utils.dpToPx(12));
-        lampaTopPanel.addView(titleAccent, accentParams);
+        lampaTopAccent = new View(this);
+        lampaTopAccent.setBackgroundColor(gold);
+        lampaTopPanel.addView(lampaTopAccent);
 
         LinearLayout textBlock = new LinearLayout(this);
         textBlock.setOrientation(LinearLayout.VERTICAL);
@@ -2528,12 +2539,12 @@ public class PlayerActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         lampaTopPanel.addView(textBlock, textParams);
 
-        LinearLayout timeBlock = new LinearLayout(this);
-        timeBlock.setOrientation(LinearLayout.VERTICAL);
-        timeBlock.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        timeBlock.setPadding(Utils.dpToPx(12), Utils.dpToPx(6),
+        lampaTopTimeBlock = new LinearLayout(this);
+        lampaTopTimeBlock.setOrientation(LinearLayout.VERTICAL);
+        lampaTopTimeBlock.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        lampaTopTimeBlock.setPadding(Utils.dpToPx(12), Utils.dpToPx(6),
                 Utils.dpToPx(12), Utils.dpToPx(6));
-        timeBlock.setBackground(lampaBackground(Color.argb(105, 10, 39, 76),
+        lampaTopTimeBlock.setBackground(lampaBackground(Color.argb(105, 10, 39, 76),
                 Color.rgb(35, 58, 84), 7));
         lampaClock = new TextView(this);
         lampaClock.setTextColor(Color.WHITE);
@@ -2544,21 +2555,22 @@ public class PlayerActivity extends Activity {
         lampaFinishTime.setTextColor(gold);
         lampaFinishTime.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         lampaFinishTime.setGravity(Gravity.END);
-        timeBlock.addView(lampaClock);
-        timeBlock.addView(lampaFinishTime);
+        lampaTopTimeBlock.addView(lampaClock);
+        lampaTopTimeBlock.addView(lampaFinishTime);
         lampaHeaderButtons = new LinearLayout(this);
         lampaHeaderButtons.setOrientation(LinearLayout.HORIZONTAL);
         lampaHeaderButtons.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        timeBlock.addView(lampaHeaderButtons, new LinearLayout.LayoutParams(
+        lampaTopTimeBlock.addView(lampaHeaderButtons, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        lampaTopPanel.addView(timeBlock, new LinearLayout.LayoutParams(
+        lampaTopPanel.addView(lampaTopTimeBlock, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, Utils.dpToPx(94), Gravity.TOP);
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP);
         topParams.setMargins(Utils.dpToPx(16), Utils.dpToPx(8),
                 Utils.dpToPx(16), 0);
         controllerBackground.addView(lampaTopPanel, topParams);
+        applyLampaTopLayout();
 
         lampaSkipPanel = new LinearLayout(this);
         lampaSkipPanel.setOrientation(LinearLayout.VERTICAL);
@@ -2594,6 +2606,61 @@ public class PlayerActivity extends Activity {
         skipParams.bottomMargin = Utils.dpToPx(86);
         playerView.addView(lampaSkipPanel, skipParams);
         updateLampaTopPanel();
+    }
+
+    private void applyLampaTopLayout() {
+        if (ui == null || lampaTopPanel == null || lampaTopPreview == null
+                || lampaTopAccent == null || lampaTopTimeBlock == null) return;
+        Configuration configuration = getResources().getConfiguration();
+        boolean narrowPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+                && configuration.screenWidthDp < 480;
+        int horizontalPadding = ui.dp(narrowPortrait ? 7 : 10);
+        int verticalPadding = ui.dp(narrowPortrait ? 6 : 8);
+        lampaTopPanel.setPadding(horizontalPadding, verticalPadding,
+                horizontalPadding, verticalPadding);
+
+        int posterHeight = narrowPortrait
+                ? Math.min(ui.posterHeight(), ui.dp(60)) : ui.posterHeight();
+        int posterWidth = Math.round(posterHeight * 16f / 9f);
+        lampaTopPreview.setLayoutParams(new LinearLayout.LayoutParams(
+                posterWidth, posterHeight));
+
+        LinearLayout.LayoutParams accentParams = new LinearLayout.LayoutParams(
+                ui.dp(2), Math.max(ui.dp(34), posterHeight - ui.dp(16)));
+        accentParams.setMarginStart(ui.dp(narrowPortrait ? 6 : 12));
+        accentParams.setMarginEnd(ui.dp(narrowPortrait ? 6 : 12));
+        accentParams.gravity = Gravity.CENTER_VERTICAL;
+        lampaTopAccent.setLayoutParams(accentParams);
+
+        lampaTopTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP,
+                narrowPortrait ? 18 : ui.textHeaderTitle());
+        lampaTopDetails.setTextSize(TypedValue.COMPLEX_UNIT_SP,
+                narrowPortrait ? 11 : ui.textInfo());
+        lampaTopDetails.setMaxLines(narrowPortrait ? 1 : 2);
+        lampaClock.setTextSize(TypedValue.COMPLEX_UNIT_SP,
+                narrowPortrait ? 19 : ui.textClock());
+        lampaFinishTime.setTextSize(TypedValue.COMPLEX_UNIT_SP,
+                narrowPortrait ? 11 : ui.textCaption());
+        int clockMaxWidth = ui.dp(narrowPortrait ? 106 : 156);
+        lampaClock.setMaxWidth(clockMaxWidth);
+        lampaFinishTime.setMaxWidth(clockMaxWidth);
+        lampaFinishTime.setMaxLines(narrowPortrait ? 2 : 1);
+        lampaFinishTime.setEllipsize(TextUtils.TruncateAt.END);
+        int timePadH = ui.dp(narrowPortrait ? 5 : 10);
+        lampaTopTimeBlock.setPadding(timePadH, ui.dp(4), timePadH, ui.dp(4));
+
+        if (lampaHeaderButtons != null) {
+            int buttonBox = ui.dp(narrowPortrait ? 32 : 38);
+            int buttonPad = ui.dp(narrowPortrait ? 5 : 7);
+            for (int index = 0; index < lampaHeaderButtons.getChildCount(); index++) {
+                View child = lampaHeaderButtons.getChildAt(index);
+                child.setMinimumWidth(0);
+                child.setMinimumHeight(0);
+                child.setPadding(buttonPad, buttonPad, buttonPad, buttonPad);
+                child.setLayoutParams(new LinearLayout.LayoutParams(buttonBox, buttonBox));
+            }
+        }
+        lampaTopPanel.requestLayout();
     }
 
     private void openAppSettings() {
@@ -2769,16 +2836,316 @@ public class PlayerActivity extends Activity {
         return Math.abs(value) < 0.001 ? null : OffsetPanel.format(this, value);
     }
 
+    private void showPickerDialog(final Dialog dialog) {
+        pickerDialogOpen = true;
+        if (playerView != null) playerView.hideController();
+        applyPickerBars();
+        dialog.setOnDismissListener(ignored -> {
+            if (menuDialog == dialog) menuDialog = null;
+            pickerDialogOpen = false;
+            if (playerView != null) {
+                Utils.toggleSystemUi(PlayerActivity.this, playerView, controllerVisibleFully);
+                playerView.post(PlayerActivity.this::requestPrimaryTvFocus);
+            }
+        });
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setLayout(ui.pickerWidthPx(getResources().getConfiguration()),
+                    ViewGroup.LayoutParams.MATCH_PARENT);
+            window.setGravity(Gravity.END);
+            window.setDimAmount(0f);
+            window.setBackgroundDrawable(lampaBackground(
+                    lampaMenuColor(4, 18, 40), Color.rgb(240, 183, 38), 10));
+        }
+    }
+
+    private void fitLongText(final View row, final TextView... texts) {
+        final boolean marquee = ui.deviceClass == UiMetrics.DeviceClass.TV
+                && !Utils.isReducedMotion(this);
+        for (TextView text : texts) {
+            if (text == null) continue;
+            if (marquee) {
+                text.setSingleLine(true);
+                text.setEllipsize(TextUtils.TruncateAt.MARQUEE);
+                text.setMarqueeRepeatLimit(-1);
+                text.setHorizontalFadingEdgeEnabled(true);
+            } else {
+                text.setMaxLines(2);
+                text.setEllipsize(TextUtils.TruncateAt.END);
+            }
+        }
+        if (marquee) {
+            row.setOnFocusChangeListener((view, focused) -> {
+                for (TextView text : texts) {
+                    if (text != null) text.setSelected(focused);
+                }
+            });
+        }
+    }
+
+    private void applyPickerBars() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsetsController controller = getWindow() == null
+                    ? null : getWindow().getInsetsController();
+            if (controller != null) {
+                controller.hide(WindowInsets.Type.statusBars());
+                controller.show(WindowInsets.Type.navigationBars());
+            }
+        } else if (playerView != null) {
+            playerView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN);
+        }
+    }
+
+    private static final class MenuItem {
+        final CharSequence badge;
+        final CharSequence title;
+        final CharSequence subtitle;
+        final CharSequence trailing;
+        final boolean checked;
+        final boolean chrome;
+        final Runnable action;
+
+        MenuItem(CharSequence title, CharSequence subtitle, boolean checked, Runnable action) {
+            this(null, title, subtitle, null, checked, false, action);
+        }
+
+        private MenuItem(CharSequence badge, CharSequence title, CharSequence subtitle,
+                         CharSequence trailing, boolean checked, boolean chrome,
+                         Runnable action) {
+            this.badge = badge;
+            this.title = title;
+            this.subtitle = subtitle;
+            this.trailing = trailing;
+            this.checked = checked;
+            this.chrome = chrome;
+            this.action = action;
+        }
+
+        static MenuItem rich(CharSequence badge, CharSequence title, CharSequence subtitle,
+                             CharSequence trailing, boolean checked, Runnable action) {
+            return new MenuItem(badge, title, subtitle, trailing, checked, false, action);
+        }
+
+        static MenuItem caption(CharSequence title) {
+            return new MenuItem(null, title, null, null, false, true, null);
+        }
+
+        static MenuItem rule() {
+            return new MenuItem(null, null, null, null, false, true, null);
+        }
+    }
+
+    private View menuRule(int top, int bottom) {
+        View rule = new View(this);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(1));
+        params.topMargin = top;
+        params.bottomMargin = bottom;
+        rule.setLayoutParams(params);
+        rule.setBackgroundColor(Color.argb(38, 240, 183, 38));
+        return rule;
+    }
+
+    private View menuCaption(CharSequence text) {
+        TextView caption = new TextView(this);
+        caption.setText(text);
+        caption.setTextColor(Color.rgb(145, 178, 219));
+        caption.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textCaption());
+        caption.setPadding(ui.dp(12), ui.dp(9), ui.dp(12), ui.dp(3));
+        return caption;
+    }
+
+    private void showSideMenu(CharSequence title, List<MenuItem> items) {
+        if (items == null || items.isEmpty()) return;
+        final View[] selectedRow = new View[1];
+        final View[] firstRow = new View[1];
+        final LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(ui.listPad(), ui.listPad(), ui.listPad(), ui.listPad());
+
+        TextView header = new TextView(this);
+        header.setText(title);
+        header.setTextColor(Color.WHITE);
+        header.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textTitle());
+        header.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        header.setPadding(ui.dp(10), ui.dp(10), ui.dp(10), ui.dp(10));
+        list.addView(header);
+        list.addView(menuRule(0, ui.dp(4)));
+
+        for (MenuItem item : items) {
+            if (item.chrome) {
+                list.addView(item.title == null
+                        ? menuRule(ui.dp(6), ui.dp(6)) : menuCaption(item.title));
+                continue;
+            }
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(ui.dp(12), ui.dp(9), ui.dp(12), ui.dp(9));
+            row.setMinimumHeight(ui.rowMinHeight());
+            row.setClickable(true);
+            row.setFocusable(true);
+            if (firstRow[0] == null) firstRow[0] = row;
+            if (item.checked) selectedRow[0] = row;
+
+            TextView badge = null;
+            if (!TextUtils.isEmpty(item.badge)) {
+                badge = new TextView(this);
+                badge.setText(item.badge);
+                badge.setTextColor(Color.rgb(145, 178, 219));
+                badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textCaption());
+                badge.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                badge.setGravity(Gravity.CENTER);
+                badge.setBackground(lampaBackground(Color.argb(70, 4, 18, 40),
+                        Color.rgb(62, 91, 126), 6));
+                int pickerWidthDp = Math.round(ui.pickerWidthPx(
+                        getResources().getConfiguration())
+                        / getResources().getDisplayMetrics().density);
+                int badgeWidth = ui.dp(PickerRowPolicy.compactPosterWidthDp(pickerWidthDp));
+                LinearLayout.LayoutParams badgeParams = new LinearLayout.LayoutParams(
+                        badgeWidth, ui.dp(38));
+                badgeParams.setMarginEnd(ui.dp(10));
+                row.addView(badge, badgeParams);
+            }
+
+            LinearLayout textBlock = new LinearLayout(this);
+            textBlock.setOrientation(LinearLayout.VERTICAL);
+            TextView rowTitle = new TextView(this);
+            rowTitle.setText(item.title);
+            rowTitle.setTextColor(Color.WHITE);
+            rowTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textBody());
+            if (item.checked) rowTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            textBlock.addView(rowTitle);
+            TextView summary = null;
+            if (!TextUtils.isEmpty(item.subtitle)) {
+                summary = new TextView(this);
+                summary.setText(item.subtitle);
+                summary.setTextColor(Color.rgb(145, 178, 219));
+                summary.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textCaption());
+                textBlock.addView(summary);
+            }
+            row.addView(textBlock, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            TextView trailing = null;
+            if (!TextUtils.isEmpty(item.trailing)) {
+                int pickerWidthDp = Math.round(ui.pickerWidthPx(
+                        getResources().getConfiguration())
+                        / getResources().getDisplayMetrics().density);
+                int textBudget = PickerRowPolicy.textColumnWidthDp(pickerWidthDp,
+                        44, TextUtils.isEmpty(item.badge) ? 0
+                                : PickerRowPolicy.compactPosterWidthDp(pickerWidthDp),
+                        72, 20);
+                if (PickerRowPolicy.showOptionalTrailingText(textBudget, 112)) {
+                    trailing = new TextView(this);
+                    trailing.setText(item.trailing);
+                    trailing.setTextColor(Color.rgb(145, 178, 219));
+                    trailing.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textCaption());
+                    trailing.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+                    trailing.setSingleLine(true);
+                    LinearLayout.LayoutParams trailingParams = new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT);
+                    trailingParams.setMarginStart(ui.dp(8));
+                    row.addView(trailing, trailingParams);
+                }
+            }
+            if (item.checked) {
+                TextView check = new TextView(this);
+                check.setText("✓");
+                check.setTextColor(Color.rgb(240, 183, 38));
+                check.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textBody());
+                check.setGravity(Gravity.CENTER);
+                row.addView(check, new LinearLayout.LayoutParams(
+                        ui.dp(32), ViewGroup.LayoutParams.MATCH_PARENT));
+            }
+            fitLongText(row, rowTitle, summary, trailing);
+            final TextView rowSummary = summary;
+            final TextView rowTrailing = trailing;
+            final TextView rowBadge = badge;
+            row.setOnFocusChangeListener((view, focused) -> {
+                rowTitle.setSelected(focused);
+                if (rowSummary != null) rowSummary.setSelected(focused);
+                if (rowTrailing != null) rowTrailing.setSelected(focused);
+                row.setBackground(lampaBackground(focused || item.checked
+                                ? Color.argb(190, 10, 39, 76) : Color.argb(70, 4, 18, 40),
+                        focused || item.checked ? Color.rgb(240, 183, 38)
+                                : Color.rgb(35, 58, 84), 8));
+                if (rowBadge != null) {
+                    rowBadge.setTextColor(focused ? Color.rgb(255, 204, 74)
+                            : Color.rgb(145, 178, 219));
+                    rowBadge.setBackground(lampaBackground(Color.argb(70, 4, 18, 40),
+                            focused ? Color.rgb(240, 183, 38)
+                                    : Color.rgb(62, 91, 126), 6));
+                }
+            });
+            row.setBackground(lampaBackground(item.checked
+                            ? Color.argb(190, 10, 39, 76) : Color.argb(70, 4, 18, 40),
+                    item.checked ? Color.rgb(240, 183, 38) : Color.rgb(35, 58, 84), 8));
+            row.setOnClickListener(view -> {
+                if (menuDialog != null) menuDialog.dismiss();
+                if (item.action != null) item.action.run();
+            });
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            rowParams.bottomMargin = ui.dp(4);
+            list.addView(row, rowParams);
+        }
+
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.addView(list);
+        Utils.padForPickerInsets(this, ui, coordinatorLayout, scroll,
+                ui.overscanH(), 0, 0);
+        if (menuDialog != null) menuDialog.dismiss();
+        menuDialog = new Dialog(this, android.R.style.Theme_Translucent_NoTitleBar);
+        menuDialog.setContentView(scroll);
+        menuDialog.setCanceledOnTouchOutside(true);
+        showPickerDialog(menuDialog);
+        View focus = selectedRow[0] == null ? firstRow[0] : selectedRow[0];
+        if (focus != null) focus.post(focus::requestFocus);
+    }
+
     private void showMoreMenu() {
-        final List<String> items = new ArrayList<>();
-        final List<Runnable> actions = new ArrayList<>();
-        items.add(getString(R.string.menu_playback));
-        actions.add(this::showPlaybackTools);
-        items.add(getString(R.string.menu_session));
-        actions.add(this::showSessionTools);
-        items.add(getString(R.string.menu_system));
-        actions.add(this::showSystemTools);
-        showActionDialog(getString(R.string.button_more), items, actions);
+        final List<MenuItem> items = new ArrayList<>();
+        items.add(MenuItem.caption(getString(R.string.menu_playback)));
+        if (player != null) {
+            items.add(new MenuItem(getString(R.string.button_playback_options),
+                    null, false, () -> exoSettings.performClick()));
+        }
+        String timerSummary = sleepTimer.isAtMediaEnd()
+                ? getString(R.string.sleep_timer_end_of_item)
+                : sleepTimer.remainingMs() > 0 ? Utils.formatMilis(sleepTimer.remainingMs()) : null;
+        if (hasActiveSubtitle()) {
+            items.add(new MenuItem(getString(R.string.subtitle_offset_title),
+                    subtitleOffsetSummary(), false, this::showSubtitleOffsetDialog));
+        }
+        if (skipSessionReachable()) {
+            items.add(new MenuItem(getString(R.string.skip_session_title),
+                    skipSessionSummary(), false, this::showSkipSessionDialog));
+        }
+        items.add(new MenuItem(getString(R.string.sleep_timer_title),
+                timerSummary, false, this::showSleepTimerMenu));
+        items.add(MenuItem.rule());
+        if (player != null) {
+            items.add(new MenuItem(getString(R.string.subtitle_search_manual),
+                    null, false, () -> showManualSubtitleSearch(false)));
+        }
+        if (togetherAvailable()) {
+            items.add(new MenuItem(getString(R.string.together_title),
+                    togetherSummary(), false, this::showTogetherMenu));
+        }
+        if (mPrefs.showStats) {
+            items.add(new MenuItem(getString(R.string.playback_statistics_title),
+                    null, false, this::showPlaybackStatistics));
+        }
+        items.add(MenuItem.rule());
+        items.add(new MenuItem(getString(R.string.button_open), null,
+                false, () -> openFile(mPrefs.mediaUri)));
+        items.add(new MenuItem(getString(R.string.button_app_settings), null,
+                false, this::openAppSettings));
+        showSideMenu(getString(R.string.button_more), items);
     }
 
     private void showPlaybackTools() {
@@ -2839,16 +3206,13 @@ public class PlayerActivity extends Activity {
 
     private void showActionDialog(CharSequence title, List<String> items,
                                   List<Runnable> actions) {
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(title)
-                .setItems(items.toArray(new String[0]), (selected, which) -> {
-                    selected.dismiss();
-                    actions.get(which).run();
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .create();
-        dialog.setOnShowListener(ignored -> styleUaPickerDialog(dialog, 0));
-        dialog.show();
+        final List<MenuItem> menuItems = new ArrayList<>();
+        final int count = Math.min(items == null ? 0 : items.size(),
+                actions == null ? 0 : actions.size());
+        for (int index = 0; index < count; index++) {
+            menuItems.add(new MenuItem(items.get(index), null, false, actions.get(index)));
+        }
+        showSideMenu(title, menuItems);
     }
 
     private void setupTogetherOverlay() {
@@ -3042,16 +3406,7 @@ public class PlayerActivity extends Activity {
             labels.add(getString(R.string.together_enter_code));
             actions.add(this::askRoomCode);
         }
-        final AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(R.string.together_title)
-                .setItems(labels.toArray(new String[0]), (selected, which) -> {
-                    selected.dismiss();
-                    actions.get(which).run();
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .create();
-        dialog.setOnShowListener(ignored -> styleUaPickerDialog(dialog, 0));
-        dialog.show();
+        showActionDialog(getString(R.string.together_title), labels, actions);
     }
 
     private void findRooms() {
@@ -3065,30 +3420,24 @@ public class PlayerActivity extends Activity {
                 showSnack(getString(R.string.together_none_found), null);
                 return;
             }
-            final String[] labels = new String[rooms.size()];
+            final List<MenuItem> roomItems = new ArrayList<>();
             for (int i = 0; i < rooms.size(); i++) {
                 final JSONObject room = rooms.get(i);
                 final String title = room.optString("title", "").isEmpty()
                         ? room.optString("name", room.optString("id"))
                         : room.optString("title");
-                labels[i] = title + "\n" + getString(R.string.together_room_summary,
+                final String summary = getString(R.string.together_room_summary,
                         room.optString("owner", ""), room.optInt("members", 1));
+                roomItems.add(new MenuItem(title, summary, false, () -> {
+                    final String code = room.optString("id");
+                    if (room.optInt("pwd") == 1) {
+                        askRoomPassword(code);
+                    } else {
+                        joinRoom(code, "");
+                    }
+                }));
             }
-            final AlertDialog dialog = new AlertDialog.Builder(this)
-                    .setTitle(R.string.together_find)
-                    .setItems(labels, (selected, which) -> {
-                        final JSONObject room = rooms.get(which);
-                        final String code = room.optString("id");
-                        if (room.optInt("pwd") == 1) {
-                            askRoomPassword(code);
-                        } else {
-                            joinRoom(code, "");
-                        }
-                    })
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .create();
-            dialog.setOnShowListener(ignored -> styleUaPickerDialog(dialog, 0));
-            dialog.show();
+            showSideMenu(getString(R.string.together_find), roomItems);
         });
     }
 
@@ -3680,19 +4029,19 @@ public class PlayerActivity extends Activity {
                 getString(R.string.sleep_timer_end_of_item),
                 getString(R.string.sleep_timer_custom)
         };
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(R.string.sleep_timer_title)
-                .setItems(labels, (selected, which) -> {
-                    int value = minutes[which];
-                    selected.dismiss();
-                    if (value == -2) showCustomSleepTimer();
-                    else if (value == -1) armSleepAtMediaEnd();
-                    else armSleepAfterMinutes(value);
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .create();
-        dialog.setOnShowListener(ignored -> styleUaPickerDialog(dialog, 0));
-        dialog.show();
+        final List<MenuItem> items = new ArrayList<>();
+        for (int index = 0; index < minutes.length; index++) {
+            final int value = minutes[index];
+            final boolean checked = value == -1
+                    ? sleepTimer.isAtMediaEnd()
+                    : value == 0 && !sleepTimer.isAtMediaEnd() && sleepTimer.remainingMs() <= 0;
+            items.add(new MenuItem(labels[index], null, checked, () -> {
+                if (value == -2) showCustomSleepTimer();
+                else if (value == -1) armSleepAtMediaEnd();
+                else armSleepAfterMinutes(value);
+            }));
+        }
+        showSideMenu(getString(R.string.sleep_timer_title), items);
     }
 
     private void showCustomSleepTimer() {
@@ -4478,39 +4827,35 @@ public class PlayerActivity extends Activity {
         if (lampaPlaylist == null || lampaPlaylist.size() < 2) return;
 
         final Dialog dialog = new Dialog(this, android.R.style.Theme_Translucent_NoTitleBar);
-        final FrameLayout overlay = new FrameLayout(this);
-        overlay.setBackgroundColor(Color.argb(36, 0, 0, 0));
-
         final LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(Utils.dpToPx(8), 0, Utils.dpToPx(8), Utils.dpToPx(8));
-        panel.setBackground(lampaBackground(lampaMenuColor(4, 18, 40),
-                Color.rgb(240, 183, 38), 10));
+        Utils.padForPickerInsets(this, ui, coordinatorLayout, panel,
+                ui.listPad(), 0, 0);
 
         final TextView heading = new TextView(this);
         heading.setText(R.string.playlist_title);
         heading.setTextColor(Color.WHITE);
-        heading.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
+        heading.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textTitle());
         heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         heading.setGravity(Gravity.CENTER_VERTICAL);
-        heading.setPadding(Utils.dpToPx(18), 0, Utils.dpToPx(18), 0);
+        heading.setPadding(ui.dp(10), ui.dp(8), ui.dp(10), ui.dp(8));
         panel.addView(heading, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, Utils.dpToPx(58)));
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         View headingDivider = new View(this);
-        headingDivider.setBackgroundColor(Color.rgb(35, 58, 84));
+        headingDivider.setBackgroundColor(Color.argb(38, 240, 183, 38));
         panel.addView(headingDivider, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, Utils.dpToPx(1)));
+                ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(1)));
 
         final ListView list = new ListView(this);
         list.setDivider(new ColorDrawable(Color.TRANSPARENT));
-        list.setDividerHeight(Utils.dpToPx(4));
+        list.setDividerHeight(ui.dp(4));
         list.setSelector(lampaBackground(Color.argb(56, 10, 39, 76),
                 Color.rgb(240, 183, 38), 7));
         list.setDrawSelectorOnTop(true);
         list.setItemsCanFocus(false);
         list.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
-        list.setPadding(Utils.dpToPx(8), 0, Utils.dpToPx(8), Utils.dpToPx(8));
+        list.setPadding(0, ui.dp(4), 0, 0);
         list.setClipToPadding(false);
         list.setAdapter(new EpisodeAdapter());
         list.setOnItemClickListener((parent, view, which, id) -> {
@@ -4523,35 +4868,15 @@ public class PlayerActivity extends Activity {
         panel.addView(list, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        int screenWidth = getResources().getDisplayMetrics().widthPixels;
-        int panelWidth = Math.max(Utils.dpToPx(330), Math.min(
-                (int) (screenWidth * (isTvBox ? 0.46f : 0.52f)), Utils.dpToPx(620)));
-        int screenHeight = getResources().getDisplayMetrics().heightPixels;
-        int topInset = isTvBox ? Utils.dpToPx(8) : Utils.dpToPx(28);
-        FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
-                panelWidth, Math.max(Utils.dpToPx(280), screenHeight - topInset),
-                Gravity.END | Gravity.BOTTOM);
-        overlay.addView(panel, panelParams);
-        overlay.setOnClickListener(view -> dialog.dismiss());
-        panel.setOnClickListener(view -> { });
-
-        dialog.setContentView(overlay);
-        Window window = dialog.getWindow();
-        if (window != null) {
-            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            window.setDimAmount(0f);
-        }
+        dialog.setContentView(panel);
         dialog.setOnShowListener(ignored -> {
-            Window shownWindow = dialog.getWindow();
-            if (shownWindow != null) {
-                shownWindow.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            }
             list.setSelection(lampaPlaylist.getCurrentIndex());
             list.setItemChecked(lampaPlaylist.getCurrentIndex(), true);
             list.requestFocus();
         });
-        dialog.show();
+        if (menuDialog != null) menuDialog.dismiss();
+        menuDialog = dialog;
+        showPickerDialog(dialog);
     }
 
     private ArrayList<AudioChoice> buildAudioChoices() {
@@ -4583,13 +4908,12 @@ public class PlayerActivity extends Activity {
     private void showAudioDialog() {
         final ArrayList<AudioChoice> choices = buildAudioChoices();
         if (choices.size() < 2) return;
-        final List<String> labels = new ArrayList<>();
-        final List<Runnable> actions = new ArrayList<>();
+        final List<MenuItem> items = new ArrayList<>();
         for (AudioChoice choice : choices) {
-            labels.add((choice.selected ? "✓  " : "") + choice.label);
-            actions.add(() -> applyAudioChoice(choice));
+            items.add(new MenuItem(choice.label, null, choice.selected,
+                    () -> applyAudioChoice(choice)));
         }
-        showActionDialog(getString(R.string.button_audio_track), labels, actions);
+        showSideMenu(getString(R.string.button_audio_track), items);
     }
 
     private void applyAudioChoice(AudioChoice choice) {
@@ -4667,82 +4991,31 @@ public class PlayerActivity extends Activity {
             return;
         }
 
-        final Dialog dialog = new Dialog(this, android.R.style.Theme_Translucent_NoTitleBar);
-        final FrameLayout overlay = new FrameLayout(this);
-        overlay.setBackgroundColor(Color.argb(44, 0, 0, 0));
-
-        final int gold = Color.rgb(240, 183, 38);
-        final LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(Utils.dpToPx(18), Utils.dpToPx(8), Utils.dpToPx(18), Utils.dpToPx(14));
-        panel.setBackground(lampaBackground(lampaMenuColor(4, 18, 40), gold, 10));
-
-        final TextView heading = new TextView(this);
-        heading.setText(R.string.quality_title);
-        heading.setTextColor(Color.WHITE);
-        heading.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
-        heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        heading.setGravity(Gravity.CENTER_VERTICAL);
-        heading.setPadding(Utils.dpToPx(12), 0, Utils.dpToPx(12), 0);
-        panel.addView(heading, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, Utils.dpToPx(66)));
-
-        final View divider = new View(this);
-        divider.setBackgroundColor(Color.rgb(35, 58, 84));
-        panel.addView(divider, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, Utils.dpToPx(1)));
-
-        final ListView list = new ListView(this);
-        list.setDivider(new ColorDrawable(Color.TRANSPARENT));
-        list.setDividerHeight(Utils.dpToPx(4));
-        list.setSelector(lampaBackground(Color.argb(56, 10, 39, 76), gold, 7));
-        list.setDrawSelectorOnTop(true);
-        list.setItemsCanFocus(false);
-        list.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
-        list.setPadding(0, Utils.dpToPx(6), 0, 0);
-        list.setClipToPadding(false);
-        list.setAdapter(new QualityAdapter(choices));
-        list.setOnItemClickListener((parent, view, which, id) -> {
-            applyVideoQuality(choices.get(which));
-            dialog.dismiss();
-        });
-        installTvListNavigation(list);
-        int visibleRows = Math.min(choices.size(), 6);
-        int screenHeight = getResources().getDisplayMetrics().heightPixels;
-        int desiredListHeight = Utils.dpToPx(visibleRows * 70 + 10);
-        int maxListHeight = Math.max(Utils.dpToPx(150),
-                screenHeight - Utils.dpToPx(110));
-        panel.addView(list, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, Math.min(desiredListHeight, maxListHeight)));
-
-        int screenWidth = getResources().getDisplayMetrics().widthPixels;
-        int panelWidth = Math.min((int) (screenWidth * (isTvBox ? 0.72f : 0.78f)),
-                Utils.dpToPx(920));
-        panelWidth = Math.max(panelWidth, Math.min(Utils.dpToPx(360), screenWidth));
-        FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
-                panelWidth, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
-        overlay.addView(panel, panelParams);
-        overlay.setOnClickListener(view -> dialog.dismiss());
-        panel.setOnClickListener(view -> { });
-
-        dialog.setContentView(overlay);
-        Window window = dialog.getWindow();
-        if (window != null) {
-            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            window.setDimAmount(0f);
-        }
-        dialog.setOnShowListener(ignored -> {
-            Window shownWindow = dialog.getWindow();
-            if (shownWindow != null) {
-                shownWindow.setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT);
+        int selected = selectedQualityIndex(choices);
+        final List<MenuItem> items = new ArrayList<>();
+        for (int index = 0; index < choices.size(); index++) {
+            final VideoQualityChoice choice = choices.get(index);
+            CharSequence badge;
+            CharSequence title;
+            CharSequence summary;
+            if (choice.mode == VideoQualityChoice.MODE_AUTO) {
+                badge = "A";
+                title = choice.label;
+                summary = getString(R.string.quality_auto_description);
+            } else if (choice.mode == VideoQualityChoice.MODE_MAXIMUM) {
+                badge = "★";
+                title = choice.label;
+                summary = getString(R.string.quality_maximum_badge);
+            } else {
+                badge = choice.label;
+                title = TextUtils.isEmpty(choice.details) ? choice.label : choice.details;
+                summary = choice.mode == VideoQualityChoice.MODE_SOURCE
+                        ? getString(R.string.quality_source) : null;
             }
-            int selected = selectedQualityIndex(choices);
-            list.setSelection(selected);
-            list.setItemChecked(selected, true);
-            list.post(list::requestFocus);
-        });
-        dialog.show();
+            items.add(MenuItem.rich(badge, title, summary, choice.bitrateText,
+                    index == selected, () -> applyVideoQuality(choice)));
+        }
+        showSideMenu(getString(R.string.quality_title), items);
     }
 
     private void installTvListNavigation(ListView list) {
@@ -4941,129 +5214,6 @@ public class PlayerActivity extends Activity {
         return 0;
     }
 
-    private final class QualityAdapter extends BaseAdapter {
-        private final List<VideoQualityChoice> choices;
-
-        QualityAdapter(List<VideoQualityChoice> choices) {
-            this.choices = choices;
-        }
-
-        @Override public int getCount() { return choices.size(); }
-        @Override public VideoQualityChoice getItem(int position) { return choices.get(position); }
-        @Override public long getItemId(int position) { return position; }
-
-        @Override
-        public View getView(int position, View convertView, ViewGroup parent) {
-            QualityRow holder;
-            if (convertView == null) {
-                LinearLayout row = new LinearLayout(PlayerActivity.this);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setPadding(Utils.dpToPx(12), Utils.dpToPx(6), Utils.dpToPx(14), Utils.dpToPx(6));
-                row.setMinimumHeight(Utils.dpToPx(66));
-                row.setFocusable(false);
-                row.setClickable(false);
-
-                TextView badge = new TextView(PlayerActivity.this);
-                badge.setGravity(Gravity.CENTER);
-                badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-                badge.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-                row.addView(badge, new LinearLayout.LayoutParams(
-                        Utils.dpToPx(112), Utils.dpToPx(44)));
-
-                LinearLayout textBlock = new LinearLayout(PlayerActivity.this);
-                textBlock.setOrientation(LinearLayout.VERTICAL);
-                textBlock.setGravity(Gravity.CENTER_VERTICAL);
-                TextView title = new TextView(PlayerActivity.this);
-                title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-                title.setTextColor(Color.WHITE);
-                title.setSingleLine(true);
-                TextView details = new TextView(PlayerActivity.this);
-                details.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-                details.setTextColor(Color.rgb(145, 178, 219));
-                details.setSingleLine(true);
-                textBlock.addView(title);
-                textBlock.addView(details);
-                LinearLayout.LayoutParams blockParams = new LinearLayout.LayoutParams(
-                        0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-                blockParams.setMarginStart(Utils.dpToPx(14));
-                row.addView(textBlock, blockParams);
-
-                TextView bitrate = new TextView(PlayerActivity.this);
-                bitrate.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-                bitrate.setTextColor(Color.rgb(145, 178, 219));
-                bitrate.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-                bitrate.setSingleLine(true);
-                row.addView(bitrate, new LinearLayout.LayoutParams(
-                        Utils.dpToPx(128), ViewGroup.LayoutParams.MATCH_PARENT));
-
-                TextView check = new TextView(PlayerActivity.this);
-                check.setText("✓");
-                check.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
-                check.setTextColor(Color.rgb(240, 183, 38));
-                check.setGravity(Gravity.CENTER);
-                row.addView(check, new LinearLayout.LayoutParams(
-                        Utils.dpToPx(42), ViewGroup.LayoutParams.MATCH_PARENT));
-
-                holder = new QualityRow(badge, title, details, bitrate, check);
-                row.setTag(holder);
-                convertView = row;
-            } else {
-                holder = (QualityRow) convertView.getTag();
-            }
-
-            VideoQualityChoice choice = getItem(position);
-            boolean special = choice.mode == VideoQualityChoice.MODE_AUTO
-                    || choice.mode == VideoQualityChoice.MODE_MAXIMUM;
-            holder.badge.setText(choice.mode == VideoQualityChoice.MODE_AUTO ? "A"
-                    : choice.mode == VideoQualityChoice.MODE_MAXIMUM ? "★" : choice.label);
-            holder.title.setText(special ? choice.label : choice.details);
-            holder.details.setText(choice.mode == VideoQualityChoice.MODE_AUTO
-                    ? getString(R.string.quality_auto_description)
-                    : choice.mode == VideoQualityChoice.MODE_MAXIMUM
-                    ? getString(R.string.quality_maximum_badge) : "");
-            holder.details.setTextColor(choice.mode == VideoQualityChoice.MODE_MAXIMUM
-                    ? Color.rgb(240, 183, 38) : Color.rgb(145, 178, 219));
-            holder.bitrate.setText(choice.bitrateText);
-            holder.check.setVisibility(position == selectedQualityIndex(choices)
-                    ? View.VISIBLE : View.INVISIBLE);
-            styleQualityBadge(holder.badge, false);
-            styleQualityRow(convertView, holder, false);
-            return convertView;
-        }
-    }
-
-    private void styleQualityRow(View row, QualityRow holder, boolean focused) {
-        int gold = Color.rgb(240, 183, 38);
-        row.setBackground(lampaBackground(focused
-                ? Color.rgb(10, 39, 76) : Color.argb(80, 4, 18, 40),
-                focused ? gold : Color.rgb(35, 58, 84), 7));
-        styleQualityBadge(holder.badge, focused);
-    }
-
-    private void styleQualityBadge(TextView badge, boolean focused) {
-        badge.setTextColor(focused ? Color.rgb(255, 204, 74) : Color.rgb(145, 178, 219));
-        badge.setBackground(lampaBackground(Color.argb(70, 4, 18, 40),
-                focused ? Color.rgb(240, 183, 38) : Color.rgb(62, 91, 126), 6));
-    }
-
-    private static final class QualityRow {
-        final TextView badge;
-        final TextView title;
-        final TextView details;
-        final TextView bitrate;
-        final TextView check;
-
-        QualityRow(TextView badge, TextView title, TextView details,
-                   TextView bitrate, TextView check) {
-            this.badge = badge;
-            this.title = title;
-            this.details = details;
-            this.bitrate = bitrate;
-            this.check = check;
-        }
-    }
-
     private final class EpisodeAdapter extends BaseAdapter {
         @Override public int getCount() { return lampaPlaylist == null ? 0 : lampaPlaylist.size(); }
         @Override public LampaPlaylist.Item getItem(int position) { return lampaPlaylist.get(position); }
@@ -5076,8 +5226,8 @@ public class PlayerActivity extends Activity {
                 LinearLayout row = new LinearLayout(PlayerActivity.this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setPadding(Utils.dpToPx(10), Utils.dpToPx(8), Utils.dpToPx(14), Utils.dpToPx(8));
-                row.setMinimumHeight(Utils.dpToPx(94));
+                row.setPadding(ui.dp(8), ui.dp(7), ui.dp(8), ui.dp(7));
+                row.setMinimumHeight(ui.dp(78));
                 row.setFocusable(false);
                 row.setClickable(false);
 
@@ -5090,28 +5240,31 @@ public class PlayerActivity extends Activity {
 
                 TextView number = new TextView(PlayerActivity.this);
                 number.setTextColor(Color.WHITE);
-                number.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+                number.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textCaption());
                 number.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
                 number.setGravity(Gravity.CENTER);
                 number.setBackgroundColor(Color.argb(190, 0, 0, 0));
                 FrameLayout.LayoutParams numberParams = new FrameLayout.LayoutParams(
-                        Utils.dpToPx(30), Utils.dpToPx(28), Gravity.START | Gravity.TOP);
+                        ui.dp(28), ui.dp(26), Gravity.START | Gravity.TOP);
                 preview.addView(number, numberParams);
 
+                int previewWidth = ui.deviceClass == UiMetrics.DeviceClass.PHONE
+                        ? ui.dp(112) : ui.dp(154);
                 LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
-                        Utils.dpToPx(154), Utils.dpToPx(86));
+                        previewWidth, Math.round(previewWidth * 9f / 16f));
                 row.addView(preview, previewParams);
 
                 TextView title = new TextView(PlayerActivity.this);
                 title.setTextColor(Color.WHITE);
-                title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+                title.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textList());
                 title.setMaxLines(2);
                 title.setEllipsize(TextUtils.TruncateAt.END);
                 title.setGravity(Gravity.CENTER_VERTICAL);
                 LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                         0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
-                titleParams.setMarginStart(Utils.dpToPx(16));
+                titleParams.setMarginStart(ui.dp(10));
                 row.addView(title, titleParams);
+                fitLongText(row, title);
 
                 holder = new EpisodeRow(thumbnail, number, title);
                 row.setTag(holder);
@@ -5458,27 +5611,21 @@ public class PlayerActivity extends Activity {
         boolean textEnabled = mainLineTrackSelected();
         boolean painting = paintedSubtitleUri != null;
         Uri fileOnly = subtitleWithoutTrack();
-        List<String> labels = new ArrayList<>();
-        List<Runnable> actions = new ArrayList<>();
-        int checked = -1;
+        List<MenuItem> items = new ArrayList<>();
 
         if (secondaryEnabled()) {
-            labels.add(getString(R.string.subtitle_secondary_title) + "  \u00B7  "
-                    + secondarySubtitleSummary());
-            actions.add(this::showSecondarySubtitleDialog);
+            items.add(new MenuItem(getString(R.string.subtitle_secondary_title),
+                    secondarySubtitleSummary(), false, this::showSecondarySubtitleDialog));
+            items.add(MenuItem.rule());
         }
 
-        int offIndex = labels.size();
-        labels.add(getString(R.string.pref_subtitle_none));
-        actions.add(this::disableSubtitles);
-        if (!textEnabled && !painting) checked = offIndex;
+        items.add(new MenuItem(getString(R.string.pref_subtitle_none), null,
+                !textEnabled && !painting, this::disableSubtitles));
         if (fileOnly != null) {
-            if (painting) checked = labels.size();
-            labels.add(subtitleFileLabel(fileOnly));
-            actions.add(() -> {
+            items.add(new MenuItem(subtitleFileLabel(fileOnly), null, painting, () -> {
                 suppressAutomaticSubtitleSearch();
                 addSubtitleTrack(fileOnly);
-            });
+            }));
         }
 
         for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
@@ -5488,36 +5635,27 @@ public class PlayerActivity extends Activity {
                 Format format = group.getTrackFormat(index);
                 if (!group.isTrackSupported(index) || isPhantomClosedCaption(format)) continue;
                 if (format.equals(secondaryTextTrack.get())) continue;
-                if (!painting && group.isTrackSelected(index)) checked = labels.size();
                 String label = trackNameProvider == null
                         ? format.label : trackNameProvider.getTrackName(format);
                 if (label == null || label.trim().isEmpty()) {
                     label = displaySubtitleLanguage(format.language);
                 }
                 final int selectedIndex = index;
-                labels.add(label == null || label.trim().isEmpty()
-                        ? getString(R.string.pref_subtitle_header) : label);
-                actions.add(() -> applySubtitle(trackGroup, selectedIndex));
+                CharSequence title = label == null || label.trim().isEmpty()
+                        ? getString(R.string.pref_subtitle_header) : label;
+                items.add(new MenuItem(title, null,
+                        !painting && group.isTrackSelected(index),
+                        () -> applySubtitle(trackGroup, selectedIndex)));
             }
         }
-        labels.add(getString(R.string.subtitle_search_manual));
-        actions.add(() -> showManualSubtitleSearch(false));
-
-        AlertDialog.Builder builder = new AlertDialog.Builder(this)
-                .setTitle(R.string.pref_subtitle_header)
-                .setSingleChoiceItems(labels.toArray(new String[0]), checked, (selected, which) -> {
-                    actions.get(which).run();
-                    selected.dismiss();
-                })
-                .setNegativeButton(android.R.string.cancel, null);
+        items.add(MenuItem.rule());
+        items.add(new MenuItem(getString(R.string.subtitle_search_manual), null,
+                false, () -> showManualSubtitleSearch(false)));
         if (hasActiveSubtitle()) {
-            builder.setNeutralButton(R.string.subtitle_offset_title,
-                    (selected, which) -> showSubtitleOffsetDialog());
+            items.add(new MenuItem(getString(R.string.subtitle_offset_title),
+                    subtitleOffsetSummary(), false, this::showSubtitleOffsetDialog));
         }
-        AlertDialog dialog = builder.create();
-        final int initialSelection = checked;
-        dialog.setOnShowListener(ignored -> styleUaPickerDialog(dialog, initialSelection));
-        dialog.show();
+        showSideMenu(getString(R.string.pref_subtitle_header), items);
     }
 
     private void clearSubtitleTimeline() {
@@ -5713,13 +5851,10 @@ public class PlayerActivity extends Activity {
 
     private void showSecondarySubtitleDialog() {
         if (player == null) return;
-        List<String> labels = new ArrayList<>();
-        List<Runnable> actions = new ArrayList<>();
-        int checked = -1;
+        List<MenuItem> items = new ArrayList<>();
 
-        labels.add(getString(R.string.pref_subtitle_none));
-        actions.add(() -> chooseSecondarySubtitle(null));
-        if (!secondaryActive()) checked = 0;
+        items.add(new MenuItem(getString(R.string.pref_subtitle_none), null,
+                !secondaryActive(), () -> chooseSecondarySubtitle(null)));
 
         Format currentTrack = secondaryTextTrack.get();
         int number = 0;
@@ -5739,35 +5874,23 @@ public class PlayerActivity extends Activity {
                 if (label == null || label.trim().isEmpty()) {
                     label = displaySubtitleLanguage(format.language);
                 }
-                if (format.equals(currentTrack)) checked = labels.size();
                 int selectedIndex = index;
-                labels.add(label == null || label.trim().isEmpty()
-                        ? getString(R.string.pref_subtitle_header) + " " + number : label);
-                actions.add(() -> chooseSecondarySubtitleTrack(
-                        mediaGroup, selectedIndex, format));
+                CharSequence title = label == null || label.trim().isEmpty()
+                        ? getString(R.string.pref_subtitle_header) + " " + number : label;
+                items.add(new MenuItem(title, null, format.equals(currentTrack),
+                        () -> chooseSecondarySubtitleTrack(mediaGroup, selectedIndex, format)));
             }
         }
 
         for (Uri uri : externalSubtitleUris()) {
             if (shownByMainLine(uri)) continue;
-            if (uri.equals(secondarySubtitleUri)) checked = labels.size();
-            labels.add(subtitleFileLabel(uri));
-            actions.add(() -> chooseSecondarySubtitle(uri));
+            items.add(new MenuItem(subtitleFileLabel(uri), null,
+                    uri.equals(secondarySubtitleUri), () -> chooseSecondarySubtitle(uri)));
         }
-        labels.add(getString(R.string.subtitle_search_manual));
-        actions.add(() -> showManualSubtitleSearch(true));
-
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(R.string.subtitle_secondary_title)
-                .setSingleChoiceItems(labels.toArray(new String[0]), checked, (selected, which) -> {
-                    actions.get(which).run();
-                    selected.dismiss();
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .create();
-        final int initialSelection = checked;
-        dialog.setOnShowListener(ignored -> styleUaPickerDialog(dialog, initialSelection));
-        dialog.show();
+        items.add(MenuItem.rule());
+        items.add(new MenuItem(getString(R.string.subtitle_search_manual), null,
+                false, () -> showManualSubtitleSearch(true)));
+        showSideMenu(getString(R.string.subtitle_secondary_title), items);
     }
 
     private void showManualSubtitleSearch(boolean secondary) {
@@ -5810,23 +5933,16 @@ public class PlayerActivity extends Activity {
                     Toast.makeText(this, R.string.subtitle_search_none, Toast.LENGTH_SHORT).show();
                     return;
                 }
-                String[] labels = new String[titles.size()];
-                for (int index = 0; index < titles.size(); index++) {
-                    TitleSearch.Title title = titles.get(index);
+                List<MenuItem> results = new ArrayList<>();
+                for (TitleSearch.Title title : titles) {
                     String kind = getString(title.movie
                             ? R.string.subtitle_search_movie : R.string.subtitle_search_series);
-                    labels[index] = title.name
-                            + (title.year == null ? "" : " (" + title.year + ")")
-                            + "  \u00B7  " + kind;
+                    String year = title.year == null ? null : String.valueOf(title.year);
+                    String summary = year == null ? kind : year + "  \u00B7  " + kind;
+                    results.add(new MenuItem(title.name, summary, false,
+                            () -> chooseManualSubtitleTitle(title, secondary)));
                 }
-                AlertDialog choices = new AlertDialog.Builder(this)
-                        .setTitle(R.string.subtitle_search_results)
-                        .setItems(labels, (selected, which) ->
-                                chooseManualSubtitleTitle(titles.get(which), secondary))
-                        .setNegativeButton(android.R.string.cancel, null)
-                        .create();
-                choices.setOnShowListener(ignored -> styleUaPickerDialog(choices, 0));
-                choices.show();
+                showSideMenu(getString(R.string.subtitle_search_results), results);
             });
         }, "SubtitleTitleSearch");
         worker.setDaemon(true);
@@ -8381,6 +8497,7 @@ public class PlayerActivity extends Activity {
         UiMetrics updatedUi = UiMetrics.of(this, isTvBox);
         if (!updatedUi.sameClassAndWidth(ui)) {
             ui = updatedUi;
+            applyLampaTopLayout();
             if (controlView != null) controlView.requestApplyInsets();
         }
         updateSubtitleViewMargin();
@@ -8736,10 +8853,6 @@ public class PlayerActivity extends Activity {
                 -1);
     }
 
-    private void styleUaPickerDialog(AlertDialog dialog, int checkedIndex) {
-        UaDialogStyler.style(this, dialog, UaDialogStyler.FocusTarget.LIST, checkedIndex);
-    }
-
     void deleteMedia() {
         try {
             if (ContentResolver.SCHEME_CONTENT.equals(mPrefs.mediaUri.getScheme())) {
@@ -8902,24 +9015,13 @@ public class PlayerActivity extends Activity {
 
     private void showVideoScaleModePicker() {
         VideoScaleMode[] modes = VideoScaleMode.values();
-        String[] labels = new String[modes.length];
-        int checked = 0;
         VideoScaleMode current = currentVideoScaleMode();
-        for (int i = 0; i < modes.length; i++) {
-            labels[i] = videoScaleLabel(modes[i]);
-            if (modes[i] == current) checked = i;
+        final List<MenuItem> items = new ArrayList<>();
+        for (VideoScaleMode mode : modes) {
+            items.add(new MenuItem(videoScaleLabel(mode), null, mode == current,
+                    () -> applyVideoScaleMode(mode)));
         }
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(R.string.video_scale_title)
-                .setSingleChoiceItems(labels, checked, (selected, which) -> {
-                    applyVideoScaleMode(modes[which]);
-                    selected.dismiss();
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .create();
-        final int initialSelection = checked;
-        dialog.setOnShowListener(ignored -> styleUaPickerDialog(dialog, initialSelection));
-        dialog.show();
+        showSideMenu(getString(R.string.video_scale_title), items);
     }
 
     void showSwipeToUnlock() {
