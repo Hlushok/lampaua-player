@@ -53,6 +53,15 @@ public class SkipPolicyTest {
                         SkipPolicy.Mode.AUTO, 5000).state);
     }
 
+    @Test public void sessionOffModeDoesNotOfferOrTriggerSegment() {
+        SkipController controller = new SkipController();
+        List<SkipSegment> segments = Collections.singletonList(
+                new SkipSegment(10_000, 20_000, SkipSegment.Kind.INTRO, "server"));
+        assertEquals(SkipController.State.HIDDEN,
+                controller.update(segments, 12_000, 60_000, false,
+                        SkipPolicy.Mode.OFF, 1000).state);
+    }
+
     @Test public void skippedCreditsAdvanceAndCanUndo() {
         SkipController controller = new SkipController();
         List<SkipSegment> segments = Collections.singletonList(

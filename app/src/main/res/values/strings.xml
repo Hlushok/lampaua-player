@@ -55,6 +55,7 @@
     <string name="pref_title">Settings</string>
     <string name="subtitle_offset_title">Subtitle offset</string>
     <string name="subtitle_offset_reset">Reset</string>
+    <string name="offset_seconds">%1$s s</string>
     <string name="pref_general_header">General</string>
     <string name="pref_framerate_matching">Auto frame rate matching</string>
     <string name="pref_framerate_matching_on">Switch display refresh rate to match video frame rate</string>
@@ -228,6 +229,12 @@
     <string name="pref_skip_mode_brief">Show briefly</string>
     <string name="pref_skip_mode_full">Show for the whole segment</string>
     <string name="pref_skip_mode_auto">Skip automatically</string>
+    <string name="skip_session_title">Skips in this session</string>
+    <string name="skip_offset_title">Skip offset</string>
+    <string name="skip_mode_brief_short">5 s</string>
+    <string name="skip_mode_button_short">Button</string>
+    <string name="skip_mode_auto_short">Auto</string>
+    <string name="skip_mode_off_short">Never</string>
     <string name="pref_skip_fetch">Find segments online</string>
     <string name="pref_skip_fetch_on">Ask the configured skip service when LAMPA provides no segments</string>
     <string name="pref_skip_fetch_off">Use only segments supplied by LAMPA</string>

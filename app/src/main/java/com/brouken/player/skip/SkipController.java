@@ -51,6 +51,10 @@ public final class SkipController {
 
     public Model update(List<SkipSegment> segments, long positionMs, long durationMs,
                         boolean hasNext, SkipPolicy.Mode mode, long nowMs) {
+        if (mode == SkipPolicy.Mode.OFF) {
+            autoSegment = null;
+            return hidden();
+        }
         if (undoUntilMs > nowMs) {
             return model(State.UNDO_AVAILABLE, Action.NONE, currentSegment,
                     undoPositionMs, undoUntilMs - nowMs, UNDO_MS);

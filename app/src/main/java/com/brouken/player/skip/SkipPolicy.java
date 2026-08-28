@@ -6,7 +6,7 @@ import java.util.Comparator;
 import java.util.List;
 
 public final class SkipPolicy {
-    public enum Mode { BRIEF_BUTTON, FULL_BUTTON, AUTO }
+    public enum Mode { BRIEF_BUTTON, FULL_BUTTON, AUTO, OFF }
 
     private SkipPolicy() {}
 

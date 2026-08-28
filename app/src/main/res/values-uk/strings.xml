@@ -54,6 +54,7 @@
     <string name="pref_title">Налаштування</string>
     <string name="subtitle_offset_title">Зміщення субтитрів</string>
     <string name="subtitle_offset_reset">Скинути</string>
+    <string name="offset_seconds">%1$s с</string>
     <string name="pref_general_header">Загальні</string>
     <string name="pref_framerate_matching">Автоматичне узгодження частоти кадрів</string>
     <string name="pref_framerate_matching_on">Переключати частоту оновлення екрану відповідно до частоти кадрів відеосигналу</string>
@@ -227,6 +228,12 @@
     <string name="pref_skip_mode_brief">Показувати коротко</string>
     <string name="pref_skip_mode_full">Показувати до кінця сегмента</string>
     <string name="pref_skip_mode_auto">Пропускати автоматично</string>
+    <string name="skip_session_title">Пропуски в цьому сеансі</string>
+    <string name="skip_offset_title">Зміщення пропуску</string>
+    <string name="skip_mode_brief_short">5 с</string>
+    <string name="skip_mode_button_short">Кнопка</string>
+    <string name="skip_mode_auto_short">Авто</string>
+    <string name="skip_mode_off_short">Ніколи</string>
     <string name="pref_skip_fetch">Шукати сегменти онлайн</string>
     <string name="pref_skip_fetch_on">Запитувати налаштований сервіс, якщо LAMPA не передала сегменти</string>
     <string name="pref_skip_fetch_off">Використовувати лише сегменти, передані LAMPA</string>

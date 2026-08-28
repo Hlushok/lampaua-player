@@ -449,6 +449,9 @@ public class ResourceContractTest {
     public void subtitleOffsetAndHotAttachStayIntegrated() throws Exception {
         String activity = readProjectFile(
                 "src/main/java/com/brouken/player/PlayerActivity.java");
+        String offset = readProjectFile(
+                "src/main/java/com/brouken/player/OffsetPanel.java");
+        String ukrainian = readProjectFile("src/main/res/values-uk/strings.xml");
 
         assertTrue(activity.contains("buildTextRenderers(Context context, TextOutput output"));
         assertTrue(activity.contains("new SubtitleOffset("));
@@ -460,8 +463,11 @@ public class ResourceContractTest {
         assertTrue(activity.contains("R.drawable.ic_subtitle_offset_24dp"));
         assertTrue(activity.contains("showSubtitleDialog()"));
         assertTrue(activity.contains("attachSubtitleTrack(subtitleUri)"));
-        assertFalse(activity.contains("button_skip_offset"));
-        assertFalse(activity.contains("skipOffsetSec"));
+        assertTrue(activity.contains("showSkipSessionDialog()"));
+        assertTrue(activity.contains("skipOffsetSec"));
+        assertTrue(activity.contains("SkipSessionPolicy.shiftAndValidate"));
+        assertTrue(offset.contains("static final class Choice"));
+        assertTrue(ukrainian.contains("name=\"skip_session_title\""));
     }
 
     @Test

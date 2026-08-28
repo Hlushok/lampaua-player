@@ -142,6 +142,7 @@ import com.brouken.player.update.Updater;
 import com.brouken.player.skip.SkipController;
 import com.brouken.player.skip.SkipPolicy;
 import com.brouken.player.skip.SkipSegment;
+import com.brouken.player.skip.SkipSessionPolicy;
 import com.brouken.player.together.Relay;
 import com.brouken.player.together.Room;
 import com.brouken.player.together.RoomAction;
@@ -251,6 +252,16 @@ public class PlayerActivity extends Activity {
     private static final long SUBTITLE_MISS_TTL_MS = 30 * 60 * 1000L;
     private static final double SUBTITLE_OFFSET_MAX_SEC = 180.0;
     private static final double SUBTITLE_OFFSET_STEP_SEC = 0.25;
+    private static final double SKIP_OFFSET_MAX_SEC = 30.0;
+    private static final double SKIP_OFFSET_STEP_SEC = 0.25;
+    private static final String[] SKIP_SESSION_MODE_VALUES = {
+            Prefs.SKIP_MODE_BRIEF, Prefs.SKIP_MODE_FULL,
+            Prefs.SKIP_MODE_AUTO, Prefs.SKIP_MODE_OFF
+    };
+    private static final int[] SKIP_SESSION_MODE_LABELS = {
+            R.string.skip_mode_brief_short, R.string.skip_mode_button_short,
+            R.string.skip_mode_auto_short, R.string.skip_mode_off_short
+    };
     private static final Map<String, Long> subtitleSearchMisses = new ConcurrentHashMap<>();
 
     private CoordinatorLayout coordinatorLayout;
@@ -349,6 +360,7 @@ public class PlayerActivity extends Activity {
     private int titleSearchGeneration;
     private int subtitleViewHeight;
     private AlertDialog subtitleOffsetDialog;
+    private AlertDialog skipSessionDialog;
     private boolean switchingPlaylistItem;
     private boolean inPip;
     private boolean playlistCurrentRecorded;
@@ -553,6 +565,9 @@ public class PlayerActivity extends Activity {
     private final SkipController skipController = new SkipController();
     private SkipController.Model skipModel;
     private String focusedSkipKey;
+    private double skipOffsetSec;
+    private String skipModeSession;
+    private boolean skipSeenThisSession;
     private boolean skipPlaylistAdvance;
     private int skipUndoPlaylistIndex = -1;
     private long pendingPlaylistRestorePosition = C.TIME_UNSET;
@@ -1821,6 +1836,7 @@ public class PlayerActivity extends Activity {
         apiHeaders.clear();
         intentReturnResult = false;
         mPrefs.setPersistent(true);
+        resetSkipSession();
     }
 
     /**
@@ -2345,6 +2361,10 @@ public class PlayerActivity extends Activity {
         lampaSkipButton.setFocusable(true);
         lampaSkipButton.setClickable(true);
         lampaSkipButton.setOnClickListener(view -> activateSkipModel());
+        lampaSkipButton.setOnLongClickListener(view -> {
+            if (!locked) showSkipSessionDialog();
+            return true;
+        });
         lampaSkipProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         lampaSkipProgress.setMax(1000);
         lampaSkipProgress.setProgressTintList(android.content.res.ColorStateList.valueOf(gold));
@@ -2529,11 +2549,11 @@ public class PlayerActivity extends Activity {
         if (main && second) {
             if (Math.abs(subtitleOffsetSec) < 0.001
                     && Math.abs(secondarySubtitleOffsetSec) < 0.001) return null;
-            return OffsetPanel.format(subtitleOffsetSec) + " / "
-                    + OffsetPanel.format(secondarySubtitleOffsetSec);
+            return OffsetPanel.format(this, subtitleOffsetSec) + " / "
+                    + OffsetPanel.format(this, secondarySubtitleOffsetSec);
         }
         double value = second ? secondarySubtitleOffsetSec : subtitleOffsetSec;
-        return Math.abs(value) < 0.001 ? null : OffsetPanel.format(value);
+        return Math.abs(value) < 0.001 ? null : OffsetPanel.format(this, value);
     }
 
     private void showPlayerTools() {
@@ -2625,6 +2645,12 @@ public class PlayerActivity extends Activity {
             items.add(getString(R.string.subtitle_offset_title)
                     + (offsetSummary == null ? "" : "  \u00B7  " + offsetSummary));
             actions.add(this::showSubtitleOffsetDialog);
+        }
+        if (skipSessionReachable()) {
+            String summary = skipSessionSummary();
+            items.add(getString(R.string.skip_session_title)
+                    + (summary == null ? "" : "  \u00B7  " + summary));
+            actions.add(this::showSkipSessionDialog);
         }
         items.add(getString(R.string.playback_statistics_title));
         actions.add(this::showPlaybackStatistics);
@@ -4000,7 +4026,10 @@ public class PlayerActivity extends Activity {
                         skipKind(segment), segment.source));
             }
         }
-        return SkipPolicy.validate(segments, duration);
+        List<SkipSegment> validated = SkipSessionPolicy.shiftAndValidate(
+                segments, duration, skipOffsetSec);
+        if (!validated.isEmpty()) skipSeenThisSession = true;
+        return validated;
     }
 
     private SkipSegment.Kind skipKind(LampaPlaylist.Segment segment) {
@@ -4029,18 +4058,96 @@ public class PlayerActivity extends Activity {
                 break;
             }
         }
-        if (relevant != null && relevant.kind == SkipSegment.Kind.AD) {
-            return SkipPolicy.Mode.AUTO;
-        }
-        String preference = relevant != null && isCreditsSegment(relevant, duration)
-                ? mPrefs.skipModeCredits : mPrefs.skipMode;
-        return parseSkipMode(preference);
+        return SkipSessionPolicy.modeFor(skipModeSession, mPrefs.skipMode,
+                mPrefs.skipModeCredits, relevant, duration);
     }
 
-    private SkipPolicy.Mode parseSkipMode(String value) {
-        if (Prefs.SKIP_MODE_AUTO.equals(value)) return SkipPolicy.Mode.AUTO;
-        if (Prefs.SKIP_MODE_BRIEF.equals(value)) return SkipPolicy.Mode.BRIEF_BUTTON;
-        return SkipPolicy.Mode.FULL_BUTTON;
+    private boolean skipSessionReachable() {
+        return mPrefs != null && mPrefs.skipEnabled
+                && (skipSeenThisSession || skipModeSession != null
+                || Math.abs(skipOffsetSec) >= 0.001);
+    }
+
+    private String skipSessionSummary() {
+        List<String> parts = new ArrayList<>();
+        if (skipModeSession != null) {
+            for (int index = 0; index < SKIP_SESSION_MODE_VALUES.length; index++) {
+                if (SKIP_SESSION_MODE_VALUES[index].equals(skipModeSession)) {
+                    parts.add(getString(SKIP_SESSION_MODE_LABELS[index]));
+                    break;
+                }
+            }
+        }
+        if (Math.abs(skipOffsetSec) >= 0.001) {
+            parts.add(OffsetPanel.format(this, skipOffsetSec));
+        }
+        return parts.isEmpty() ? null : TextUtils.join("  \u00B7  ", parts);
+    }
+
+    private void showSkipSessionDialog() {
+        if (player == null || lampaPlaylist == null) return;
+        long duration = player.getDuration();
+        LampaPlaylist.Item item = lampaPlaylist.getCurrent();
+        if (item == null || duration == C.TIME_UNSET || duration <= 0) return;
+        List<SkipSegment> segments = validatedSkipSegments(item, duration);
+        boolean hasChoice = skipModeSession != null
+                || SkipSessionPolicy.hasUserControlledSegments(segments);
+        OffsetPanel.Choice[] choices = new OffsetPanel.Choice[0];
+        if (hasChoice) {
+            CharSequence[] labels = new CharSequence[SKIP_SESSION_MODE_LABELS.length];
+            for (int index = 0; index < labels.length; index++) {
+                labels[index] = getString(SKIP_SESSION_MODE_LABELS[index]);
+            }
+            String inherited = SkipSessionPolicy.inheritedMode(
+                    mPrefs.skipMode, mPrefs.skipModeCredits);
+            choices = new OffsetPanel.Choice[]{new OffsetPanel.Choice(
+                    labels, SKIP_SESSION_MODE_VALUES,
+                    skipModeSession == null ? inherited : skipModeSession,
+                    inherited, this::setSessionSkipMode)};
+        }
+        if (skipSessionDialog != null) skipSessionDialog.dismiss();
+        skipSessionDialog = OffsetPanel.create(this,
+                getString(R.string.skip_session_title),
+                SKIP_OFFSET_MAX_SEC, SKIP_OFFSET_STEP_SEC, choices,
+                new OffsetPanel.Line(hasChoice ? getString(R.string.skip_offset_title) : null,
+                        skipOffsetSec, this::applySkipOffset));
+        skipSessionDialog.setIcon(R.drawable.ic_skip_offset_24dp);
+        skipSessionDialog.setOnDismissListener(ignored -> skipSessionDialog = null);
+        skipSessionDialog.show();
+    }
+
+    private void applySkipOffset(double seconds) {
+        skipOffsetSec = Math.max(-SKIP_OFFSET_MAX_SEC,
+                Math.min(SKIP_OFFSET_MAX_SEC, seconds));
+        refreshSkipSessionPolicy();
+    }
+
+    private void setSessionSkipMode(String mode) {
+        if (mode != null && !Arrays.asList(SKIP_SESSION_MODE_VALUES).contains(mode)) return;
+        skipModeSession = mode;
+        refreshSkipSessionPolicy();
+    }
+
+    private void refreshSkipSessionPolicy() {
+        skipController.reset();
+        skipModel = null;
+        focusedSkipKey = null;
+        updateLampaSegmentMarkers();
+        updateLampaSkipUi();
+    }
+
+    private void resetSkipSession() {
+        skipOffsetSec = 0;
+        skipModeSession = null;
+        skipSeenThisSession = false;
+        skipController.reset();
+        skipModel = null;
+        focusedSkipKey = null;
+        skipUndoPlaylistIndex = -1;
+        if (skipSessionDialog != null) {
+            skipSessionDialog.dismiss();
+            skipSessionDialog = null;
+        }
     }
 
     private String segmentButtonText(SkipSegment segment, long duration) {
@@ -4049,14 +4156,6 @@ public class PlayerActivity extends Activity {
             return getString(R.string.next_episode);
         }
         return getString(R.string.skip_action);
-    }
-
-    private boolean isCreditsSegment(SkipSegment segment, long duration) {
-        if (segment == null) return false;
-        if (segment.kind == SkipSegment.Kind.OUTRO
-                || segment.kind == SkipSegment.Kind.CREDITS) return true;
-        return duration != C.TIME_UNSET && duration > 0
-                && segment.endMs >= Math.round(duration * 0.75d);
     }
 
     private boolean reachesMediaEnd(SkipSegment segment, long duration) {
