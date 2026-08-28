@@ -273,14 +273,13 @@ public class PlayerActivity extends Activity {
     private ImageButton buttonOpen;
     private ImageButton buttonPlaylist;
     private ImageButton buttonQuality;
+    private ImageButton buttonAudio;
     private ImageButton buttonPiP;
     private ImageButton buttonAspectRatio;
     private ImageButton buttonLock;
     private ImageButton buttonRotation;
-    private ImageButton buttonTools;
-    private ImageButton buttonTogether;
+    private ImageButton buttonMore;
     private ImageButton buttonUpdate;
-    private ImageButton buttonAppSettings;
     private View emptyStateView;
     private View emptyStateOpen;
     private ImageButton exoSubtitle;
@@ -577,6 +576,7 @@ public class PlayerActivity extends Activity {
     private final Handler lampaUiHandler = new Handler(Looper.getMainLooper());
     private final SimpleDateFormat lampaClockFormatter = new SimpleDateFormat("HH:mm", Locale.getDefault());
     private LinearLayout lampaTopPanel;
+    private LinearLayout lampaHeaderButtons;
     private ImageView lampaTopThumbnail;
     private TextView lampaEpisodeBadge;
     private TextView lampaTopTitle;
@@ -890,19 +890,23 @@ public class PlayerActivity extends Activity {
         buttonPlaylist.setImageResource(R.drawable.ic_playlist_play_24dp);
         buttonPlaylist.setId(View.generateViewId());
         buttonPlaylist.setContentDescription(getString(R.string.button_playlist));
-        buttonPlaylist.setVisibility(barVisibility(mPrefs.showButtonPlaylist,
-                lampaPlaylist != null && lampaPlaylist.size() > 1));
+        buttonPlaylist.setVisibility(lampaPlaylist != null && lampaPlaylist.size() > 1
+                ? View.VISIBLE : View.GONE);
         buttonPlaylist.setOnClickListener(view -> showLampaPlaylist());
 
         buttonQuality = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
         buttonQuality.setImageResource(R.drawable.ic_high_quality_24dp);
+        buttonQuality.setId(View.generateViewId());
         buttonQuality.setContentDescription(getString(R.string.button_quality));
+        buttonQuality.setVisibility(View.GONE);
         buttonQuality.setOnClickListener(view -> showQualityDialog());
 
-        buttonAppSettings = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
-        buttonAppSettings.setImageResource(R.drawable.ic_settings_24dp);
-        buttonAppSettings.setContentDescription(getString(R.string.button_app_settings));
-        buttonAppSettings.setOnClickListener(view -> openAppSettings());
+        buttonAudio = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
+        buttonAudio.setImageResource(R.drawable.ic_audiotrack_24dp);
+        buttonAudio.setId(View.generateViewId());
+        buttonAudio.setContentDescription(getString(R.string.button_audio_track));
+        buttonAudio.setVisibility(View.GONE);
+        buttonAudio.setOnClickListener(view -> showAudioDialog());
 
         buttonUpdate = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
         buttonUpdate.setImageResource(R.drawable.ic_update_24dp);
@@ -910,16 +914,15 @@ public class PlayerActivity extends Activity {
         buttonUpdate.setVisibility(View.GONE);
         buttonUpdate.setOnClickListener(view -> showPendingUpdate(true));
 
-        buttonTools = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
-        buttonTools.setImageResource(R.drawable.ic_more_vert_24dp);
-        buttonTools.setContentDescription(getString(R.string.player_tools));
-        buttonTools.setOnClickListener(view -> showPlayerTools());
-
-        buttonTogether = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
-        buttonTogether.setImageResource(R.drawable.ic_together_24dp);
-        buttonTogether.setContentDescription(getString(R.string.together_title));
-        buttonTogether.setVisibility(View.GONE);
-        buttonTogether.setOnClickListener(view -> showTogetherMenu());
+        buttonMore = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
+        buttonMore.setImageResource(R.drawable.ic_settings_24dp);
+        buttonMore.setId(View.generateViewId());
+        buttonMore.setContentDescription(getString(R.string.button_more));
+        buttonMore.setOnClickListener(view -> showMoreMenu());
+        buttonMore.setOnLongClickListener(view -> {
+            openAppSettings();
+            return true;
+        });
 
         if (Utils.isPiPSupported(this)) {
             // TODO: Android 12 improvements:
@@ -1194,30 +1197,39 @@ public class PlayerActivity extends Activity {
         final HorizontalScrollView horizontalScrollView = (HorizontalScrollView) getLayoutInflater().inflate(R.layout.controls, null);
         final LinearLayout controls = horizontalScrollView.findViewById(R.id.controls);
 
-        controls.addView(buttonOpen);
-        controls.addView(buttonPlaylist);
+        // Just+ v1.3 semantic order: media pickers first on every device.
         controls.addView(buttonQuality);
+        controls.addView(buttonAudio);
         controls.addView(exoSubtitle);
-        controls.addView(buttonAspectRatio);
-        if (!isTvBox) controls.addView(buttonLock);
-        if (Utils.isPiPSupported(this) && buttonPiP != null) {
-            controls.addView(buttonPiP);
-        }
+        controls.addView(buttonPlaylist);
         if (mPrefs.repeatToggle) {
             controls.addView(exoRepeat);
         }
-        if (!isTvBox) {
-            controls.addView(buttonRotation);
+
+        // Display actions sit by the clock on touch devices and in the one TV focus row.
+        final LinearLayout displayParent = isTvBox ? controls : lampaHeaderButtons;
+        displayParent.addView(buttonAspectRatio);
+        if (Utils.isPiPSupported(this) && buttonPiP != null) {
+            displayParent.addView(buttonPiP);
         }
-        controls.addView(exoSettings);
-        controls.addView(buttonTogether);
-        controls.addView(buttonTools);
+        if (!isTvBox) displayParent.addView(buttonRotation);
+
+        // Update is adjacent to More; More always terminates the bottom bar.
         controls.addView(buttonUpdate);
-        controls.addView(buttonAppSettings);
+        controls.addView(buttonMore);
         styleTvBottomControls(controls);
-        applyControlVisibility();
 
         exoBasicControls.addView(horizontalScrollView);
+
+        // Lock is isolated at the far-left of the time row on touch devices.
+        if (!isTvBox) {
+            View exoTime = findViewById(R.id.exo_time);
+            if (exoTime instanceof LinearLayout) {
+                ((LinearLayout) exoTime).addView(buttonLock, 0);
+                exoTime.bringToFront();
+            }
+        }
+        updateMediaControlVisibility();
 
         if (Build.VERSION.SDK_INT > 23) {
             horizontalScrollView.setOnScrollChangeListener((view, i, i1, i2, i3) -> resetHideCallbacks());
@@ -2179,8 +2191,8 @@ public class PlayerActivity extends Activity {
                 mPrefs.setPersistent(false);
             }
             if (buttonPlaylist != null) {
-                buttonPlaylist.setVisibility(barVisibility(
-                        mPrefs.showButtonPlaylist, lampaPlaylist.size() > 1));
+                buttonPlaylist.setVisibility(lampaPlaylist.size() > 1
+                        ? View.VISIBLE : View.GONE);
             }
         } catch (Exception e) {
             lampaPlaylist = null;
@@ -2534,6 +2546,11 @@ public class PlayerActivity extends Activity {
         lampaFinishTime.setGravity(Gravity.END);
         timeBlock.addView(lampaClock);
         timeBlock.addView(lampaFinishTime);
+        lampaHeaderButtons = new LinearLayout(this);
+        lampaHeaderButtons.setOrientation(LinearLayout.HORIZONTAL);
+        lampaHeaderButtons.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        timeBlock.addView(lampaHeaderButtons, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         lampaTopPanel.addView(timeBlock, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -2752,87 +2769,28 @@ public class PlayerActivity extends Activity {
         return Math.abs(value) < 0.001 ? null : OffsetPanel.format(this, value);
     }
 
-    private void showPlayerTools() {
+    private void showMoreMenu() {
         final List<String> items = new ArrayList<>();
         final List<Runnable> actions = new ArrayList<>();
-        addHiddenPlayerControls(items, actions);
-        items.add(getString(R.string.player_tools_utilities));
-        actions.add(this::showUtilityTools);
-        if (PlayerButtonPlacement.resolve(mPrefs.showButtonTogether,
-                togetherAvailable()) == PlayerButtonPlacement.MORE) {
-            final String summary = togetherSummary();
-            items.add(getString(R.string.together_title)
-                    + (summary == null ? "" : "  \u00B7  " + summary));
-            actions.add(this::showTogetherMenu);
-        }
-        if (PlayerButtonPlacement.resolve(mPrefs.showButtonAppSettings,
-                true) == PlayerButtonPlacement.MORE) {
-            items.add(getString(R.string.button_app_settings));
-            actions.add(this::openAppSettings);
-        }
-        showActionDialog(getString(R.string.player_tools), items, actions);
+        items.add(getString(R.string.menu_playback));
+        actions.add(this::showPlaybackTools);
+        items.add(getString(R.string.menu_session));
+        actions.add(this::showSessionTools);
+        items.add(getString(R.string.menu_system));
+        actions.add(this::showSystemTools);
+        showActionDialog(getString(R.string.button_more), items, actions);
     }
 
-    private void addHiddenPlayerControls(List<String> items, List<Runnable> actions) {
-        final List<String> mediaItems = new ArrayList<>();
-        final List<Runnable> mediaActions = new ArrayList<>();
-        addOverflowAction(mediaItems, mediaActions, mPrefs.showButtonOpen, true,
-                getString(R.string.button_open), () -> openFile(mPrefs.mediaUri));
-        addOverflowAction(mediaItems, mediaActions, mPrefs.showButtonPlaylist,
-                lampaPlaylist != null && lampaPlaylist.size() > 1,
-                getString(R.string.button_playlist), this::showLampaPlaylist);
-        addOverflowAction(mediaItems, mediaActions, mPrefs.showButtonQuality,
-                player != null && haveMedia,
-                getString(R.string.button_quality), this::showQualityDialog);
-        addOverflowAction(mediaItems, mediaActions, mPrefs.showButtonSubtitles,
-                exoSubtitle != null && exoSubtitle.isEnabled(),
-                getString(R.string.pref_player_button_subtitles), this::showSubtitleDialog);
-        addOverflowAction(mediaItems, mediaActions, mPrefs.showButtonPlaybackOptions,
-                player != null && haveMedia,
-                getString(R.string.button_playback_options), () -> exoSettings.performClick());
-        if (!mediaItems.isEmpty()) {
-            items.add(getString(R.string.player_tools_media));
-            actions.add(() -> showActionDialog(
-                    getString(R.string.player_tools_media), mediaItems, mediaActions));
-        }
-
-        final List<String> screenItems = new ArrayList<>();
-        final List<Runnable> screenActions = new ArrayList<>();
-        addOverflowAction(screenItems, screenActions, mPrefs.showButtonAspectRatio,
-                player != null && haveMedia,
-                getString(R.string.button_crop), this::showVideoScaleModePicker);
-        addOverflowAction(screenItems, screenActions, mPrefs.showButtonRotation,
-                !isTvBox && player != null && haveMedia,
-                getString(R.string.button_rotate), () -> buttonRotation.performClick());
-        addOverflowAction(screenItems, screenActions, mPrefs.showButtonLock,
-                !isTvBox && player != null && haveMedia,
-                getString(R.string.button_lock), () -> playerView.toggleLock());
-        addOverflowAction(screenItems, screenActions, mPrefs.showButtonPiP,
-                buttonPiP != null && player != null && haveMedia,
-                getString(R.string.button_pip), () -> buttonPiP.performClick());
-        if (!screenItems.isEmpty()) {
-            items.add(getString(R.string.player_tools_screen));
-            actions.add(() -> showActionDialog(
-                    getString(R.string.player_tools_screen), screenItems, screenActions));
-        }
-    }
-
-    private void addOverflowAction(List<String> items, List<Runnable> actions,
-                                   boolean pinned, boolean available,
-                                   String label, Runnable action) {
-        if (PlayerButtonPlacement.resolve(pinned, available) != PlayerButtonPlacement.MORE) {
-            return;
-        }
-        items.add(label);
-        actions.add(action);
-    }
-
-    private void showUtilityTools() {
+    private void showPlaybackTools() {
         String timerSummary = sleepTimer.isAtMediaEnd()
                 ? getString(R.string.sleep_timer_end_of_item)
                 : sleepTimer.remainingMs() > 0 ? Utils.formatMilis(sleepTimer.remainingMs()) : null;
         final List<String> items = new ArrayList<>();
         final List<Runnable> actions = new ArrayList<>();
+        if (player != null) {
+            items.add(getString(R.string.button_playback_options));
+            actions.add(() -> exoSettings.performClick());
+        }
         items.add(getString(R.string.sleep_timer_title)
                 + (timerSummary == null ? "" : "  \u00B7  " + timerSummary));
         actions.add(this::showSleepTimerMenu);
@@ -2848,9 +2806,35 @@ public class PlayerActivity extends Activity {
                     + (summary == null ? "" : "  \u00B7  " + summary));
             actions.add(this::showSkipSessionDialog);
         }
+        showActionDialog(getString(R.string.menu_playback), items, actions);
+    }
+
+    private void showSessionTools() {
+        final List<String> items = new ArrayList<>();
+        final List<Runnable> actions = new ArrayList<>();
+        if (player != null) {
+            items.add(getString(R.string.subtitle_search_manual));
+            actions.add(() -> showManualSubtitleSearch(false));
+        }
+        if (togetherAvailable()) {
+            String summary = togetherSummary();
+            items.add(getString(R.string.together_title)
+                    + (summary == null ? "" : "  \u00B7  " + summary));
+            actions.add(this::showTogetherMenu);
+        }
         items.add(getString(R.string.playback_statistics_title));
         actions.add(this::showPlaybackStatistics);
-        showActionDialog(getString(R.string.player_tools_utilities), items, actions);
+        showActionDialog(getString(R.string.menu_session), items, actions);
+    }
+
+    private void showSystemTools() {
+        final List<String> items = new ArrayList<>();
+        final List<Runnable> actions = new ArrayList<>();
+        items.add(getString(R.string.button_open));
+        actions.add(() -> openFile(mPrefs.mediaUri));
+        items.add(getString(R.string.button_app_settings));
+        actions.add(this::openAppSettings);
+        showActionDialog(getString(R.string.menu_system), items, actions);
     }
 
     private void showActionDialog(CharSequence title, List<String> items,
@@ -3520,10 +3504,6 @@ public class PlayerActivity extends Activity {
 
     private void updateRoomBadge() {
         final boolean active = together != null && together.isActive();
-        if (buttonTogether != null) {
-            buttonTogether.setVisibility(barVisibility(
-                    mPrefs.showButtonTogether, togetherAvailable()));
-        }
         if (roomPill != null) {
             final boolean visible = active && controllerChromeVisible && !inPip && !locked;
             if (visible) {
@@ -4481,8 +4461,8 @@ public class PlayerActivity extends Activity {
 
     private void updateEpisodeControls() {
         if (buttonPlaylist != null) {
-            buttonPlaylist.setVisibility(barVisibility(mPrefs.showButtonPlaylist,
-                    lampaPlaylist != null && lampaPlaylist.size() > 1));
+            buttonPlaylist.setVisibility(lampaPlaylist != null && lampaPlaylist.size() > 1
+                    ? View.VISIBLE : View.GONE);
         }
         if (exoPrevious == null || exoNext == null || lampaPlaylist == null) return;
         int index = lampaPlaylist.getCurrentIndex();
@@ -4572,6 +4552,68 @@ public class PlayerActivity extends Activity {
             list.requestFocus();
         });
         dialog.show();
+    }
+
+    private ArrayList<AudioChoice> buildAudioChoices() {
+        final ArrayList<AudioChoice> choices = new ArrayList<>();
+        if (player == null) return choices;
+        int number = 0;
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_AUDIO) continue;
+            for (int index = 0; index < group.length; index++) {
+                if (!group.isTrackSupported(index)) continue;
+                number++;
+                Format format = group.getTrackFormat(index);
+                String label = trackNameProvider == null
+                        ? null : trackNameProvider.getTrackName(format);
+                if (TextUtils.isEmpty(label)) {
+                    label = getString(R.string.audio_track_number, number);
+                }
+                choices.add(new AudioChoice(label, group.getMediaTrackGroup(), index,
+                        group.isTrackSelected(index)));
+            }
+        }
+        return choices;
+    }
+
+    private int audioChoiceCount() {
+        return buildAudioChoices().size();
+    }
+
+    private void showAudioDialog() {
+        final ArrayList<AudioChoice> choices = buildAudioChoices();
+        if (choices.size() < 2) return;
+        final List<String> labels = new ArrayList<>();
+        final List<Runnable> actions = new ArrayList<>();
+        for (AudioChoice choice : choices) {
+            labels.add((choice.selected ? "✓  " : "") + choice.label);
+            actions.add(() -> applyAudioChoice(choice));
+        }
+        showActionDialog(getString(R.string.button_audio_track), labels, actions);
+    }
+
+    private void applyAudioChoice(AudioChoice choice) {
+        if (player == null || choice == null || choice.group == null) return;
+        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                .setOverrideForType(new TrackSelectionOverride(
+                        choice.group, Collections.singletonList(choice.trackIndex)))
+                .build());
+    }
+
+    private static final class AudioChoice {
+        final String label;
+        final TrackGroup group;
+        final int trackIndex;
+        final boolean selected;
+
+        AudioChoice(String label, TrackGroup group, int trackIndex, boolean selected) {
+            this.label = label;
+            this.group = group;
+            this.trackIndex = trackIndex;
+            this.selected = selected;
+        }
     }
 
     private void showQualityDialog() {
@@ -5296,7 +5338,7 @@ public class PlayerActivity extends Activity {
             updateLampaSegmentMarkers();
             updateLampaSkipUi();
             updateStatsPanel();
-            applyControlVisibility();
+            updateMediaControlVisibility();
             resetPausedScreenGuard();
             if (player != null) maybeSearchSubtitlesOnline(player.getCurrentTracks());
             if (mPrefs.skipEnabled && mPrefs.skipFetchOnline && player != null
@@ -5406,7 +5448,7 @@ public class PlayerActivity extends Activity {
                 }
             }
         }
-        exoSubtitle.setVisibility(barVisibility(mPrefs.showButtonSubtitles, hasSubtitles));
+        exoSubtitle.setVisibility(hasSubtitles ? View.VISIBLE : View.GONE);
         Utils.setButtonEnabled(this, exoSubtitle, hasSubtitles);
         exoSubtitle.setSelected(selected);
     }
@@ -7342,6 +7384,7 @@ public class PlayerActivity extends Activity {
             }
             resolveTrackNames();
             updateLampaTrackDetails();
+            updateMediaControlVisibility();
             rememberMainLineTrack();
             applySecondaryTrackSelection();
             applyMainLineTrackSelection();
@@ -8764,44 +8807,30 @@ public class PlayerActivity extends Activity {
         }
     }
 
-    private void applyControlVisibility() {
-        if (buttonOpen != null) {
-            buttonOpen.setVisibility(barVisibility(mPrefs.showButtonOpen, true));
-        }
+    private void updateMediaControlVisibility() {
         updateEpisodeControls();
         if (buttonQuality != null) {
-            buttonQuality.setVisibility(barVisibility(mPrefs.showButtonQuality, true));
+            buttonQuality.setVisibility(player != null && haveMedia ? View.VISIBLE : View.GONE);
+        }
+        if (buttonAudio != null) {
+            buttonAudio.setVisibility(audioChoiceCount() > 1 ? View.VISIBLE : View.GONE);
         }
         if (exoSubtitle != null) updateSubtitleButton();
         if (buttonAspectRatio != null) {
-            buttonAspectRatio.setVisibility(barVisibility(mPrefs.showButtonAspectRatio, true));
+            buttonAspectRatio.setVisibility(player != null && haveMedia ? View.VISIBLE : View.GONE);
         }
         if (buttonRotation != null) {
-            buttonRotation.setVisibility(barVisibility(
-                    mPrefs.showButtonRotation, !isTvBox));
+            buttonRotation.setVisibility(!isTvBox && player != null && haveMedia
+                    ? View.VISIBLE : View.GONE);
         }
         if (buttonLock != null) {
-            buttonLock.setVisibility(barVisibility(mPrefs.showButtonLock, !isTvBox));
+            buttonLock.setVisibility(!isTvBox && player != null && haveMedia
+                    ? View.VISIBLE : View.GONE);
         }
         if (buttonPiP != null) {
-            buttonPiP.setVisibility(barVisibility(mPrefs.showButtonPiP, true));
+            buttonPiP.setVisibility(player != null && haveMedia ? View.VISIBLE : View.GONE);
         }
-        if (exoSettings != null) {
-            exoSettings.setVisibility(barVisibility(mPrefs.showButtonPlaybackOptions, true));
-        }
-        if (buttonTogether != null) {
-            buttonTogether.setVisibility(barVisibility(
-                    mPrefs.showButtonTogether, togetherAvailable()));
-        }
-        if (buttonAppSettings != null) {
-            buttonAppSettings.setVisibility(barVisibility(mPrefs.showButtonAppSettings, true));
-        }
-        if (buttonTools != null) buttonTools.setVisibility(View.VISIBLE);
-    }
-
-    private int barVisibility(boolean pinned, boolean available) {
-        return PlayerButtonPlacement.resolve(pinned, available) == PlayerButtonPlacement.BAR
-                ? View.VISIBLE : View.GONE;
+        if (buttonMore != null) buttonMore.setVisibility(View.VISIBLE);
     }
 
     private void scaleStart() {

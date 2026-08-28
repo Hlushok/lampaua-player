@@ -290,4 +290,10 @@
     <string name="subtitle_search_series">сериал</string>
     <string name="subtitle_search_season">Сезон</string>
     <string name="subtitle_search_episode">Серия</string>
+    <string name="button_audio_track">Аудио</string>
+    <string name="audio_track_number">Аудио %1$d</string>
+    <string name="button_more">Ещё</string>
+    <string name="menu_playback">Воспроизведение</string>
+    <string name="menu_session">Сеанс и медиа</string>
+    <string name="menu_system">Открыть и настроить</string>
 </resources>

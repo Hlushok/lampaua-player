@@ -319,7 +319,7 @@ public class ResourceContractTest {
     }
 
     @Test
-    public void optionalPlayerButtonsCanBeHiddenWithoutLosingCoreActions() throws Exception {
+    public void playerControlsFollowDonorPlacementWithoutUserPinning() throws Exception {
         String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
         String prefs = readProjectFile("src/main/java/com/brouken/player/Prefs.java");
         String activity = readProjectFile(
@@ -327,28 +327,29 @@ public class ResourceContractTest {
         String offset = readProjectFile("src/main/java/com/brouken/player/OffsetPanel.java");
         String ukrainian = readProjectFile("src/main/res/values-uk/strings.xml");
 
-        assertTrue(preferences.contains("app:key=\"playerButtons\""));
-        assertTrue(preferences.contains("app:key=\"showButtonOpen\""));
-        assertTrue(preferences.contains("app:key=\"showButtonPlaylist\""));
-        assertTrue(preferences.contains("app:key=\"showButtonQuality\""));
-        assertTrue(preferences.contains("app:key=\"showButtonSubtitles\""));
-        assertTrue(preferences.contains("app:key=\"showButtonAspectRatio\""));
-        assertTrue(preferences.contains("app:key=\"showButtonTogether\""));
-        assertTrue(preferences.contains("app:key=\"showButtonAppSettings\""));
-        assertTrue(prefs.contains("public boolean showButtonOpen = false"));
-        assertTrue(prefs.contains("public boolean showButtonPlaylist = true"));
-        assertTrue(prefs.contains("public boolean showButtonQuality = true"));
-        assertTrue(prefs.contains("public boolean showButtonSubtitles = true"));
-        assertTrue(prefs.contains("public boolean showButtonPlaybackOptions = true"));
-        assertTrue(prefs.contains("public boolean showButtonAppSettings = false"));
-        assertTrue(activity.contains("applyControlVisibility()"));
-        assertTrue(activity.contains("controls.addView(buttonTools)"));
-        assertTrue(activity.contains("addHiddenPlayerControls(items, actions)"));
-        assertTrue(activity.contains("PlayerButtonPlacement.resolve"));
+        assertFalse(preferences.contains("app:key=\"playerButtons\""));
+        assertFalse(preferences.contains("app:key=\"showButtonOpen\""));
+        assertFalse(preferences.contains("app:key=\"showButtonPlaylist\""));
+        assertFalse(preferences.contains("app:key=\"showButtonQuality\""));
+        assertFalse(preferences.contains("app:key=\"showButtonSubtitles\""));
+        assertFalse(preferences.contains("app:key=\"showButtonAspectRatio\""));
+        assertFalse(preferences.contains("app:key=\"showButtonTogether\""));
+        assertFalse(preferences.contains("app:key=\"showButtonAppSettings\""));
+        assertFalse(prefs.contains("public boolean showButtonOpen"));
+        assertFalse(prefs.contains("public boolean showButtonPlaylist"));
+        assertFalse(prefs.contains("public boolean showButtonQuality"));
+        assertFalse(prefs.contains("public boolean showButtonSubtitles"));
+        assertFalse(prefs.contains("public boolean showButtonPlaybackOptions"));
+        assertFalse(prefs.contains("public boolean showButtonAppSettings"));
+        assertFalse(activity.contains("PlayerButtonPlacement.resolve"));
+        assertTrue(activity.contains("controls.addView(buttonQuality)"));
+        assertTrue(activity.contains("controls.addView(buttonAudio)"));
+        assertTrue(activity.contains("controls.addView(exoSubtitle)"));
+        assertTrue(activity.contains("controls.addView(buttonPlaylist)"));
+        assertTrue(activity.contains("controls.addView(buttonMore)"));
+        assertTrue(activity.contains("showMoreMenu()"));
         assertTrue(activity.contains(
                 "setNeutralButton(R.string.subtitle_offset_title"));
-        assertFalse(preferences.contains("showButtonTools"));
-        assertFalse(preferences.contains("showButtonPlayPause"));
         assertTrue(offset.contains("subtitle_offset_earlier"));
         assertTrue(offset.contains("subtitle_offset_later"));
         assertTrue(ukrainian.contains("name=\"subtitle_offset_earlier\""));

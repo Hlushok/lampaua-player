@@ -342,4 +342,10 @@
     <string name="subtitle_search_series">series</string>
     <string name="subtitle_search_season">Season</string>
     <string name="subtitle_search_episode">Episode</string>
+    <string name="button_audio_track">Audio</string>
+    <string name="audio_track_number">Audio %1$d</string>
+    <string name="button_more">More</string>
+    <string name="menu_playback">Playback</string>
+    <string name="menu_session">Session and media</string>
+    <string name="menu_system">Open and settings</string>
 </resources>

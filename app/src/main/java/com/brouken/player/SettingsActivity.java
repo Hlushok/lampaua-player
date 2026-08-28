@@ -185,13 +185,6 @@ public class SettingsActivity extends AppCompatActivity
             Preference preferenceKeepAwake = findPreference("keepAwakeOnPause");
             if (preferenceSingleBack != null) preferenceSingleBack.setVisible(tvBox);
             if (preferenceKeepAwake != null) preferenceKeepAwake.setVisible(tvBox);
-            Preference showRotation = findPreference("showButtonRotation");
-            Preference showLock = findPreference("showButtonLock");
-            Preference showPiP = findPreference("showButtonPiP");
-            if (showRotation != null) showRotation.setVisible(!tvBox);
-            if (showLock != null) showLock.setVisible(!tvBox);
-            if (showPiP != null) showPiP.setVisible(Utils.isPiPSupported(getContext()));
-
             final EditTextPreference preferenceNick = findPreference("togetherNick");
             final Preference preferenceNickRandom = findPreference("togetherNickRandom");
             if (preferenceNick != null) {

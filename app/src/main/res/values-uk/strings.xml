@@ -341,4 +341,10 @@
     <string name="subtitle_search_series">серіал</string>
     <string name="subtitle_search_season">Сезон</string>
     <string name="subtitle_search_episode">Серія</string>
+    <string name="button_audio_track">Аудіо</string>
+    <string name="audio_track_number">Аудіо %1$d</string>
+    <string name="button_more">Ще</string>
+    <string name="menu_playback">Відтворення</string>
+    <string name="menu_session">Сеанс і медіа</string>
+    <string name="menu_system">Відкрити й налаштувати</string>
 </resources>
