@@ -166,12 +166,10 @@ class Prefs {
     public String languageAudio = "";
     public String languageSubtitle = "";
     public String languageSubtitleSecondary = "";
-    public String languageSubtitleTranslate = "ukr";
     // Opt-in because searches disclose the title identifiers to third-party services.
     public boolean subtitleSearch = false;
     public boolean subtitleSearchStrict = false;
     public boolean subtitleSearchLanguage = false;
-    public boolean subtitleAutoTranslateUkrainian = true;
     public boolean subtitleTranslate = true;
     public String subtitleTranslateBackends = SubtitleTranslate.DEFAULT_BACKENDS;
     public boolean subtitleSourceOpenSubtitles = true;
@@ -264,15 +262,12 @@ class Prefs {
         languageAudio = getLanguageAudio(mContext);
         languageSubtitle = getLanguageSubtitle(mContext);
         languageSubtitleSecondary = getLanguageSubtitleSecondary(mContext);
-        languageSubtitleTranslate = getLanguageSubtitleTranslate(mContext);
+        getLanguageSubtitleTranslate(mContext);
         String subtitleSearchMode = getSubtitleSearchMode(mContext);
         subtitleSearch = !SEARCH_OFF.equals(subtitleSearchMode);
         subtitleSearchStrict = SEARCH_NONE.equals(subtitleSearchMode);
         subtitleSearchLanguage = mSharedPreferences.getBoolean(
                 PREF_KEY_SUBTITLE_SEARCH_LANGUAGE, subtitleSearchLanguage);
-        subtitleAutoTranslateUkrainian = mSharedPreferences.getBoolean(
-                PREF_KEY_SUBTITLE_AUTO_TRANSLATE_UKRAINIAN,
-                subtitleAutoTranslateUkrainian);
         subtitleTranslate = getSubtitleTranslate(mContext);
         subtitleTranslateBackends = getSubtitleTranslateBackends(mContext);
         if (BuildConfig.DEBUG) {
@@ -412,12 +407,7 @@ class Prefs {
         if (preferences.contains(PREF_KEY_LANGUAGE_SUBTITLE_TRANSLATE)) {
             preferences.edit().remove(PREF_KEY_LANGUAGE_SUBTITLE_TRANSLATE).apply();
         }
-        return "ukr";
-    }
-
-    public static void setLanguageSubtitleTranslate(Context context, String language) {
-        PreferenceManager.getDefaultSharedPreferences(context).edit()
-                .remove(PREF_KEY_LANGUAGE_SUBTITLE_TRANSLATE).apply();
+        return UkrainianSubtitlePolicy.SEARCH_LANGUAGE;
     }
 
     public static String getSubtitleSearchMode(Context context) {
@@ -449,7 +439,10 @@ class Prefs {
             return preferences.getBoolean(PREF_KEY_SUBTITLE_TRANSLATE_ON, true);
         }
         boolean migrated = preferences.getBoolean(PREF_KEY_SUBTITLE_AUTO_TRANSLATE_UKRAINIAN, true);
-        preferences.edit().putBoolean(PREF_KEY_SUBTITLE_TRANSLATE_ON, migrated).apply();
+        preferences.edit()
+                .putBoolean(PREF_KEY_SUBTITLE_TRANSLATE_ON, migrated)
+                .remove(PREF_KEY_SUBTITLE_AUTO_TRANSLATE_UKRAINIAN)
+                .apply();
         return migrated;
     }
 

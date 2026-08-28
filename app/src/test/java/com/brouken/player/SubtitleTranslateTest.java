@@ -1,6 +1,7 @@
 package com.brouken.player;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 
 import org.junit.Test;
 
@@ -19,5 +20,6 @@ public class SubtitleTranslateTest {
     public void translatesToUkrainianFromReadableFallbacksOnly() {
         assertEquals(Arrays.asList("rus", "eng"), SubtitleTranslate.sourcesFor("ukr"));
         assertEquals(Collections.emptyList(), SubtitleTranslate.sourcesFor("eng"));
+        assertNull(UkrainianSubtitlePolicy.translatedCacheName("subs.movie", "ukr"));
     }
 }

@@ -18,12 +18,11 @@ final class UkrainianSubtitlePolicy {
     private UkrainianSubtitlePolicy() { }
 
     static boolean enabled(boolean preference, List<String> preferred) {
-        return preference && normalized(preferred).contains(SEARCH_LANGUAGE);
+        return preference;
     }
 
     static List<String> directLanguages(List<String> preferred) {
-        return normalized(preferred).contains(SEARCH_LANGUAGE)
-                ? Collections.singletonList(SEARCH_LANGUAGE) : Collections.emptyList();
+        return Collections.singletonList(SEARCH_LANGUAGE);
     }
 
     static List<String> fallbackLanguages(List<String> preferred) {
@@ -33,8 +32,22 @@ final class UkrainianSubtitlePolicy {
         return new ArrayList<>(ordered);
     }
 
+    static List<String> playbackLanguages(boolean searchEnabled, boolean translationEnabled,
+                                          List<String> preferred) {
+        List<String> ordered = new ArrayList<>(normalized(preferred));
+        if (searchEnabled && translationEnabled) {
+            ordered.remove(SEARCH_LANGUAGE);
+            ordered.add(0, SEARCH_LANGUAGE);
+        }
+        return ordered;
+    }
+
     static String targetIso2() {
         return TARGET_ISO2;
+    }
+
+    static String targetIso3() {
+        return SEARCH_LANGUAGE;
     }
 
     static String sourceIso2(String sourceIso3) {

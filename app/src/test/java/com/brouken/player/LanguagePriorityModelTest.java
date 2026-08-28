@@ -15,8 +15,8 @@ public class LanguagePriorityModelTest {
     }
 
     @Test
-    public void translationTargetDefaultsToUkrainian() {
-        assertEquals("ukr", LanguagePriorityModel.targetOrUkrainian(""));
-        assertEquals("deu", LanguagePriorityModel.targetOrUkrainian("de-DE"));
+    public void translationTargetIsNotAUserLanguageChoice() {
+        assertEquals("ukr", UkrainianSubtitlePolicy.SEARCH_LANGUAGE);
+        assertEquals("ukr", SubtitleSettingsPolicy.fixedTranslationTarget());
     }
 }

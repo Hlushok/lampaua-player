@@ -14,11 +14,13 @@ import java.util.Collections;
 public class UkrainianSubtitlePolicyTest {
 
     @Test
-    public void directSearchIsUkrainianOnlyWhenEnabled() {
+    public void directSearchIsAlwaysUkrainianOnly() {
         assertEquals(Collections.singletonList("ukr"),
                 UkrainianSubtitlePolicy.directLanguages(Arrays.asList("ukr", "eng")));
-        assertEquals(Collections.emptyList(),
+        assertEquals(Collections.singletonList("ukr"),
                 UkrainianSubtitlePolicy.directLanguages(Collections.singletonList("eng")));
+        assertEquals(Collections.singletonList("ukr"),
+                UkrainianSubtitlePolicy.directLanguages(Collections.emptyList()));
     }
 
     @Test
@@ -29,9 +31,23 @@ public class UkrainianSubtitlePolicyTest {
     }
 
     @Test
-    public void translationRequiresUkrainianPreference() {
+    public void activeUkrainianTranslationAlsoPrefersAnExistingUkrainianTrack() {
+        assertEquals(Arrays.asList("ukr", "eng", "rus"),
+                UkrainianSubtitlePolicy.playbackLanguages(
+                        true, true, Arrays.asList("eng", "ukr", "rus")));
+        assertEquals(Collections.singletonList("ukr"),
+                UkrainianSubtitlePolicy.playbackLanguages(
+                        true, true, Collections.emptyList()));
+        assertEquals(Collections.singletonList("eng"),
+                UkrainianSubtitlePolicy.playbackLanguages(
+                        false, true, Collections.singletonList("eng")));
+    }
+
+    @Test
+    public void translationSwitchDoesNotRequireUkrainianInPrimaryPriority() {
         assertTrue(UkrainianSubtitlePolicy.enabled(true, Arrays.asList("eng", "ukr")));
-        assertFalse(UkrainianSubtitlePolicy.enabled(true, Arrays.asList("eng", "rus")));
+        assertTrue(UkrainianSubtitlePolicy.enabled(true, Arrays.asList("eng", "rus")));
+        assertTrue(UkrainianSubtitlePolicy.enabled(true, Collections.emptyList()));
         assertFalse(UkrainianSubtitlePolicy.enabled(false, Collections.singletonList("ukr")));
     }
 

@@ -115,9 +115,9 @@
     <string name="subtitle_search_found">Знайдено субтитри: %1$s</string>
     <string name="pref_subtitle_auto_translate_ukrainian">Автопереклад українською</string>
     <string name="pref_subtitle_auto_translate_ukrainian_summary">Якщо українських субтитрів немає, лише текст реплік надсилається зовнішньому сервісу Google і перекладається українською</string>
-    <string name="subtitle_translate_progress">Перекладаємо субтитри…</string>
-    <string name="subtitle_translate_success">Переклад субтитрів готовий</string>
-    <string name="subtitle_translate_failed">Не вдалося безпечно перекласти субтитри</string>
+    <string name="subtitle_translate_progress">Перекладаємо субтитри українською…</string>
+    <string name="subtitle_translate_success">Український переклад субтитрів готовий</string>
+    <string name="subtitle_translate_failed">Не вдалося безпечно перекласти субтитри українською</string>
     <string name="pref_subtitle_sources">Джерела субтитрів</string>
     <string name="pref_subtitle_sources_summary">Сторонні джерела перевіряються, доки одне не надасть потрібну мову</string>
     <string name="pref_subtitle_source_opensubtitles">OpenSubtitles.com</string>

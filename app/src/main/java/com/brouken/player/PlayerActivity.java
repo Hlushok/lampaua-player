@@ -6025,12 +6025,11 @@ public class PlayerActivity extends Activity {
         if (player == null) return;
         MediaId id = currentMediaId();
         List<String> wanted = oneShotLanguages == null
-                ? secondary ? secondarySubtitleLanguages()
-                        : AudioLanguagePriority.parse(mPrefs.languageSubtitle)
+                ? (secondary ? secondarySubtitleLanguages()
+                        : AudioLanguagePriority.parse(mPrefs.languageSubtitle))
                 : AudioLanguagePriority.parse(TextUtils.join(",", oneShotLanguages));
         if (wanted.isEmpty()) {
-            wanted = Collections.singletonList(LanguagePriorityModel.targetOrUkrainian(
-                    mPrefs.languageSubtitleTranslate));
+            wanted = UkrainianSubtitlePolicy.directLanguages(wanted);
         }
         cancelSubtitleSearch();
         int generation = subtitleSearchGeneration;
@@ -6038,16 +6037,19 @@ public class PlayerActivity extends Activity {
         subtitleSearchStarted = key;
         subtitleSearchMisses.remove(key);
         String cachePrefix = "subs." + id.key().replaceAll("[^A-Za-z0-9]", "-");
-        String target = LanguagePriorityModel.targetOrUkrainian(
-                mPrefs.languageSubtitleTranslate);
-        boolean translate = mPrefs.subtitleTranslate && wanted.get(0).equals(target);
-        if (attachCachedSubtitle(generation, id, cachePrefix, wanted,
-                secondary, translate)) return;
+        boolean translate = !secondary
+                && UkrainianSubtitlePolicy.enabled(mPrefs.subtitleTranslate, wanted);
+        List<String> direct = translate
+                ? UkrainianSubtitlePolicy.directLanguages(wanted) : wanted;
+        List<String> fallback = translate
+                ? UkrainianSubtitlePolicy.fallbackLanguages(wanted) : Collections.emptyList();
+        if (attachCachedSubtitle(generation, id, cachePrefix, direct,
+                secondary, fallback)) return;
         List<String> requested = new ArrayList<>(wanted);
         Thread worker = new Thread(() -> {
             boolean found = translate
-                    ? searchAndTranslate(generation, id, key, cachePrefix, target,
-                    SubtitleTranslate.sourcesFor(target), requested, secondary)
+                    ? searchAndTranslate(generation, id, key, cachePrefix,
+                    fallback, requested)
                     : searchOriginalSubtitles(
                     generation, id, key, cachePrefix, requested, secondary);
             if (!found && generation == subtitleSearchGeneration
@@ -6408,7 +6410,9 @@ public class PlayerActivity extends Activity {
         }
         List<String> preferred = AudioLanguagePriority.parse(mPrefs.languageSubtitle);
         List<String> secondaryPreferred = secondarySubtitleLanguages();
-        if (preferred.isEmpty() && secondaryPreferred.isEmpty()) return;
+        boolean translateEnabled = UkrainianSubtitlePolicy.enabled(
+                mPrefs.subtitleTranslate, preferred);
+        if (preferred.isEmpty() && secondaryPreferred.isEmpty() && !translateEnabled) return;
 
         Set<String> present = new HashSet<>();
         for (Tracks.Group group : tracks.getGroups()) {
@@ -6422,13 +6426,8 @@ public class PlayerActivity extends Activity {
         }
         List<String> wanted = SubtitleLanguagePolicy.missing(
                 preferred, present, mPrefs.subtitleSearchStrict);
-        String translateTarget = LanguagePriorityModel.targetOrUkrainian(
-                mPrefs.languageSubtitleTranslate);
-        boolean translateMissing = !preferred.isEmpty() && mPrefs.subtitleTranslate
-                && !present.contains(translateTarget);
-        if (translateMissing && !wanted.contains(translateTarget)) {
-            wanted.add(0, translateTarget);
-        }
+        String translateTarget = UkrainianSubtitlePolicy.targetIso3();
+        boolean translateMissing = translateEnabled && !present.contains(translateTarget);
         List<String> secondaryWanted = new ArrayList<>();
         if (secondaryEnabled() && !secondaryActive()
                 && (mPrefs.mediaUri == null || !mPrefs.mediaUri.equals(secondaryChoiceMedia))) {
@@ -6442,17 +6441,17 @@ public class PlayerActivity extends Activity {
         if (!wanted.isEmpty() && !secondaryWanted.isEmpty()) {
             secondaryWanted.remove(wanted.get(0));
         }
-        if (wanted.isEmpty() && secondaryWanted.isEmpty()) return;
+        if (translateMissing) secondaryWanted.remove(translateTarget);
+        if (!translateMissing && wanted.isEmpty() && secondaryWanted.isEmpty()) return;
 
         MediaId id = currentMediaId();
         String sources = enabledSubtitleSources();
         if (id.isEmpty() || sources.isEmpty() || id.key().equals(subtitleSearchSuppressed)) return;
         List<String> direct = translateMissing
-                ? Collections.singletonList(translateTarget) : wanted;
+                ? UkrainianSubtitlePolicy.directLanguages(preferred) : wanted;
         List<String> fallback = translateMissing
-                ? SubtitleTranslate.sourcesFor(translateTarget) : Collections.emptyList();
-        boolean secondaryTranslate = !secondaryWanted.isEmpty() && mPrefs.subtitleTranslate
-                && secondaryWanted.get(0).equals(translateTarget);
+                ? UkrainianSubtitlePolicy.fallbackLanguages(preferred)
+                : Collections.emptyList();
         String mode = translateMissing
                 ? "translate|" + translateTarget + "|" + fallback + "|"
                 + mPrefs.subtitleTranslateBackends : "direct";
@@ -6469,9 +6468,9 @@ public class PlayerActivity extends Activity {
         subtitleSearchStarted = key;
         int generation = subtitleSearchGeneration;
         boolean mainCached = attachCachedSubtitle(
-                generation, id, cachePrefix, direct, false, translateMissing);
+                generation, id, cachePrefix, direct, false, fallback);
         boolean secondaryCached = attachCachedSubtitle(
-                generation, id, cachePrefix, secondaryWanted, true, secondaryTranslate);
+                generation, id, cachePrefix, secondaryWanted, true, Collections.emptyList());
         if ((direct.isEmpty() || mainCached)
                 && (secondaryWanted.isEmpty() || secondaryCached)) return;
 
@@ -6481,21 +6480,15 @@ public class PlayerActivity extends Activity {
                 if (!direct.isEmpty() && !mainCached) {
                     found = translateMissing
                             ? searchAndTranslate(generation, id, key, cachePrefix,
-                            translateTarget, fallback, wanted, false)
+                            fallback, wanted)
                             : searchOriginalSubtitles(
                             generation, id, key, cachePrefix, direct, false);
                 }
                 if (!secondaryWanted.isEmpty() && !secondaryCached
                         && generation == subtitleSearchGeneration
                         && !Thread.currentThread().isInterrupted()) {
-                    List<String> secondFallback = secondaryTranslate
-                            ? SubtitleTranslate.sourcesFor(secondaryWanted.get(0))
-                            : Collections.emptyList();
-                    boolean secondFound = secondaryTranslate
-                            ? searchAndTranslate(generation, id, key, cachePrefix,
-                            secondaryWanted.get(0), secondFallback, secondaryWanted, true)
-                            : searchOriginalSubtitles(generation, id, key, cachePrefix,
-                            secondaryWanted, true);
+                    boolean secondFound = searchOriginalSubtitles(
+                            generation, id, key, cachePrefix, secondaryWanted, true);
                     found = found || secondFound;
                 }
                 if (found) subtitleSearchMisses.remove(key);
@@ -6510,14 +6503,18 @@ public class PlayerActivity extends Activity {
 
     private boolean attachCachedSubtitle(int generation, MediaId id, String cachePrefix,
                                          List<String> wanted, boolean secondary,
-                                         boolean allowTranslated) {
+                                         List<String> translatedSources) {
         for (String language : wanted) {
             List<File> candidates = new ArrayList<>();
             candidates.add(new File(getCacheDir(), cachePrefix + "." + language + ".srt"));
-            if (allowTranslated) {
-                for (String source : SubtitleTranslate.sourcesFor(language)) {
-                    candidates.add(new File(getCacheDir(),
-                            translatedCacheName(cachePrefix, source, language)));
+            if (!secondary && UkrainianSubtitlePolicy.SEARCH_LANGUAGE.equals(language)
+                    && translatedSources != null) {
+                for (String source : translatedSources) {
+                    String translatedName = UkrainianSubtitlePolicy.translatedCacheName(
+                            cachePrefix, source);
+                    if (translatedName != null) {
+                        candidates.add(new File(getCacheDir(), translatedName));
+                    }
                 }
             }
             for (File cached : candidates) {
@@ -6553,16 +6550,18 @@ public class PlayerActivity extends Activity {
     }
 
     private boolean searchAndTranslate(int generation, MediaId id, String key,
-                                       String cachePrefix, String targetLanguage,
-                                       List<String> fallback, List<String> wanted,
-                                       boolean secondary) {
+                                       String cachePrefix, List<String> fallback,
+                                       List<String> wanted) {
+        final String targetLanguage = UkrainianSubtitlePolicy.targetIso3();
         for (String source : fallback) {
-            String translatedName = translatedCacheName(cachePrefix, source, targetLanguage);
+            String translatedName = UkrainianSubtitlePolicy.translatedCacheName(
+                    cachePrefix, source);
+            if (translatedName == null) continue;
             File cached = new File(getCacheDir(), translatedName);
             if (cached.isFile() && cached.length() > 0) {
                 cached.setLastModified(System.currentTimeMillis());
                 runOnUiThread(() -> attachTranslatedSubtitle(
-                        generation, id, Uri.fromFile(cached), targetLanguage, secondary));
+                        generation, id, Uri.fromFile(cached)));
                 return true;
             }
             if (cached.exists()) cached.delete();
@@ -6574,11 +6573,11 @@ public class PlayerActivity extends Activity {
                 Collections.singletonList(targetLanguage), mPrefs, durationMs, result -> {
                     if (generation != subtitleSearchGeneration
                             || Thread.currentThread().isInterrupted()) return false;
-            Uri file = downloadSubtitle(result,
+                    Uri file = downloadSubtitle(result,
                             cachePrefix + "." + targetLanguage + ".srt", durationMs);
                     if (file == null) return false;
                     runOnUiThread(() -> attachSearchedSubtitle(generation, id, file,
-                            targetLanguage, secondary));
+                            targetLanguage, false));
                     return true;
                 }, directAnswered);
         if (direct != null) return true;
@@ -6597,7 +6596,9 @@ public class PlayerActivity extends Activity {
                     || Thread.currentThread().isInterrupted()) return false;
             String source = AudioLanguagePriority.normalize(result.language);
             if (source == null || source.equals(targetLanguage)) return false;
-            String translatedName = translatedCacheName(cachePrefix, source, targetLanguage);
+            String translatedName = UkrainianSubtitlePolicy.translatedCacheName(
+                    cachePrefix, source);
+            if (translatedName == null) return false;
             Uri downloaded = downloadSubtitle(result,
                     cachePrefix + ".source." + source + ".srt", durationMs);
             if (downloaded == null) return false;
@@ -6615,7 +6616,7 @@ public class PlayerActivity extends Activity {
             if (generation != subtitleSearchGeneration
                     || Thread.currentThread().isInterrupted()) return false;
             runOnUiThread(() -> attachTranslatedSubtitle(
-                    generation, id, translatedFile, targetLanguage, secondary));
+                    generation, id, translatedFile));
             return true;
         }, foreignAnswered);
 
@@ -6633,14 +6634,10 @@ public class PlayerActivity extends Activity {
             remaining.remove(targetLanguage);
             if (!remaining.isEmpty()) {
                 return searchOriginalSubtitles(
-                        generation, id, key, cachePrefix, remaining, secondary);
+                        generation, id, key, cachePrefix, remaining, false);
             }
         }
         return false;
-    }
-
-    private static String translatedCacheName(String cachePrefix, String source, String target) {
-        return cachePrefix + ".translated." + source + "-" + target + ".srt";
     }
 
     private Uri downloadSubtitle(SubtitleSearch.Result result, String cacheName, long durationMs) {
@@ -6682,19 +6679,10 @@ public class PlayerActivity extends Activity {
         }
     }
 
-    private void attachTranslatedSubtitle(int generation, MediaId id, Uri file,
-                                           String targetLanguage, boolean secondary) {
+    private void attachTranslatedSubtitle(int generation, MediaId id, Uri file) {
         if (generation != subtitleSearchGeneration || player == null
                 || !mPrefs.subtitleTranslate
-                || !LanguagePriorityModel.targetOrUkrainian(
-                mPrefs.languageSubtitleTranslate).equals(targetLanguage)
                 || !currentMediaId().sameAs(id)) {
-            return;
-        }
-        if (secondary) {
-            chooseSecondarySubtitle(file);
-            Toast.makeText(this, getString(R.string.subtitle_search_found_secondary,
-                    displaySubtitleLanguage(targetLanguage)), Toast.LENGTH_SHORT).show();
             return;
         }
         mPrefs.updateSubtitle(file);
@@ -6800,7 +6788,9 @@ public class PlayerActivity extends Activity {
 
     private void applyPreferredTextLanguages() {
         if (trackSelector == null) return;
-        List<String> languages = AudioLanguagePriority.parse(mPrefs.languageSubtitle);
+        List<String> languages = UkrainianSubtitlePolicy.playbackLanguages(
+                mPrefs.subtitleSearch, mPrefs.subtitleTranslate,
+                AudioLanguagePriority.parse(mPrefs.languageSubtitle));
         trackSelector.setParameters(trackSelector.buildUponParameters()
                 // Subtitles only start automatically when they match the user's ordered list.
                 .setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT)

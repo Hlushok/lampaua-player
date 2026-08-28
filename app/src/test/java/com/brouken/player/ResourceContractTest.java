@@ -500,12 +500,15 @@ public class ResourceContractTest {
         assertFalse(preferences.contains("app:key=\"languageSubtitleTranslate\""));
         assertTrue(preferences.contains("app:defaultValue=\"true\""));
         assertTrue(prefs.contains("public boolean subtitleSearch = false"));
-        assertTrue(prefs.contains("languageSubtitleTranslate = \"ukr\""));
-        assertTrue(prefs.contains("return \"ukr\";"));
+        assertFalse(prefs.contains("public String languageSubtitleTranslate"));
+        assertFalse(prefs.contains("setLanguageSubtitleTranslate"));
+        assertTrue(prefs.contains("remove(PREF_KEY_LANGUAGE_SUBTITLE_TRANSLATE)"));
+        assertTrue(prefs.contains("return UkrainianSubtitlePolicy.SEARCH_LANGUAGE"));
         assertTrue(prefs.contains("public boolean subtitleTranslate = true"));
-        assertTrue(activity.contains("LanguagePriorityModel.targetOrUkrainian"));
-        assertTrue(activity.contains("SubtitleTranslate.sourcesFor"));
-        assertTrue(activity.contains("translatedCacheName"));
+        assertFalse(activity.contains("mPrefs.languageSubtitleTranslate"));
+        assertTrue(activity.contains("UkrainianSubtitlePolicy.directLanguages"));
+        assertTrue(activity.contains("UkrainianSubtitlePolicy.fallbackLanguages"));
+        assertTrue(activity.contains("UkrainianSubtitlePolicy.translatedCacheName"));
         assertTrue(translator.contains(
                 "https://translate.googleapis.com/translate_a/single"));
         assertTrue(translator.contains("new FormBody.Builder()"));
