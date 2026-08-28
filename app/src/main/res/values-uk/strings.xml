@@ -67,11 +67,14 @@
     <string name="pref_auto_pip">Автоматичний режим PiP</string>
     <string name="pref_auto_pip_on">Перемикати автоматично на режим PiP при виході з додатку</string>
     <string name="pref_auto_pip_off">Не перемикатися автоматично на режим PiP</string>
-    <string name="pref_skip_silence">Пропускати тишу</string>
-    <string name="pref_skip_silence_on">Пропускати частини з тишею в аудіопотоці</string>
-    <string name="pref_skip_silence_off">Відтворювати контент як є</string>
     <string name="pref_repeat_toggle">Переключення повтору</string>
     <string name="pref_repeat_toggle_summary">Додатковий контроль, що дозволяє необмежений цикл відео (потрібно перезапустити додаток)</string>
+    <string name="pref_tv_single_back">Виходити одним натисканням «Назад»</string>
+    <string name="pref_tv_single_back_on">Якщо немає відкритих панелей чи дій, кнопка «Назад» одразу закриває плеєр</string>
+    <string name="pref_tv_single_back_off">Перед виходом плеєр просить натиснути «Назад» ще раз</string>
+    <string name="pref_keep_awake_on_pause">Не вимикати екран на паузі</string>
+    <string name="pref_keep_awake_on_pause_on">Заставка не вмикається; за хвилину зображення затемнюється, а за дві години екран передається системі</string>
+    <string name="pref_keep_awake_on_pause_off">Під час паузи пристрій може ввімкнути свою заставку</string>
     <string name="pref_map_dv7">Dolby Vision Profile 7 → HDR10</string>
     <string name="pref_map_dv7_on">Використовувати сумісний шар HDR10, якщо пристрій не підтримує Dolby Vision Profile 7</string>
     <string name="pref_map_dv7_off">Відтворювати Dolby Vision Profile 7 без перетворення</string>

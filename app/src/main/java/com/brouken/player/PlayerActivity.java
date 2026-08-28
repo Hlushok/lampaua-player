@@ -197,6 +197,8 @@ public class PlayerActivity extends Activity {
 
     public CustomPlayerView playerView;
     public static ExoPlayer player;
+    private static PlayerActivity live;
+    private boolean handedOver;
     private YouTubeOverlay youTubeOverlay;
     private final SubtitleOffset.Position subtitlePosition = new SubtitleOffset.Position() {
         @Override public long currentMs() {
@@ -234,6 +236,8 @@ public class PlayerActivity extends Activity {
     private static final int REQUEST_CHOOSER_SUBTITLE_MEDIASTORE = 21;
     private static final int REQUEST_SETTINGS = 100;
     private static final String STATE_SUPPRESS_RESUME = "ua.suppress_resume";
+    private static final String STATE_API_SESSION = "ua.api_session";
+    private static final String STATE_PLAY_WHEN_READY = "ua.play_when_ready";
     public static final int CONTROLLER_TIMEOUT = 3500;
     private static final String ACTION_MEDIA_CONTROL = "media_control";
     private static final String EXTRA_CONTROL_TYPE = "control_type";
@@ -328,6 +332,9 @@ public class PlayerActivity extends Activity {
     List<MediaItem.SubtitleConfiguration> apiSubs = new ArrayList<>();
     boolean intentReturnResult;
     boolean playbackFinished;
+    private Uri reportUri;
+    private long reportPosition;
+    private long reportDuration;
     final HashMap<String, String> apiHeaders = new HashMap<>();
     private LampaPlaylist lampaPlaylist;
     private String subtitleSearchStarted;
@@ -493,6 +500,22 @@ public class PlayerActivity extends Activity {
     private final Runnable audioRestartRunnable = this::restartPassthroughAudio;
     private final TvSeekController tvSeekController = new TvSeekController();
     private final BackExitGuard backExitGuard = new BackExitGuard(2_000L);
+    private static final long DIM_DELAY_MS = 60_000L;
+    private static final long KEEP_AWAKE_MAX_MS = 2 * 60 * 60 * 1000L;
+    private static final float DIM_ALPHA = 0.85f;
+    private static final int DIM_IN_MS = 800;
+    private static final int DIM_OUT_MS = 300;
+    private View dimOverlay;
+    private final Runnable dimRunnable = this::dimPausedScreen;
+    private final Runnable keepAwakeGiveUpRunnable = () -> {
+        if (playerView != null) playerView.setKeepScreenOn(false);
+    };
+    private final Runnable hidePausedControllerRunnable = () -> {
+        if (player != null && !player.getPlayWhenReady() && controllerVisibleFully
+                && !locked && !isScrubbing) {
+            playerView.hideController();
+        }
+    };
     private final SleepTimerController sleepTimer = new SleepTimerController(SystemClock::elapsedRealtime);
     private final Runnable sleepTimerRunnable = new Runnable() {
         @Override public void run() {
@@ -625,9 +648,28 @@ public class PlayerActivity extends Activity {
     @RequiresApi(api = Build.VERSION_CODES.O)
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        final Intent incomingIntent = getIntent();
+        final Room.Invite incomingRoomInvite = roomInviteFromIntent(incomingIntent);
+        Intent inheritedIntent = null;
+        Bundle inheritedState = null;
+        boolean liveHadMedia = false;
+        if (live != null && live != this && !live.isFinishing()) {
+            liveHadMedia = haveMedia && live.mPrefs != null && live.mPrefs.mediaUri != null;
+            inheritedState = new Bundle();
+            live.saveApiSession(inheritedState);
+            inheritedIntent = live.buildHandoffIntent();
+            live.handOver();
+        }
+        final boolean inheritLiveSession = LaunchIntentPolicy.shouldInheritLiveSession(
+                incomingIntent == null ? null : incomingIntent.getAction(),
+                incomingIntent != null && incomingIntent.getData() != null,
+                incomingRoomInvite != null, liveHadMedia);
+        final Intent launchIntent = inheritLiveSession && inheritedIntent != null
+                ? inheritedIntent : incomingIntent;
+        if (launchIntent != incomingIntent) setIntent(launchIntent);
+
         // Rotate ASAP, before super/inflating to avoid glitches with activity launch animation
         mPrefs = new Prefs(this);
-        final Intent launchIntent = getIntent();
         final Room.Invite launchRoomInvite = roomInviteFromIntent(launchIntent);
         mPrefs.suppressResume = savedInstanceState == null
                 ? LaunchIntentPolicy.shouldSuppressResume(
@@ -737,8 +779,11 @@ public class PlayerActivity extends Activity {
         if (launchRoomInvite == null) {
             readLampaPlaylist(launchIntent);
         }
+        restoreApiSession(savedInstanceState != null ? savedInstanceState
+                : inheritLiveSession ? inheritedState : null);
 
         coordinatorLayout = findViewById(R.id.coordinatorLayout);
+        dimOverlay = findViewById(R.id.dim_overlay);
         mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         playerView = findViewById(R.id.video_view);
         TextView secondaryHint = playerView.findViewById(R.id.subtitle_secondary);
@@ -1188,6 +1233,7 @@ public class PlayerActivity extends Activity {
                 }
                 updateRoomBadge();
                 updateStatsPanel();
+                schedulePausedControllerHide();
 
                 if (PlayerActivity.restoreControllerTimeout) {
                     restoreControllerTimeout = false;
@@ -1265,6 +1311,7 @@ public class PlayerActivity extends Activity {
         if (launchRoomInvite != null) {
             joinRoom(launchRoomInvite.code, launchRoomInvite.password);
         }
+        live = this;
     }
 
     @Override
@@ -1297,13 +1344,131 @@ public class PlayerActivity extends Activity {
     protected void onSaveInstanceState(Bundle outState) {
         outState.putBoolean(STATE_SUPPRESS_RESUME,
                 mPrefs != null && mPrefs.suppressResume);
+        saveApiSession(outState);
         super.onSaveInstanceState(outState);
+    }
+
+    private void saveApiSession(Bundle outState) {
+        if (handedOver) return;
+        boolean resume = player != null ? player.getPlayWhenReady() : restorePlayState;
+        outState.putBoolean(STATE_PLAY_WHEN_READY, resume);
+        if (player != null) savePlayer();
+        if (!apiAccess || !haveMedia || mPrefs == null) return;
+
+        Bundle state = new Bundle();
+        Uri uri = currentPlayingUri();
+        if (uri != null) state.putString("uri", uri.toString());
+        state.putString("type", mPrefs.mediaType);
+        state.putLong("position", mPrefs.getPosition());
+        state.putBoolean("playWhenReady", resume);
+        if (lampaPlaylist != null && !lampaPlaylist.isEmpty()) {
+            state.putString("playlist", lampaPlaylist.toSessionJson());
+            state.putInt("playlistIndex", lampaPlaylist.getCurrentIndex());
+            state.putBoolean("playlistAutoNext", lampaPlaylist.isAutoNext());
+        }
+        state.putString("subtitleUri", uriText(mPrefs.subtitleUri));
+        state.putString("secondarySubtitleUri", uriText(mPrefs.subtitleSecondaryUri));
+        state.putString("audioTrack", mPrefs.audioTrackId);
+        state.putString("subtitleTrack", mPrefs.subtitleTrackId);
+        state.putInt("resizeMode", mPrefs.resizeMode);
+        state.putFloat("scale", mPrefs.scale);
+        state.putFloat("speed", mPrefs.speed);
+        state.putFloat("aspectRatio", mPrefs.aspectRatio);
+        state.putDouble("subtitleOffset", subtitleOffsetSec);
+        state.putDouble("secondarySubtitleOffset", secondarySubtitleOffsetSec);
+        state.putDouble("skipOffset", skipOffsetSec);
+        state.putString("skipMode", skipModeSession);
+        state.putBoolean("skipSeen", skipSeenThisSession);
+        state.putString("reportUri", uriText(reportUri));
+        state.putLong("reportPosition", reportPosition);
+        state.putLong("reportDuration", reportDuration);
+        outState.putBundle(STATE_API_SESSION, state);
+    }
+
+    private void restoreApiSession(Bundle savedState) {
+        if (savedState == null) return;
+        restorePlayState = savedState.getBoolean(STATE_PLAY_WHEN_READY, restorePlayState);
+        if (!apiAccess || mPrefs == null) return;
+        Bundle state = savedState.getBundle(STATE_API_SESSION);
+        if (state == null) return;
+
+        String playlistJson = state.getString("playlist");
+        if (!TextUtils.isEmpty(playlistJson)) {
+            try {
+                lampaPlaylist = LampaPlaylist.fromJson(this, playlistJson,
+                        state.getInt("playlistIndex", 0),
+                        state.getBoolean("playlistAutoNext", true));
+                LampaPlaylist.Item current = lampaPlaylist.getCurrent();
+                if (current != null && current.isResolved()) applyPlaylistItem(current, true);
+            } catch (JSONException ignored) {
+                lampaPlaylist = null;
+            }
+        }
+
+        String uri = state.getString("uri");
+        if ((lampaPlaylist == null || lampaPlaylist.isEmpty()) && !TextUtils.isEmpty(uri)) {
+            mPrefs.setPersistent(false);
+            mPrefs.updateMedia(this, Uri.parse(uri), state.getString("type"));
+        }
+        if (state.containsKey("subtitleUri")) {
+            mPrefs.updateSubtitle(parseUri(state.getString("subtitleUri")));
+        }
+        if (state.containsKey("secondarySubtitleUri")) {
+            mPrefs.updateSecondarySubtitle(parseUri(state.getString("secondarySubtitleUri")));
+        }
+        mPrefs.updateMeta(state.getString("audioTrack"), state.getString("subtitleTrack"),
+                state.getInt("resizeMode", mPrefs.resizeMode),
+                state.getFloat("scale", mPrefs.scale),
+                state.getFloat("speed", mPrefs.speed));
+        mPrefs.updateAspectRatio(state.getFloat("aspectRatio", mPrefs.aspectRatio));
+        mPrefs.updatePosition(Math.max(0L, state.getLong("position", 0L)));
+        subtitleOffsetSec = state.getDouble("subtitleOffset", 0d);
+        secondarySubtitleOffsetSec = state.getDouble("secondarySubtitleOffset", 0d);
+        skipOffsetSec = state.getDouble("skipOffset", 0d);
+        skipModeSession = state.getString("skipMode");
+        skipSeenThisSession = state.getBoolean("skipSeen", false);
+        reportUri = parseUri(state.getString("reportUri"));
+        reportPosition = Math.max(0L, state.getLong("reportPosition", 0L));
+        reportDuration = Math.max(0L, state.getLong("reportDuration", 0L));
+        restorePlayState = state.getBoolean("playWhenReady", restorePlayState);
+    }
+
+    private Intent buildHandoffIntent() {
+        Intent current = getIntent();
+        Intent handoff = current == null ? new Intent() : new Intent(current);
+        Uri uri = currentPlayingUri();
+        if (uri != null) {
+            handoff.setAction(Intent.ACTION_VIEW);
+            handoff.setDataAndType(uri, mPrefs == null ? null : mPrefs.mediaType);
+        }
+        if (player != null && player.isCurrentMediaItemSeekable()) {
+            handoff.putExtra(API_POSITION, (int) Math.max(0, player.getCurrentPosition()));
+        }
+        handoff.putExtra(API_RETURN_RESULT, intentReturnResult);
+        if (lampaPlaylist != null && !lampaPlaylist.isEmpty()) {
+            String snapshot = lampaPlaylist.toSessionJson();
+            if (snapshot != null) handoff.putExtra(LampaPlaylist.EXTRA_PLAYLIST_JSON, snapshot);
+            handoff.putExtra(LampaPlaylist.EXTRA_PLAYLIST_INDEX,
+                    lampaPlaylist.getCurrentIndex());
+            handoff.putExtra(LampaPlaylist.EXTRA_AUTO_NEXT, lampaPlaylist.isAutoNext());
+            if (uri != null) handoff.putExtra(LampaPlaylist.EXTRA_CURRENT_URL, uri.toString());
+        }
+        return handoff;
+    }
+
+    private static String uriText(Uri uri) {
+        return uri == null ? null : uri.toString();
+    }
+
+    private static Uri parseUri(String value) {
+        return TextUtils.isEmpty(value) ? null : Uri.parse(value);
     }
 
     @Override
     public void onResume() {
         super.onResume();
         restorePlayStateAllowed = true;
+        resetPausedScreenGuard();
         audioRecoveryState.onResume();
         if (player != null && player.isPlaying() && audioRecoveryState.shouldRebuildSink()) {
             requestPassthroughAudioRestart();
@@ -1321,6 +1486,7 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        if (handedOver) return;
         audioRecoveryState.onPause();
         if (playerView != null) playerView.cancelHoldSpeed();
         savePlayer();
@@ -1342,17 +1508,24 @@ public class PlayerActivity extends Activity {
         fadeAuxiliaryChrome(statsView, false, true);
         fadeAuxiliaryChrome(roomPill, false, true);
         unregisterAudioOutputReceiver();
-        releasePlayer(false);
+        if (!handedOver) releasePlayer(false);
     }
 
     @Override
     protected void onDestroy() {
+        if (live == this) live = null;
         titleSearchGeneration++;
         hideSwipeToUnlock();
         if (together != null) {
             together.leave();
         }
         super.onDestroy();
+    }
+
+    private void handOver() {
+        handedOver = true;
+        finish();
+        releasePlayer(true);
     }
 
     private void registerAudioOutputReceiver() {
@@ -1405,7 +1578,8 @@ public class PlayerActivity extends Activity {
                 playerView.hideController();
                 return;
             }
-            if (!backExitGuard.shouldExit(SystemClock.elapsedRealtime())) {
+            if (!mPrefs.tvSingleBack
+                    && !backExitGuard.shouldExit(SystemClock.elapsedRealtime())) {
                 Utils.showText(playerView, getString(R.string.press_back_again), 2_000);
                 return;
             }
@@ -1421,21 +1595,26 @@ public class PlayerActivity extends Activity {
         }
         if (intentReturnResult) {
             Intent intent = new Intent("com.mxtech.intent.result.VIEW");
+            Uri resultUri = currentPlayingUri();
             intent.putExtra(API_END_BY, playbackFinished ? "playback_completion" : "user");
             if (!playbackFinished) {
+                long duration = 0;
+                long position = 0;
                 if (player != null) {
-                    long duration = player.getDuration();
-                    if (duration != C.TIME_UNSET) {
-                        intent.putExtra(API_DURATION, (int) player.getDuration());
-                    }
+                    long currentDuration = player.getDuration();
+                    if (currentDuration != C.TIME_UNSET) duration = currentDuration;
                     if (player.isCurrentMediaItemSeekable()) {
-                        if (mPrefs.persistentMode) {
-                            intent.putExtra(API_POSITION, (int) mPrefs.nonPersitentPosition);
-                        } else {
-                            intent.putExtra(API_POSITION, (int) player.getCurrentPosition());
-                        }
+                        position = mPrefs.persistentMode
+                                ? mPrefs.nonPersitentPosition : player.getCurrentPosition();
                     }
                 }
+                if ((position <= 0 || duration <= 0) && reportDuration > 0) {
+                    resultUri = reportUri;
+                    position = reportPosition;
+                    duration = reportDuration;
+                }
+                if (duration > 0) intent.putExtra(API_DURATION, (int) duration);
+                if (position > 0) intent.putExtra(API_POSITION, (int) position);
             }
             if (lampaPlaylist != null && !lampaPlaylist.isEmpty()) {
                 recordCurrentPlaylistItem(playbackFinished);
@@ -1443,12 +1622,11 @@ public class PlayerActivity extends Activity {
                 intent.putExtra(LampaPlaylist.EXTRA_PLAYLIST_INDEX, lampaPlaylist.getCurrentIndex());
                 if (current != null && current.url != null) {
                     intent.putExtra(LampaPlaylist.EXTRA_CURRENT_URL, current.url);
-                    // Official LAMPA identifies the active playlist entry by
-                    // the result Intent data URI.
-                    intent.setData(Uri.parse(current.url));
                 }
                 intent.putExtra(LampaPlaylist.EXTRA_PLAYBACK_RESULTS, lampaPlaylist.getPlaybackResultsJson());
             }
+            // Official LAMPA identifies the report target by the result Intent data URI.
+            if (resultUri != null) intent.setData(resultUri);
             setResult(Activity.RESULT_OK, intent);
         }
 
@@ -1629,6 +1807,11 @@ public class PlayerActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        if (resetPausedScreenGuard()) {
+            return true;
+        }
+        if (event.getAction() == KeyEvent.ACTION_DOWN) schedulePausedControllerHide();
+
         final int lampaKeyCode = event.getKeyCode();
         if (event.getAction() == KeyEvent.ACTION_DOWN
                 && isSkipActionEnabled()
@@ -1722,6 +1905,7 @@ public class PlayerActivity extends Activity {
     public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, Configuration newConfig) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
         inPip = isInPictureInPictureMode;
+        resetPausedScreenGuard();
         videoFreezePolicy.resetWindow();
 
         if (isInPictureInPictureMode) {
@@ -1835,6 +2019,9 @@ public class PlayerActivity extends Activity {
         apiSubs.clear();
         apiHeaders.clear();
         intentReturnResult = false;
+        reportUri = null;
+        reportPosition = 0;
+        reportDuration = 0;
         mPrefs.setPersistent(true);
         resetSkipSession();
     }
@@ -3873,6 +4060,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void updateLampaRuntimeUi() {
+        rememberPlaybackReport();
         // HLS may switch rendition without rebuilding the Tracks object.
         // Refresh the badge so it follows the format currently rendered.
         updateLampaTrackDetails();
@@ -3891,6 +4079,18 @@ public class PlayerActivity extends Activity {
         updateLampaSkipUi();
         updateTransferRateUi();
         updateStatsPanel();
+    }
+
+    private void rememberPlaybackReport() {
+        if (!intentReturnResult || player == null || !player.isPlaying()
+                || !player.isCurrentMediaItemSeekable()) return;
+        long duration = player.getDuration();
+        long position = player.getCurrentPosition();
+        Uri uri = currentPlayingUri();
+        if (duration == C.TIME_UNSET || duration <= 0 || position <= 0 || uri == null) return;
+        reportUri = uri;
+        reportPosition = position;
+        reportDuration = duration;
     }
 
     private void updateTransferRateUi() {
@@ -5088,6 +5288,7 @@ public class PlayerActivity extends Activity {
             updateLampaSkipUi();
             updateStatsPanel();
             applyControlVisibility();
+            resetPausedScreenGuard();
             if (player != null) maybeSearchSubtitlesOnline(player.getCurrentTracks());
             if (mPrefs.skipEnabled && mPrefs.skipFetchOnline && player != null
                     && lampaPlaylist != null && player.getDuration() > 0) {
@@ -6605,10 +6806,6 @@ public class PlayerActivity extends Activity {
         player.setVolume(systemVolume ? 1f : Math.max(0f, Math.min(1f, playerVolume / 100f)));
         Utils.applyBoost();
 
-        if (mPrefs.skipSilence) {
-            player.setSkipSilenceEnabled(true);
-        }
-
         youTubeOverlay.player(player);
         playerView.setPlayer(player);
         hideEmptyState();
@@ -6784,9 +6981,11 @@ public class PlayerActivity extends Activity {
         cancelSubtitleSearch();
         play = false;
         cancelPlaybackWatchdogs();
+        releasePausedScreenGuard();
         hideSwipeToUnlock();
         if (playerView != null) {
             playerView.removeCallbacks(audioRestartRunnable);
+            playerView.removeCallbacks(hidePausedControllerRunnable);
         }
         audioRestartInFlight = false;
         audioRestartRetries = 0;
@@ -6930,7 +7129,7 @@ public class PlayerActivity extends Activity {
             videoFreezePolicy.resetWindow();
             if (subtitleOffset != null) subtitleOffset.wake();
             if (secondarySubtitleOffset != null) secondarySubtitleOffset.wake();
-            playerView.setKeepScreenOn(isPlaying);
+            resetPausedScreenGuard();
 
             if (Utils.isPiPSupported(PlayerActivity.this)) {
                 if (isPlaying) {
@@ -6953,6 +7152,7 @@ public class PlayerActivity extends Activity {
                     playerView.setControllerShowTimeoutMs(-1);
                 }
             }
+            schedulePausedControllerHide();
 
             if (!isPlaying) {
                 PlayerActivity.locked = false;
@@ -8050,6 +8250,65 @@ public class PlayerActivity extends Activity {
             e.printStackTrace();
         }
         return false;
+    }
+
+    private boolean keepAwakeOnPause() {
+        return mPrefs != null && mPrefs.keepAwakeOnPause && isTvBox
+                && haveMedia && !inPip;
+    }
+
+    private void schedulePausedControllerHide() {
+        if (playerView == null) return;
+        playerView.removeCallbacks(hidePausedControllerRunnable);
+        if (controllerVisibleFully && haveMedia && player != null
+                && player.getPlaybackState() == Player.STATE_READY
+                && !player.getPlayWhenReady() && !locked && !isScrubbing) {
+            playerView.postDelayed(hidePausedControllerRunnable, CONTROLLER_TIMEOUT);
+        }
+    }
+
+    /** Re-arms the TV pause guard and reports whether this event only woke a dimmed screen. */
+    private boolean resetPausedScreenGuard() {
+        if (playerView == null || dimOverlay == null) return false;
+        playerView.removeCallbacks(dimRunnable);
+        playerView.removeCallbacks(keepAwakeGiveUpRunnable);
+
+        boolean wasDimmed = dimOverlay.getVisibility() == View.VISIBLE;
+        if (wasDimmed) {
+            dimOverlay.animate().cancel();
+            dimOverlay.animate().alpha(0f).setDuration(DIM_OUT_MS)
+                    .withEndAction(() -> dimOverlay.setVisibility(View.GONE));
+        }
+
+        boolean playing = player != null && player.isPlaying();
+        boolean holdingPause = keepAwakeOnPause() && !playing;
+        playerView.setKeepScreenOn(playing || holdingPause);
+        if (holdingPause) {
+            playerView.postDelayed(dimRunnable, DIM_DELAY_MS);
+            playerView.postDelayed(keepAwakeGiveUpRunnable, KEEP_AWAKE_MAX_MS);
+        }
+        return wasDimmed;
+    }
+
+    private void dimPausedScreen() {
+        if (dimOverlay == null || !keepAwakeOnPause()
+                || (player != null && player.isPlaying())) return;
+        dimOverlay.animate().cancel();
+        dimOverlay.setAlpha(0f);
+        dimOverlay.setVisibility(View.VISIBLE);
+        dimOverlay.animate().alpha(DIM_ALPHA).setDuration(DIM_IN_MS).withEndAction(null);
+    }
+
+    private void releasePausedScreenGuard() {
+        if (playerView == null) return;
+        playerView.removeCallbacks(dimRunnable);
+        playerView.removeCallbacks(keepAwakeGiveUpRunnable);
+        playerView.setKeepScreenOn(false);
+        if (dimOverlay != null) {
+            dimOverlay.animate().cancel();
+            dimOverlay.setAlpha(0f);
+            dimOverlay.setVisibility(View.GONE);
+        }
     }
 
     @RequiresApi(api = Build.VERSION_CODES.N)

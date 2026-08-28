@@ -46,10 +46,11 @@ class Prefs {
     private static final String PREF_KEY_ASK_SCOPE = "askScope";
     private static final String PREF_KEY_AUTO_PIP = "autoPiP";
     private static final String PREF_KEY_TUNNELING = "tunneling";
-    private static final String PREF_KEY_SKIP_SILENCE = "skipSilence";
     private static final String PREF_KEY_FRAMERATE_MATCHING = "frameRateMatching";
     private static final String PREF_KEY_ALLOW_SYSTEM_FRAMERATE = "allowSystemFrameRate";
     private static final String PREF_KEY_REPEAT_TOGGLE = "repeatToggle";
+    private static final String PREF_KEY_TV_SINGLE_BACK = "tvSingleBack";
+    private static final String PREF_KEY_KEEP_AWAKE_ON_PAUSE = "keepAwakeOnPause";
     private static final String PREF_KEY_SPEED = "speed";
     private static final String PREF_KEY_HOLD_SPEED = "holdSpeed";
     private static final String PREF_KEY_TIME_REMAINING = "timeRemaining";
@@ -160,10 +161,11 @@ class Prefs {
     public boolean autoPiP = false;
 
     public boolean tunneling = false;
-    public boolean skipSilence = false;
     public boolean frameRateMatching = false;
     public boolean allowSystemFrameRate = true;
     public boolean repeatToggle = false;
+    public boolean tvSingleBack = false;
+    public boolean keepAwakeOnPause = true;
     public String fileAccess = "auto";
     public int decoderPriority = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON;
     public boolean mapDV7ToHevc = false;
@@ -266,10 +268,12 @@ class Prefs {
                 PREF_KEY_TIME_REMAINING, timeRemaining);
         showStats = mSharedPreferences.getBoolean(PREF_KEY_SHOW_STATS, showStats);
         tunneling = mSharedPreferences.getBoolean(PREF_KEY_TUNNELING, tunneling);
-        skipSilence = mSharedPreferences.getBoolean(PREF_KEY_SKIP_SILENCE, skipSilence);
         frameRateMatching = mSharedPreferences.getBoolean(PREF_KEY_FRAMERATE_MATCHING, frameRateMatching);
         allowSystemFrameRate = mSharedPreferences.getBoolean(PREF_KEY_ALLOW_SYSTEM_FRAMERATE, !Utils.isTvBox(mContext));
         repeatToggle = mSharedPreferences.getBoolean(PREF_KEY_REPEAT_TOGGLE, repeatToggle);
+        tvSingleBack = mSharedPreferences.getBoolean(PREF_KEY_TV_SINGLE_BACK, tvSingleBack);
+        keepAwakeOnPause = mSharedPreferences.getBoolean(
+                PREF_KEY_KEEP_AWAKE_ON_PAUSE, keepAwakeOnPause);
         fileAccess = mSharedPreferences.getString(PREF_KEY_FILE_ACCESS, fileAccess);
         decoderPriority = Integer.parseInt(mSharedPreferences.getString(PREF_KEY_DECODER_PRIORITY, String.valueOf(decoderPriority)));
         mapDV7ToHevc = mSharedPreferences.getBoolean(PREF_KEY_MAP_DV7, mapDV7ToHevc);

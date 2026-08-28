@@ -516,4 +516,55 @@ public class ResourceContractTest {
         assertTrue(search.contains("answered.set(true);"));
         assertTrue(openSubtitles.contains("if (answered != null) answered.set(true)"));
     }
+
+    @Test
+    public void tvBackAndPausedScreenGuardRemainWired() throws Exception {
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+        String prefs = readProjectFile("src/main/java/com/brouken/player/Prefs.java");
+        String settings = readProjectFile(
+                "src/main/java/com/brouken/player/SettingsActivity.java");
+        String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
+        String surface = readProjectFile("src/main/res/layout/activity_player.xml");
+        String texture = readProjectFile(
+                "src/main/res/layout/activity_player_textureview.xml");
+
+        assertTrue(prefs.contains("public boolean tvSingleBack = false"));
+        assertTrue(prefs.contains("public boolean keepAwakeOnPause = true"));
+        assertTrue(preferences.contains("app:key=\"tvSingleBack\""));
+        assertTrue(preferences.contains("app:key=\"keepAwakeOnPause\""));
+        assertFalse(preferences.contains("app:key=\"skipSilence\""));
+        assertFalse(prefs.contains("skipSilence"));
+        assertTrue(settings.contains("preferenceSingleBack.setVisible(tvBox)"));
+        assertTrue(settings.contains("preferenceKeepAwake.setVisible(tvBox)"));
+        assertTrue(activity.contains("!mPrefs.tvSingleBack"));
+        assertTrue(activity.contains("resetPausedScreenGuard()"));
+        assertTrue(activity.contains("KEEP_AWAKE_MAX_MS"));
+        assertTrue(activity.contains("dimPausedScreen"));
+        assertTrue(activity.contains("schedulePausedControllerHide()"));
+        assertTrue(activity.contains("hidePausedControllerRunnable"));
+        assertTrue(surface.contains("android:id=\"@+id/dim_overlay\""));
+        assertTrue(texture.contains("android:id=\"@+id/dim_overlay\""));
+    }
+
+    @Test
+    public void duplicateScreensHandOffOneCompleteSession() throws Exception {
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+        String playlist = readProjectFile(
+                "src/main/java/com/brouken/player/LampaPlaylist.java");
+        String manifest = readProjectFile("src/main/AndroidManifest.xml");
+
+        assertTrue(manifest.contains("android:launchMode=\"singleTask\""));
+        assertTrue(activity.contains("private static PlayerActivity live"));
+        assertTrue(activity.contains("live.saveApiSession(inheritedState)"));
+        assertTrue(activity.contains("live.buildHandoffIntent()"));
+        assertTrue(activity.contains("live.handOver()"));
+        assertTrue(activity.contains("if (handedOver) return;"));
+        assertTrue(activity.contains("if (!handedOver) releasePlayer(false)"));
+        assertTrue(activity.contains("restoreApiSession(savedInstanceState"));
+        assertTrue(playlist.contains("String toSessionJson()"));
+        assertTrue(playlist.contains("playback_results"));
+        assertTrue(playlist.contains("_session_segments"));
+    }
 }

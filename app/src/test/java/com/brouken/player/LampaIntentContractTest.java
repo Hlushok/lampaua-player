@@ -46,7 +46,9 @@ public class LampaIntentContractTest {
         assertTrue(source.contains("intent.putExtra(API_END_BY"));
         assertTrue(source.contains("intent.putExtra(API_POSITION"));
         assertTrue(source.contains("intent.putExtra(API_DURATION"));
-        assertTrue(source.contains("intent.setData(Uri.parse(current.url))"));
+        assertTrue(source.contains("intent.setData(resultUri)"));
+        assertTrue(source.contains("reportDuration > 0"));
+        assertTrue(source.contains("rememberPlaybackReport()"));
         assertTrue(source.contains("setResult(Activity.RESULT_OK, intent)"));
         assertTrue(source.contains("LampaPlaylist.EXTRA_PLAYBACK_RESULTS"));
         assertTrue(source.contains("bundle.getBoolean(API_RETURN_RESULT)"));

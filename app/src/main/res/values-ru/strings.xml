@@ -50,9 +50,6 @@
     <string name="delete_confirmation">Удалить</string>
     <string name="delete_query">Удалить этот файл\?</string>
     <string name="request_scope">Чтобы автоматически загружать внешние субтитры или переходить к следующему файлу в каталоге, предоставьте %s доступ к самой верхней папке, содержащей ваши видео (например, Movies).</string>
-    <string name="pref_skip_silence_off">Воспроизводить как есть</string>
-    <string name="pref_skip_silence_on">Пропускать фрагменты с тишиной в аудиопотоке</string>
-    <string name="pref_skip_silence">Пропускать тишину</string>
     <string name="pref_auto_pip_off">Не переключаться автоматически на картинку в картинке</string>
     <string name="pref_auto_pip_on">Переключение на картинку в картинке при выходе из приложения</string>
     <string name="pref_auto_pip">Автоматическая картинка в картинке</string>
@@ -70,6 +67,12 @@
     <string name="subtitle_offset_reset">Сбросить</string>
     <string name="pref_repeat_toggle">Переключение повтора</string>
     <string name="pref_repeat_toggle_summary">Дополнительное управление, позволяющее бесконечно зацикливать видео (требуется перезапуск приложения)</string>
+    <string name="pref_tv_single_back">Выходить одним нажатием «Назад»</string>
+    <string name="pref_tv_single_back_on">Если нет открытых панелей или действий, кнопка «Назад» сразу закрывает плеер</string>
+    <string name="pref_tv_single_back_off">Перед выходом плеер просит нажать «Назад» ещё раз</string>
+    <string name="pref_keep_awake_on_pause">Не выключать экран на паузе</string>
+    <string name="pref_keep_awake_on_pause_on">Заставка не включается; через минуту изображение затемняется, а через два часа экран передаётся системе</string>
+    <string name="pref_keep_awake_on_pause_off">Во время паузы устройство может включить свою заставку</string>
     <string name="shortcut_videos">Видео</string>
     <string name="button_open">Открыть</string>
     <string name="button_crop">Изменить размер</string>

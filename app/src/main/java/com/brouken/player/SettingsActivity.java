@@ -181,6 +181,10 @@ public class SettingsActivity extends AppCompatActivity
                 preferenceHoldSpeed.setVisible(false);
             }
             boolean tvBox = Utils.isTvBox(getContext());
+            Preference preferenceSingleBack = findPreference("tvSingleBack");
+            Preference preferenceKeepAwake = findPreference("keepAwakeOnPause");
+            if (preferenceSingleBack != null) preferenceSingleBack.setVisible(tvBox);
+            if (preferenceKeepAwake != null) preferenceKeepAwake.setVisible(tvBox);
             Preference showRotation = findPreference("showButtonRotation");
             Preference showLock = findPreference("showButtonLock");
             Preference showPiP = findPreference("showButtonPiP");

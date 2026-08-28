@@ -158,17 +158,24 @@
             app:title="@string/pref_auto_pip" />
 
         <SwitchPreferenceCompat
-            app:key="skipSilence"
-            app:defaultValue="false"
-            app:summaryOn="@string/pref_skip_silence_on"
-            app:summaryOff="@string/pref_skip_silence_off"
-            app:title="@string/pref_skip_silence" />
-
-        <SwitchPreferenceCompat
             app:key="repeatToggle"
             app:defaultValue="false"
             app:summary="@string/pref_repeat_toggle_summary"
             app:title="@string/pref_repeat_toggle" />
+
+        <SwitchPreferenceCompat
+            app:key="tvSingleBack"
+            app:defaultValue="false"
+            app:summaryOn="@string/pref_tv_single_back_on"
+            app:summaryOff="@string/pref_tv_single_back_off"
+            app:title="@string/pref_tv_single_back" />
+
+        <SwitchPreferenceCompat
+            app:key="keepAwakeOnPause"
+            app:defaultValue="true"
+            app:summaryOn="@string/pref_keep_awake_on_pause_on"
+            app:summaryOff="@string/pref_keep_awake_on_pause_off"
+            app:title="@string/pref_keep_awake_on_pause" />
 
     </PreferenceCategory>
 

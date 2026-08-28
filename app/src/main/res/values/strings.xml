@@ -68,11 +68,14 @@
     <string name="pref_auto_pip">Auto picture-in-picture</string>
     <string name="pref_auto_pip_on">Switch to PiP when leaving the app</string>
     <string name="pref_auto_pip_off">Do not automatically switch to PiP</string>
-    <string name="pref_skip_silence">Skip silence</string>
-    <string name="pref_skip_silence_on">Skip parts with silence on the audio stream</string>
-    <string name="pref_skip_silence_off">Play content as is</string>
     <string name="pref_repeat_toggle">Repeat toggle</string>
     <string name="pref_repeat_toggle_summary">Extra control to allow indefinitely loop video (requires app restart)</string>
+    <string name="pref_tv_single_back">Leave with one Back press</string>
+    <string name="pref_tv_single_back_on">Back closes the player as soon as there is no panel or action left to close</string>
+    <string name="pref_tv_single_back_off">Back asks for a second press before closing the player</string>
+    <string name="pref_keep_awake_on_pause">Keep the screen on while paused</string>
+    <string name="pref_keep_awake_on_pause_on">The screensaver stays away; the picture dims after one minute and the screen is released after two hours</string>
+    <string name="pref_keep_awake_on_pause_off">The device may start its screensaver while playback is paused</string>
     <string name="pref_map_dv7">Dolby Vision Profile 7 → HDR10</string>
     <string name="pref_map_dv7_on">Use the compatible HDR10 layer when the device does not support Dolby Vision Profile 7</string>
     <string name="pref_map_dv7_off">Play Dolby Vision Profile 7 without conversion</string>

@@ -24,4 +24,16 @@ public class LaunchIntentPolicyTest {
         assertFalse(LaunchIntentPolicy.shouldSuppressResume(
                 "android.intent.action.SEND", false, false));
     }
+
+    @Test
+    public void launcherTapInheritsOnlyAnActiveMediaSession() {
+        assertTrue(LaunchIntentPolicy.shouldInheritLiveSession(
+                "android.intent.action.MAIN", false, false, true));
+        assertFalse(LaunchIntentPolicy.shouldInheritLiveSession(
+                "android.intent.action.MAIN", false, false, false));
+        assertFalse(LaunchIntentPolicy.shouldInheritLiveSession(
+                "android.intent.action.VIEW", true, false, true));
+        assertFalse(LaunchIntentPolicy.shouldInheritLiveSession(
+                "android.intent.action.MAIN", false, true, true));
+    }
 }

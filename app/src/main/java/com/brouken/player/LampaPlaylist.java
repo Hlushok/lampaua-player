@@ -154,12 +154,13 @@ final class LampaPlaylist {
 
         String trimmed = raw.trim();
         JSONArray source;
+        JSONObject root = null;
         if (trimmed.startsWith("[")) {
             source = new JSONArray(trimmed);
             playlist.currentIndex = requestedIndex;
             playlist.autoNext = requestedAutoNext;
         } else {
-            JSONObject root = new JSONObject(trimmed);
+            root = new JSONObject(trimmed);
             source = root.optJSONArray("items");
             if (source == null) source = root.optJSONArray("playlist");
             if (source == null) source = root.optJSONArray("data");
@@ -174,6 +175,15 @@ final class LampaPlaylist {
             JSONObject json = source.optJSONObject(i);
             if (json != null) playlist.items.add(parseItem(json));
         }
+        if (root != null) {
+            JSONArray results = root.optJSONArray("playback_results");
+            if (results != null) {
+                for (int i = 0; i < results.length(); i++) {
+                    JSONObject result = results.optJSONObject(i);
+                    if (result != null) playlist.playbackResults.put(result);
+                }
+            }
+        }
         if (!playlist.items.isEmpty()) {
             playlist.currentIndex = Math.max(0, Math.min(playlist.currentIndex, playlist.items.size() - 1));
         } else {
@@ -182,7 +192,7 @@ final class LampaPlaylist {
         return playlist;
     }
 
-    private static Item parseItem(JSONObject json) {
+    static Item parseItem(JSONObject json) {
         Item item = new Item();
         item.id = optText(json, "id");
         item.url = firstText(json, "url", "media_url", "stream_url");
@@ -208,6 +218,7 @@ final class LampaPlaylist {
         readStringMap(json.optJSONObject("quality"), item.quality);
         readSubtitles(json.optJSONArray("subtitles"), item.subtitles);
         readSegments(json.optJSONObject("segments"), item.segments);
+        readSessionSegments(json.optJSONArray("_session_segments"), item.segments);
         if ((item.url == null || item.url.isEmpty()) && !item.quality.isEmpty()) {
             item.url = item.quality.values().iterator().next();
         }
@@ -238,6 +249,24 @@ final class LampaPlaylist {
         }
     }
 
+    private static void readSessionSegments(JSONArray source, List<Segment> target) {
+        if (source == null) return;
+        for (int i = 0; i < source.length(); i++) {
+            JSONObject json = source.optJSONObject(i);
+            if (json == null) continue;
+            long start = json.optLong("start_ms", -1);
+            long end = json.optLong("end_ms", -1);
+            if (start < 0 || end <= start) continue;
+            Segment segment = new Segment();
+            segment.type = firstText(json, "type", "kind");
+            segment.kind = firstText(json, "kind", "type");
+            segment.source = firstText(json, "source");
+            segment.startMs = start;
+            segment.endMs = end;
+            target.add(segment);
+        }
+    }
+
     int size() { return items.size(); }
     boolean isEmpty() { return items.isEmpty(); }
     boolean isAutoNext() { return autoNext; }
@@ -245,6 +274,83 @@ final class LampaPlaylist {
     Item getCurrent() { return get(currentIndex); }
     Item get(int index) { return index >= 0 && index < items.size() ? items.get(index) : null; }
     boolean hasNext() { return currentIndex + 1 < items.size(); }
+
+    String toSessionJson() {
+        try {
+            JSONObject root = new JSONObject();
+            root.put("current_index", currentIndex);
+            root.put("auto_next", autoNext);
+            JSONArray serializedItems = new JSONArray();
+            for (Item item : items) serializedItems.put(sessionItem(item));
+            root.put("items", serializedItems);
+            root.put("playback_results", new JSONArray(playbackResults.toString()));
+            return root.toString();
+        } catch (JSONException ignored) {
+            return null;
+        }
+    }
+
+    static JSONObject sessionItem(Item item) throws JSONException {
+        JSONObject json = new JSONObject();
+        putText(json, "id", item.id);
+        putText(json, "url", item.url);
+        putText(json, "resolver_url", item.resolverUrl);
+        putText(json, "title", item.title);
+        putText(json, "thumbnail", item.thumbnail);
+        putText(json, "mime_type", item.mimeType);
+        putText(json, "imdb_id", item.imdbId);
+        if (item.tmdbId > 0) json.put("tmdb_id", item.tmdbId);
+        if (item.kpId > 0) json.put("kp_id", item.kpId);
+        if (item.malId > 0) json.put("mal_id", item.malId);
+        putText(json, "media_type", item.mediaType);
+        putText(json, "original_title", item.originalTitle);
+        if (item.year > 0) json.put("year", item.year);
+        if (item.anime) json.put("is_anime", true);
+        if (item.season > 0) json.put("season", item.season);
+        if (item.episode > 0) json.put("episode", item.episode);
+        json.put("position_ms", Math.max(0, item.positionMs));
+        json.put("cache_ttl_ms", item.cacheTtlMs);
+        json.put("headers", stringMap(item.headers));
+        json.put("resolver_headers", stringMap(item.resolverHeaders));
+        json.put("quality", stringMap(item.quality));
+
+        JSONArray subtitles = new JSONArray();
+        for (Subtitle subtitle : item.subtitles) {
+            if (subtitle == null || subtitle.url == null) continue;
+            JSONObject value = new JSONObject().put("url", subtitle.url);
+            putText(value, "label", subtitle.label);
+            putText(value, "language", subtitle.language);
+            subtitles.put(value);
+        }
+        json.put("subtitles", subtitles);
+
+        JSONArray segments = new JSONArray();
+        for (Segment segment : item.segments) {
+            if (segment == null || segment.endMs <= segment.startMs) continue;
+            JSONObject value = new JSONObject()
+                    .put("start_ms", segment.startMs)
+                    .put("end_ms", segment.endMs);
+            putText(value, "type", segment.type);
+            putText(value, "kind", segment.kind);
+            putText(value, "source", segment.source);
+            segments.put(value);
+        }
+        json.put("_session_segments", segments);
+        return json;
+    }
+
+    private static JSONObject stringMap(HashMap<String, String> values) throws JSONException {
+        JSONObject json = new JSONObject();
+        for (String key : values.keySet()) {
+            String value = values.get(key);
+            if (key != null && value != null) json.put(key, value);
+        }
+        return json;
+    }
+
+    private static void putText(JSONObject json, String key, String value) throws JSONException {
+        if (value != null && !value.trim().isEmpty()) json.put(key, value);
+    }
 
     String useLowerQuality(Item item) {
         if (item == null || item.quality.isEmpty()) return null;
