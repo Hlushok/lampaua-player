@@ -839,7 +839,8 @@ class Utils {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 if (!landscape) {
                     top = Math.max(top, rootInsets.getInsetsIgnoringVisibility(
-                            WindowInsets.Type.statusBars()).top);
+                            WindowInsets.Type.statusBars()
+                                    | WindowInsets.Type.displayCutout()).top);
                 }
                 bottom = rootInsets.getInsetsIgnoringVisibility(
                         WindowInsets.Type.navigationBars()).bottom + ui.overscanV();

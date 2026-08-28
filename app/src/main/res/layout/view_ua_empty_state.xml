@@ -71,6 +71,13 @@
             android:text="@string/empty_state_open" />
 
         <TextView
+            android:id="@+id/ua_empty_state_link"
+            style="@style/UaEmptyStateAction.Secondary"
+            android:layout_marginTop="10dp"
+            android:drawableStart="@drawable/ic_link_24dp"
+            android:text="@string/empty_state_link" />
+
+        <TextView
             android:id="@+id/ua_empty_state_together"
             style="@style/UaEmptyStateAction.Secondary"
             android:layout_marginTop="10dp"

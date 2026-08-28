@@ -29,6 +29,13 @@ public class ResourceContractTest {
         return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 
+    private static String section(String source, String start, String end) {
+        int from = source.indexOf(start);
+        int to = source.indexOf(end, Math.max(0, from + start.length()));
+        if (from < 0 || to < 0 || to <= from) return "";
+        return source.substring(from, to);
+    }
+
     private static int pngInt(byte[] bytes, int offset) {
         return ((bytes[offset] & 0xff) << 24)
                 | ((bytes[offset + 1] & 0xff) << 16)
@@ -369,6 +376,46 @@ public class ResourceContractTest {
         assertTrue(offset.contains("subtitle_offset_later"));
         assertTrue(ukrainian.contains("name=\"subtitle_offset_earlier\""));
         assertTrue(ukrainian.contains("name=\"subtitle_offset_later\""));
+    }
+
+    @Test
+    public void remainingDonorPanelsStayReachableAndRotationSafe() throws Exception {
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+        String launcher = readProjectFile(
+                "src/main/res/layout/view_ua_empty_state.xml");
+        String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
+        String more = section(activity, "private void showMoreMenu()",
+                "private void showPlaybackTools()");
+        String subtitles = section(activity, "private void showSubtitleDialog()",
+                "private void clearSubtitleTimeline()");
+        String secondary = section(activity, "private void showSecondarySubtitleDialog()",
+                "private void showManualSubtitleSearch(boolean secondary)");
+        String configuration = section(activity,
+                "public void onConfigurationChanged(@NonNull Configuration newConfig)",
+                "void showError(");
+
+        assertTrue(more.contains("this::showSpeedDialog"));
+        assertTrue(more.contains("this::askForLink"));
+        assertFalse(more.contains("button_playback_options"));
+        assertTrue(more.contains("if (player != null) {\n"
+                + "            items.add(new MenuItem(getString(R.string.sleep_timer_title)"));
+        assertTrue(activity.contains("showPickerDialog(subtitleOffsetDialog)"));
+        assertTrue(activity.contains("showPickerDialog(skipSessionDialog)"));
+        assertTrue(activity.contains("showPickerDialog(sleepTimerDialog)"));
+        assertTrue(configuration.contains("dismissOpenPickers();"));
+        assertTrue(subtitles.contains(
+                "MenuItem.caption(getString(R.string.subtitle_main_title))"));
+        assertTrue(subtitles.contains(
+                "textEnabled && !painting && group.isTrackSelected(index)"));
+        assertFalse(subtitles.contains("R.string.subtitle_offset_title"));
+        assertTrue(secondary.contains("format.sampleMimeType == null"));
+        assertTrue(launcher.contains("@+id/ua_empty_state_link"));
+
+        int translate = preferences.indexOf("app:key=\"subtitleTranslateOn\"");
+        int backends = preferences.indexOf("app:key=\"subtitleTranslateBackends\"");
+        int sourceLanguage = preferences.indexOf("app:key=\"subtitleSearchLanguage\"");
+        assertTrue(translate >= 0 && translate < backends && backends < sourceLanguage);
     }
 
     @Test

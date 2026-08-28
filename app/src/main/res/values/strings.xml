@@ -12,6 +12,8 @@
     <string name="player_tools_utilities">Tools</string>
     <string name="empty_state_subtitle">No video is open</string>
     <string name="empty_state_open">Open video</string>
+    <string name="empty_state_link">Open link</string>
+    <string name="error_link_invalid">Enter a link starting with http:// or rtsp://</string>
     <string name="empty_state_together">Watch together</string>
     <string name="sleep_timer_title">Sleep timer</string>
     <string name="sleep_timer_off">Off</string>
@@ -85,6 +87,11 @@
     <string name="button_quality">Video quality</string>
     <string name="button_playback_options">Playback options</string>
     <string name="button_app_settings">UA Player settings</string>
+    <string name="speed_row">Speed</string>
+    <string name="speed_title">Playback speed</string>
+    <string name="speed_normal">Normal</string>
+    <string name="audio_prefer_language">Always prefer %1$s</string>
+    <string name="audio_prefer_language_done">%1$s is now the first preferred audio language</string>
     <string name="quality_title">Video quality</string>
     <string name="quality_auto">Auto</string>
     <string name="quality_maximum">Maximum</string>

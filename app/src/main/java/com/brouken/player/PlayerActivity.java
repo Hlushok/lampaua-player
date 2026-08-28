@@ -15,6 +15,8 @@ import android.app.PendingIntent;
 import android.app.PictureInPictureParams;
 import android.app.RemoteAction;
 import android.content.BroadcastReceiver;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.Context;
@@ -308,6 +310,7 @@ public class PlayerActivity extends Activity {
     private static boolean isTvBox;
     private UiMetrics ui;
     private Dialog menuDialog;
+    private AlertDialog sleepTimerDialog;
     private boolean pickerDialogOpen;
     public static boolean locked = false;
     private Thread nextUriThread;
@@ -588,6 +591,7 @@ public class PlayerActivity extends Activity {
     private TextView lampaTopDetails;
     private TextView lampaClock;
     private TextView lampaFinishTime;
+    private int lampaSafeHorizontalInset;
     private LinearLayout lampaSkipPanel;
     private TextView lampaSkipButton;
     private ProgressBar lampaSkipProgress;
@@ -1068,6 +1072,16 @@ public class PlayerActivity extends Activity {
 
                 int insetLeft = windowInsets.getSystemWindowInsetLeft();
                 int insetRight = windowInsets.getSystemWindowInsetRight();
+                int insetTopIgnoringVisibility = 0;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    android.graphics.Insets stableSystem =
+                            windowInsets.getInsetsIgnoringVisibility(
+                                    WindowInsets.Type.statusBars()
+                                            | WindowInsets.Type.displayCutout());
+                    insetLeft = Math.max(insetLeft, stableSystem.left);
+                    insetRight = Math.max(insetRight, stableSystem.right);
+                    insetTopIgnoringVisibility = stableSystem.top;
+                }
                 int insetHorizontal = Math.max(
                         WindowInsetPolicy.symmetricHorizontalInset(insetLeft, insetRight),
                         ui.overscanH());
@@ -1075,9 +1089,6 @@ public class PlayerActivity extends Activity {
                 int marginLeft = 0;
                 int paddingRight = insetHorizontal;
                 int marginRight = 0;
-                int insetTopIgnoringVisibility = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-                        ? windowInsets.getInsetsIgnoringVisibility(
-                                WindowInsets.Type.statusBars()).top : 0;
                 int stableTopInset = WindowInsetPolicy.stableTopInset(
                         windowInsets.getSystemWindowInsetTop(), insetTopIgnoringVisibility);
                 int bottomInset = windowInsets.getSystemWindowInsetBottom() + ui.overscanV();
@@ -1113,6 +1124,10 @@ public class PlayerActivity extends Activity {
 
                 if (lampaTopPanel != null
                         && lampaTopPanel.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                    if (lampaSafeHorizontalInset != insetHorizontal) {
+                        lampaSafeHorizontalInset = insetHorizontal;
+                        applyLampaTopLayout();
+                    }
                     FrameLayout.LayoutParams topParams =
                             (FrameLayout.LayoutParams) lampaTopPanel.getLayoutParams();
                     topParams.leftMargin = insetHorizontal + ui.gridH();
@@ -1218,19 +1233,38 @@ public class PlayerActivity extends Activity {
             displayParent.addView(buttonPiP);
         }
         if (!isTvBox) displayParent.addView(buttonRotation);
-        applyLampaTopLayout();
 
         // Update is adjacent to More; More always terminates the bottom bar.
         controls.addView(buttonUpdate);
         controls.addView(buttonMore);
-        styleTvBottomControls(controls);
 
-        exoBasicControls.addView(horizontalScrollView);
+        for (ImageButton button : new ImageButton[]{buttonQuality, buttonAudio,
+                exoSubtitle, buttonPlaylist, buttonUpdate, buttonMore,
+                buttonAspectRatio, buttonPiP, buttonRotation}) {
+            styleClusterButton(button);
+        }
+        if (mPrefs.repeatToggle) styleClusterButton(exoRepeat);
+        applyControlPill(controls);
+        styleTvBottomControls(controls);
+        applyLampaTopLayout();
+
+        final LinearLayout.LayoutParams controlStripParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        controlStripParams.gravity = Gravity.CENTER_VERTICAL;
+        controlStripParams.setMarginEnd(ui.gridH());
+        exoBasicControls.addView(horizontalScrollView, controlStripParams);
 
         // Lock is isolated at the far-left of the time row on touch devices.
         if (!isTvBox) {
             View exoTime = findViewById(R.id.exo_time);
             if (exoTime instanceof LinearLayout) {
+                styleClusterButton(buttonLock);
+                buttonLock.setBackground(lampaBackground(
+                        Color.argb(170, 4, 18, 40), Color.TRANSPARENT, 8));
+                LinearLayout.LayoutParams lockParams =
+                        (LinearLayout.LayoutParams) buttonLock.getLayoutParams();
+                lockParams.setMarginEnd(ui.lockMarginEnd());
+                buttonLock.setLayoutParams(lockParams);
                 ((LinearLayout) exoTime).addView(buttonLock, 0);
                 exoTime.bringToFront();
             }
@@ -1548,10 +1582,7 @@ public class PlayerActivity extends Activity {
         if (live == this) live = null;
         titleSearchGeneration++;
         hideSwipeToUnlock();
-        if (menuDialog != null) {
-            menuDialog.dismiss();
-            menuDialog = null;
-        }
+        dismissOpenPickers();
         if (together != null) {
             together.leave();
         }
@@ -2619,18 +2650,12 @@ public class PlayerActivity extends Activity {
         lampaTopPanel.setPadding(horizontalPadding, verticalPadding,
                 horizontalPadding, verticalPadding);
 
-        int posterHeight = narrowPortrait
-                ? Math.min(ui.posterHeight(), ui.dp(60)) : ui.posterHeight();
-        int posterWidth = Math.round(posterHeight * 16f / 9f);
-        lampaTopPreview.setLayoutParams(new LinearLayout.LayoutParams(
-                posterWidth, posterHeight));
-
+        int accentGap = ui.dp(narrowPortrait ? 6 : 12);
         LinearLayout.LayoutParams accentParams = new LinearLayout.LayoutParams(
-                ui.dp(2), Math.max(ui.dp(34), posterHeight - ui.dp(16)));
-        accentParams.setMarginStart(ui.dp(narrowPortrait ? 6 : 12));
-        accentParams.setMarginEnd(ui.dp(narrowPortrait ? 6 : 12));
+                ui.dp(2), ui.dp(34));
+        accentParams.setMarginStart(accentGap);
+        accentParams.setMarginEnd(accentGap);
         accentParams.gravity = Gravity.CENTER_VERTICAL;
-        lampaTopAccent.setLayoutParams(accentParams);
 
         lampaTopTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP,
                 narrowPortrait ? 18 : ui.textHeaderTitle());
@@ -2649,8 +2674,27 @@ public class PlayerActivity extends Activity {
         int timePadH = ui.dp(narrowPortrait ? 5 : 10);
         lampaTopTimeBlock.setPadding(timePadH, ui.dp(4), timePadH, ui.dp(4));
 
+        int buttonBox = ui.dp(narrowPortrait ? 32 : 38);
+        int buttonCount = lampaHeaderButtons == null
+                ? 0 : lampaHeaderButtons.getChildCount();
+        int panelWidth = Math.max(0, getResources().getDisplayMetrics().widthPixels
+                - 2 * (lampaSafeHorizontalInset + ui.gridH()));
+        int fixedWidth = 2 * horizontalPadding
+                + accentParams.width + accentGap * 2
+                + Math.max(clockMaxWidth, buttonBox * buttonCount) + 2 * timePadH;
+        int preferredPosterHeight = narrowPortrait
+                ? Math.min(ui.posterHeight(), ui.dp(60)) : ui.posterHeight();
+        int preferredPosterWidth = Math.round(preferredPosterHeight * 16f / 9f);
+        int posterWidth = TopPanelPolicy.posterWidth(panelWidth, preferredPosterWidth,
+                fixedWidth, ui.dp(narrowPortrait ? 84 : 112));
+        int posterHeight = Math.min(preferredPosterHeight,
+                Math.round(posterWidth * 9f / 16f));
+        lampaTopPreview.setLayoutParams(new LinearLayout.LayoutParams(
+                posterWidth, posterHeight));
+        accentParams.height = Math.max(ui.dp(34), posterHeight - ui.dp(16));
+        lampaTopAccent.setLayoutParams(accentParams);
+
         if (lampaHeaderButtons != null) {
-            int buttonBox = ui.dp(narrowPortrait ? 32 : 38);
             int buttonPad = ui.dp(narrowPortrait ? 5 : 7);
             for (int index = 0; index < lampaHeaderButtons.getChildCount(); index++) {
                 View child = lampaHeaderButtons.getChildAt(index);
@@ -2694,10 +2738,14 @@ public class PlayerActivity extends Activity {
     private void setupEmptyState() {
         emptyStateView = findViewById(R.id.ua_empty_state);
         emptyStateOpen = findViewById(R.id.ua_empty_state_open);
+        final View linkAction = findViewById(R.id.ua_empty_state_link);
         final View togetherAction = findViewById(R.id.ua_empty_state_together);
         final View settingsAction = findViewById(R.id.ua_empty_state_settings);
         if (emptyStateOpen != null) {
             emptyStateOpen.setOnClickListener(view -> openFile(mPrefs.mediaUri));
+        }
+        if (linkAction != null) {
+            linkAction.setOnClickListener(view -> askForLink());
         }
         if (togetherAction != null) {
             togetherAction.setOnClickListener(view -> showTogetherMenu());
@@ -2705,6 +2753,48 @@ public class PlayerActivity extends Activity {
         if (settingsAction != null) {
             settingsAction.setOnClickListener(view -> openAppSettings());
         }
+    }
+
+    private void askForLink() {
+        final EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        input.setSingleLine(true);
+        input.setHint("https://");
+        final Uri pasted = clipboardNetworkUri();
+        if (pasted != null) {
+            input.setText(pasted.toString());
+            input.setSelection(input.length());
+        }
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.empty_state_link)
+                .setView(input)
+                .setPositiveButton(android.R.string.ok,
+                        (ignored, which) -> openTypedLink(input.getText().toString()))
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+        dialog.show();
+        input.requestFocus();
+    }
+
+    private void openTypedLink(String text) {
+        final Uri uri = Uri.parse(text == null ? "" : text.trim());
+        if (!Utils.isSupportedNetworkUri(uri)) {
+            showSnack(getString(R.string.error_link_invalid), null);
+            return;
+        }
+        applyViewIntent(new Intent(Intent.ACTION_VIEW, uri), true);
+    }
+
+    private Uri clipboardNetworkUri() {
+        final ClipboardManager clipboard =
+                (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        final ClipData clip = clipboard == null ? null : clipboard.getPrimaryClip();
+        if (clip == null || clip.getItemCount() == 0) return null;
+        final CharSequence text = clip.getItemAt(0).coerceToText(this);
+        if (text == null) return null;
+        final Uri uri = Uri.parse(text.toString().trim());
+        return Utils.isSupportedNetworkUri(uri) ? uri : null;
     }
 
     private boolean isEmptyStateVisible() {
@@ -2814,8 +2904,7 @@ public class PlayerActivity extends Activity {
                 SUBTITLE_OFFSET_MAX_SEC, SUBTITLE_OFFSET_STEP_SEC,
                 lines.toArray(new OffsetPanel.Line[0]));
         subtitleOffsetDialog.setIcon(R.drawable.ic_subtitle_offset_24dp);
-        subtitleOffsetDialog.setOnDismissListener(ignored -> subtitleOffsetDialog = null);
-        subtitleOffsetDialog.show();
+        showPickerDialog(subtitleOffsetDialog);
     }
 
     private boolean hasActiveSubtitle() {
@@ -2842,6 +2931,9 @@ public class PlayerActivity extends Activity {
         applyPickerBars();
         dialog.setOnDismissListener(ignored -> {
             if (menuDialog == dialog) menuDialog = null;
+            if (subtitleOffsetDialog == dialog) subtitleOffsetDialog = null;
+            if (skipSessionDialog == dialog) skipSessionDialog = null;
+            if (sleepTimerDialog == dialog) sleepTimerDialog = null;
             pickerDialogOpen = false;
             if (playerView != null) {
                 Utils.toggleSystemUi(PlayerActivity.this, playerView, controllerVisibleFully);
@@ -3107,12 +3199,48 @@ public class PlayerActivity extends Activity {
         if (focus != null) focus.post(focus::requestFocus);
     }
 
+    private static final float[] SPEED_PRESETS =
+            {0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f};
+
+    private float userSpeed() {
+        if (together != null && together.isActive()) return together.userSpeed();
+        return player == null ? 1f : player.getPlaybackParameters().speed;
+    }
+
+    private String formatSpeed(float speed) {
+        if (Math.abs(speed - 1f) < 0.001f) return getString(R.string.speed_normal);
+        String number = speed == Math.rint(speed)
+                ? String.valueOf((int) speed) : String.valueOf(speed);
+        return number + "×";
+    }
+
+    private void showSpeedDialog() {
+        if (player == null) return;
+        float current = userSpeed();
+        List<MenuItem> items = new ArrayList<>();
+        for (float speed : SPEED_PRESETS) {
+            items.add(new MenuItem(formatSpeed(speed), null,
+                    Math.abs(current - speed) < 0.001f,
+                    () -> applyUserSpeed(speed)));
+        }
+        showSideMenu(getString(R.string.speed_title), items);
+    }
+
+    private void applyUserSpeed(float speed) {
+        if (player == null) return;
+        player.setPlaybackSpeed(speed);
+        mPrefs.speed = speed;
+        updateLampaRuntimeUi();
+    }
+
     private void showMoreMenu() {
         final List<MenuItem> items = new ArrayList<>();
         items.add(MenuItem.caption(getString(R.string.menu_playback)));
         if (player != null) {
-            items.add(new MenuItem(getString(R.string.button_playback_options),
-                    null, false, () -> exoSettings.performClick()));
+            items.add(new MenuItem(getString(R.string.speed_row),
+                    Math.abs(userSpeed() - 1f) < 0.001f
+                            ? null : formatSpeed(userSpeed()),
+                    false, this::showSpeedDialog));
         }
         String timerSummary = sleepTimer.isAtMediaEnd()
                 ? getString(R.string.sleep_timer_end_of_item)
@@ -3125,8 +3253,10 @@ public class PlayerActivity extends Activity {
             items.add(new MenuItem(getString(R.string.skip_session_title),
                     skipSessionSummary(), false, this::showSkipSessionDialog));
         }
-        items.add(new MenuItem(getString(R.string.sleep_timer_title),
-                timerSummary, false, this::showSleepTimerMenu));
+        if (player != null) {
+            items.add(new MenuItem(getString(R.string.sleep_timer_title),
+                    timerSummary, false, this::showSleepTimerMenu));
+        }
         items.add(MenuItem.rule());
         if (player != null) {
             items.add(new MenuItem(getString(R.string.subtitle_search_manual),
@@ -3136,13 +3266,15 @@ public class PlayerActivity extends Activity {
             items.add(new MenuItem(getString(R.string.together_title),
                     togetherSummary(), false, this::showTogetherMenu));
         }
-        if (mPrefs.showStats) {
+        if (player != null && mPrefs.showStats) {
             items.add(new MenuItem(getString(R.string.playback_statistics_title),
                     null, false, this::showPlaybackStatistics));
         }
         items.add(MenuItem.rule());
         items.add(new MenuItem(getString(R.string.button_open), null,
                 false, () -> openFile(mPrefs.mediaUri)));
+        items.add(new MenuItem(getString(R.string.empty_state_link), null,
+                false, this::askForLink));
         items.add(new MenuItem(getString(R.string.button_app_settings), null,
                 false, this::openAppSettings));
         showSideMenu(getString(R.string.button_more), items);
@@ -4045,8 +4177,9 @@ public class PlayerActivity extends Activity {
     }
 
     private void showCustomSleepTimer() {
-        AlertDialog dialog = DurationPanel.create(this, this::armSleepAfterMinutes);
-        dialog.show();
+        if (sleepTimerDialog != null) sleepTimerDialog.dismiss();
+        sleepTimerDialog = DurationPanel.create(this, this::armSleepAfterMinutes);
+        showPickerDialog(sleepTimerDialog);
     }
 
     private void armSleepAfterMinutes(int minutes) {
@@ -4650,8 +4783,7 @@ public class PlayerActivity extends Activity {
                 new OffsetPanel.Line(hasChoice ? getString(R.string.skip_offset_title) : null,
                         skipOffsetSec, this::applySkipOffset));
         skipSessionDialog.setIcon(R.drawable.ic_skip_offset_24dp);
-        skipSessionDialog.setOnDismissListener(ignored -> skipSessionDialog = null);
-        skipSessionDialog.show();
+        showPickerDialog(skipSessionDialog);
     }
 
     private void applySkipOffset(double seconds) {
@@ -4710,6 +4842,30 @@ public class PlayerActivity extends Activity {
         if (!isTvBox || playerView == null) return;
         playerView.removeCallbacks(primaryTvFocusRunnable);
         playerView.post(primaryTvFocusRunnable);
+    }
+
+    private void styleClusterButton(ImageButton button) {
+        if (button == null) return;
+        int padding = ui.clusterPad();
+        button.setPadding(padding, padding, padding, padding);
+        button.setMinimumWidth(0);
+        button.setMinimumHeight(0);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ui.clusterBox(), ui.clusterBox());
+        params.gravity = Gravity.CENTER_VERTICAL;
+        button.setLayoutParams(params);
+    }
+
+    private void applyControlPill(ViewGroup controls) {
+        if (controls == null) return;
+        GradientDrawable pill = new GradientDrawable();
+        pill.setColor(Color.argb(180, 4, 18, 40));
+        pill.setCornerRadius(ui.pillCorner());
+        controls.setBackground(pill);
+        controls.setClipToOutline(true);
+        int horizontal = ui.pillPadH();
+        controls.setPadding(horizontal, controls.getPaddingTop(),
+                horizontal, controls.getPaddingBottom());
     }
 
     private void styleTvBottomControls(ViewGroup controls) {
@@ -4895,7 +5051,8 @@ public class PlayerActivity extends Activity {
                     label = getString(R.string.audio_track_number, number);
                 }
                 choices.add(new AudioChoice(label, group.getMediaTrackGroup(), index,
-                        group.isTrackSelected(index)));
+                        group.isTrackSelected(index),
+                        AudioLanguagePriority.normalize(format.language)));
             }
         }
         return choices;
@@ -4909,9 +5066,21 @@ public class PlayerActivity extends Activity {
         final ArrayList<AudioChoice> choices = buildAudioChoices();
         if (choices.size() < 2) return;
         final List<MenuItem> items = new ArrayList<>();
+        String selectedLanguage = null;
         for (AudioChoice choice : choices) {
             items.add(new MenuItem(choice.label, null, choice.selected,
                     () -> applyAudioChoice(choice)));
+            if (choice.selected) selectedLanguage = choice.language;
+        }
+        List<String> preferred = AudioLanguagePriority.parse(mPrefs.languageAudio);
+        if (selectedLanguage != null && hasOverrideType(C.TRACK_TYPE_AUDIO)
+                && (preferred.isEmpty() || !selectedLanguage.equals(preferred.get(0)))) {
+            String language = selectedLanguage;
+            String label = displaySubtitleLanguage(language);
+            items.add(MenuItem.rule());
+            items.add(new MenuItem(getString(R.string.audio_prefer_language,
+                    TextUtils.isEmpty(label) ? language : label), null, false,
+                    () -> preferAudioLanguage(language)));
         }
         showSideMenu(getString(R.string.button_audio_track), items);
     }
@@ -4926,29 +5095,41 @@ public class PlayerActivity extends Activity {
                 .build());
     }
 
+    private void preferAudioLanguage(String language) {
+        List<String> languages = AudioLanguagePriority.parse(mPrefs.languageAudio);
+        languages.remove(language);
+        languages.add(0, language);
+        mPrefs.setLanguageAudio(AudioLanguagePriority.serialize(languages));
+        if (player != null) {
+            player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                    .setPreferredAudioLanguages(languages.toArray(new String[0]))
+                    .build());
+        }
+        String label = displaySubtitleLanguage(language);
+        Utils.showText(playerView, getString(R.string.audio_prefer_language_done,
+                TextUtils.isEmpty(label) ? language : label));
+    }
+
     private static final class AudioChoice {
         final String label;
         final TrackGroup group;
         final int trackIndex;
         final boolean selected;
+        final String language;
 
-        AudioChoice(String label, TrackGroup group, int trackIndex, boolean selected) {
+        AudioChoice(String label, TrackGroup group, int trackIndex, boolean selected,
+                    String language) {
             this.label = label;
             this.group = group;
             this.trackIndex = trackIndex;
             this.selected = selected;
+            this.language = language;
         }
     }
 
-    private void showQualityDialog() {
-        if (player == null) {
-            Toast.makeText(this, R.string.quality_unavailable, Toast.LENGTH_SHORT).show();
-            return;
-        }
-
+    private ArrayList<VideoQualityChoice> buildQualityChoices() {
         final ArrayList<VideoQualityChoice> choices = new ArrayList<>();
-        choices.add(VideoQualityChoice.auto(getString(R.string.quality_auto)));
-        choices.add(VideoQualityChoice.maximum(getString(R.string.quality_maximum)));
+        if (player == null) return choices;
 
         final HashMap<Integer, VideoQualityChoice> renditions = new HashMap<>();
         for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
@@ -4962,16 +5143,28 @@ public class PlayerActivity extends Activity {
                         ? format.averageBitrate : format.peakBitrate;
                 VideoQualityChoice previous = renditions.get(longSide);
                 if (previous == null || bitrateValue > previous.bitrate) {
-                    String details = MediaFormatLabel.videoDetails(format);
+                    ArrayList<String> details = new ArrayList<>(
+                            MediaFormatLabel.videoParts(format));
+                    String bitrateText = "";
+                    if (bitrateValue > 0 && !details.isEmpty()) {
+                        details.remove(details.size() - 1);
+                        bitrateText = getString(R.string.quality_bitrate,
+                                bitrateValue / 1_000_000f);
+                    }
                     renditions.put(longSide, VideoQualityChoice.track(
-                            MediaFormatLabel.qualityLabel(format), details, "",
+                            MediaFormatLabel.qualityLabel(format),
+                            TextUtils.join(" · ", details), bitrateText,
                             group.getMediaTrackGroup(), index, bitrateValue));
                 }
             }
         }
-        ArrayList<Integer> longSides = new ArrayList<>(renditions.keySet());
-        Collections.sort(longSides, Collections.reverseOrder());
-        for (Integer longSide : longSides) choices.add(renditions.get(longSide));
+        if (renditions.size() >= 2) {
+            choices.add(VideoQualityChoice.auto(getString(R.string.quality_auto)));
+            choices.add(VideoQualityChoice.maximum(getString(R.string.quality_maximum)));
+            ArrayList<Integer> longSides = new ArrayList<>(renditions.keySet());
+            Collections.sort(longSides, Collections.reverseOrder());
+            for (Integer longSide : longSides) choices.add(renditions.get(longSide));
+        }
 
         LampaPlaylist.Item item = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
         if (item != null && !item.quality.isEmpty()) {
@@ -4985,8 +5178,13 @@ public class PlayerActivity extends Activity {
                 }
             }
         }
+        return choices;
+    }
 
-        if (choices.size() <= 2) {
+    private void showQualityDialog() {
+        final ArrayList<VideoQualityChoice> choices = buildQualityChoices();
+
+        if (choices.size() < 2) {
             Toast.makeText(this, R.string.quality_unavailable, Toast.LENGTH_SHORT).show();
             return;
         }
@@ -5617,6 +5815,7 @@ public class PlayerActivity extends Activity {
             items.add(new MenuItem(getString(R.string.subtitle_secondary_title),
                     secondarySubtitleSummary(), false, this::showSecondarySubtitleDialog));
             items.add(MenuItem.rule());
+            items.add(MenuItem.caption(getString(R.string.subtitle_main_title)));
         }
 
         items.add(new MenuItem(getString(R.string.pref_subtitle_none), null,
@@ -5644,17 +5843,13 @@ public class PlayerActivity extends Activity {
                 CharSequence title = label == null || label.trim().isEmpty()
                         ? getString(R.string.pref_subtitle_header) : label;
                 items.add(new MenuItem(title, null,
-                        !painting && group.isTrackSelected(index),
+                        textEnabled && !painting && group.isTrackSelected(index),
                         () -> applySubtitle(trackGroup, selectedIndex)));
             }
         }
         items.add(MenuItem.rule());
         items.add(new MenuItem(getString(R.string.subtitle_search_manual), null,
                 false, () -> showManualSubtitleSearch(false)));
-        if (hasActiveSubtitle()) {
-            items.add(new MenuItem(getString(R.string.subtitle_offset_title),
-                    subtitleOffsetSummary(), false, this::showSubtitleOffsetDialog));
-        }
         showSideMenu(getString(R.string.pref_subtitle_header), items);
     }
 
@@ -5864,8 +6059,8 @@ public class PlayerActivity extends Activity {
             for (int index = 0; index < group.length; index++) {
                 Format format = group.getTrackFormat(index);
                 if (!group.isTrackSupported(index) || isPhantomClosedCaption(format)
-                        || shownByMainLine(format)
-                        || (format.sampleMimeType != null && MimeTypes.isImage(format.sampleMimeType))) {
+                        || shownByMainLine(format) || format.sampleMimeType == null
+                        || MimeTypes.isImage(format.sampleMimeType)) {
                     continue;
                 }
                 number++;
@@ -5882,10 +6077,23 @@ public class PlayerActivity extends Activity {
             }
         }
 
+        Set<Uri> subtitleConfigurations = new HashSet<>();
+        MediaItem currentItem = player.getCurrentMediaItem();
+        if (currentItem != null && currentItem.localConfiguration != null) {
+            for (MediaItem.SubtitleConfiguration configuration
+                    : currentItem.localConfiguration.subtitleConfigurations) {
+                subtitleConfigurations.add(configuration.uri);
+            }
+        }
         for (Uri uri : externalSubtitleUris()) {
-            if (shownByMainLine(uri)) continue;
-            items.add(new MenuItem(subtitleFileLabel(uri), null,
-                    uri.equals(secondarySubtitleUri), () -> chooseSecondarySubtitle(uri)));
+            if (uri.equals(secondarySubtitleUri)) {
+                items.add(new MenuItem(subtitleFileLabel(uri), null, true,
+                        () -> chooseSecondarySubtitle(uri)));
+                continue;
+            }
+            if (shownByMainLine(uri) || subtitleConfigurations.contains(uri)) continue;
+            items.add(new MenuItem(subtitleFileLabel(uri), null, false,
+                    () -> chooseSecondarySubtitle(uri)));
         }
         items.add(MenuItem.rule());
         items.add(new MenuItem(getString(R.string.subtitle_search_manual), null,
@@ -8519,12 +8727,27 @@ public class PlayerActivity extends Activity {
         UiMetrics updatedUi = UiMetrics.of(this, isTvBox);
         if (!updatedUi.sameClassAndWidth(ui)) {
             ui = updatedUi;
+            dismissOpenPickers();
+            lampaSafeHorizontalInset = 0;
             applyLampaTopLayout();
             if (controlView != null) controlView.requestApplyInsets();
         }
         updateSubtitleViewMargin();
 
         updateButtonRotation();
+    }
+
+    private void dismissOpenPickers() {
+        Dialog[] dialogs = {menuDialog, subtitleOffsetDialog,
+                skipSessionDialog, sleepTimerDialog};
+        for (Dialog dialog : dialogs) {
+            if (dialog != null && dialog.isShowing()) dialog.dismiss();
+        }
+        menuDialog = null;
+        subtitleOffsetDialog = null;
+        skipSessionDialog = null;
+        sleepTimerDialog = null;
+        pickerDialogOpen = false;
     }
 
     void showError(ExoPlaybackException error) {
@@ -8945,7 +9168,10 @@ public class PlayerActivity extends Activity {
     private void updateMediaControlVisibility() {
         updateEpisodeControls();
         if (buttonQuality != null) {
-            buttonQuality.setVisibility(player != null && haveMedia ? View.VISIBLE : View.GONE);
+            boolean available = buildQualityChoices().size() >= 2;
+            buttonQuality.setVisibility(available ? View.VISIBLE : View.GONE);
+            buttonQuality.setSelected(available
+                    && selectedVideoQualityMode != VideoQualityChoice.MODE_AUTO);
         }
         if (buttonAudio != null) {
             buttonAudio.setVisibility(audioChoiceCount() > 1 ? View.VISIBLE : View.GONE);

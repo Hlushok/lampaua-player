@@ -217,15 +217,15 @@
                 app:summaryOff="@string/pref_subtitle_translate_off"
                 app:title="@string/pref_subtitle_translate" />
 
+            <Preference
+                app:key="subtitleTranslateBackends"
+                app:title="@string/pref_subtitle_translate_backends" />
+
             <SwitchPreferenceCompat
                 app:key="subtitleSearchLanguage"
                 app:defaultValue="false"
                 app:summary="@string/pref_subtitle_search_language_summary"
                 app:title="@string/pref_subtitle_search_language" />
-
-            <Preference
-                app:key="subtitleTranslateBackends"
-                app:title="@string/pref_subtitle_translate_backends" />
 
             <PreferenceCategory
                 app:key="subtitleSourcesCategory"

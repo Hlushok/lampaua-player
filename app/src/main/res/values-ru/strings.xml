@@ -9,6 +9,8 @@
     <string name="player_tools_utilities">Инструменты</string>
     <string name="empty_state_subtitle">Видео не открыто</string>
     <string name="empty_state_open">Открыть видео</string>
+    <string name="empty_state_link">Открыть ссылку</string>
+    <string name="error_link_invalid">Введите ссылку, начинающуюся с http:// или rtsp://</string>
     <string name="empty_state_together">Совместный просмотр</string>
     <string name="sleep_timer_title">Таймер сна</string>
     <string name="sleep_timer_off">Выключено</string>
@@ -75,6 +77,11 @@
     <string name="pref_keep_awake_on_pause_off">Во время паузы устройство может включить свою заставку</string>
     <string name="shortcut_videos">Видео</string>
     <string name="button_open">Открыть</string>
+    <string name="speed_row">Скорость</string>
+    <string name="speed_title">Скорость воспроизведения</string>
+    <string name="speed_normal">Обычная</string>
+    <string name="audio_prefer_language">Всегда предпочитать: %1$s</string>
+    <string name="audio_prefer_language_done">%1$s теперь первый среди предпочитаемых языков озвучки</string>
     <string name="button_crop">Изменить размер</string>
     <string name="button_rotate">Повернуть</string>
     <string name="button_pip">Картинка в картинке</string>
