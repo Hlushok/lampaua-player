@@ -6,7 +6,13 @@
     <string name="video_scale_title">Video size</string>
     <string name="button_lock">Lock controls</string>
     <string name="swipe_unlock">Swipe right to unlock</string>
-    <string name="player_tools">Player tools</string>
+    <string name="player_tools">More</string>
+    <string name="player_tools_media">Media</string>
+    <string name="player_tools_screen">Screen</string>
+    <string name="player_tools_utilities">Tools</string>
+    <string name="empty_state_subtitle">No video is open</string>
+    <string name="empty_state_open">Open video</string>
+    <string name="empty_state_together">Watch together</string>
     <string name="sleep_timer_title">Sleep timer</string>
     <string name="sleep_timer_off">Off</string>
     <string name="sleep_timer_custom">Custom duration</string>
@@ -174,8 +180,8 @@
     <string name="pref_subtitle_preview">Live preview</string>
     <string name="subtitle_preview_sample">This is how your subtitles will look</string>
     <string name="pref_player_buttons">Player buttons</string>
-    <string name="pref_player_buttons_summary">Choose optional buttons shown below the timeline</string>
-    <string name="pref_player_buttons_required">Play/Pause and More are always shown</string>
+    <string name="pref_player_buttons_summary">Choose buttons pinned below the timeline</string>
+    <string name="pref_player_buttons_required">Play/Pause and More are always shown; unpinned actions move to More</string>
     <string name="pref_player_button_subtitles">Subtitles</string>
     <string name="subtitle_offset_earlier">− Earlier</string>
     <string name="subtitle_offset_later">Later +</string>

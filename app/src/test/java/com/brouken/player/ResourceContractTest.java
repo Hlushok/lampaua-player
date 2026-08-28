@@ -335,10 +335,16 @@ public class ResourceContractTest {
         assertTrue(preferences.contains("app:key=\"showButtonAspectRatio\""));
         assertTrue(preferences.contains("app:key=\"showButtonTogether\""));
         assertTrue(preferences.contains("app:key=\"showButtonAppSettings\""));
-        assertTrue(prefs.contains("public boolean showButtonOpen = true"));
-        assertTrue(prefs.contains("public boolean showButtonAppSettings = true"));
+        assertTrue(prefs.contains("public boolean showButtonOpen = false"));
+        assertTrue(prefs.contains("public boolean showButtonPlaylist = true"));
+        assertTrue(prefs.contains("public boolean showButtonQuality = true"));
+        assertTrue(prefs.contains("public boolean showButtonSubtitles = true"));
+        assertTrue(prefs.contains("public boolean showButtonPlaybackOptions = true"));
+        assertTrue(prefs.contains("public boolean showButtonAppSettings = false"));
         assertTrue(activity.contains("applyControlVisibility()"));
         assertTrue(activity.contains("controls.addView(buttonTools)"));
+        assertTrue(activity.contains("addHiddenPlayerControls(items, actions)"));
+        assertTrue(activity.contains("PlayerButtonPlacement.resolve"));
         assertTrue(activity.contains(
                 "setNeutralButton(R.string.subtitle_offset_title"));
         assertFalse(preferences.contains("showButtonTools"));
@@ -347,6 +353,35 @@ public class ResourceContractTest {
         assertTrue(offset.contains("subtitle_offset_later"));
         assertTrue(ukrainian.contains("name=\"subtitle_offset_earlier\""));
         assertTrue(ukrainian.contains("name=\"subtitle_offset_later\""));
+    }
+
+    @Test
+    public void manualLaunchUsesBrandedEmptyStateWithoutPreparingAnEmptyPlayer()
+            throws Exception {
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+        String prefs = readProjectFile("src/main/java/com/brouken/player/Prefs.java");
+        String playerLayout = readProjectFile("src/main/res/layout/activity_player.xml");
+        String textureLayout = readProjectFile(
+                "src/main/res/layout/activity_player_textureview.xml");
+        String emptyLayout = readProjectFile("src/main/res/layout/view_ua_empty_state.xml");
+        String ukrainian = readProjectFile("src/main/res/values-uk/strings.xml");
+
+        assertTrue(activity.contains("LaunchIntentPolicy.shouldSuppressResume"));
+        assertTrue(activity.contains(
+                "haveMedia = mPrefs.mediaUri != null && !mPrefs.suppressResume"));
+        assertTrue(activity.contains("showEmptyState();"));
+        assertTrue(activity.contains("if (!haveMedia)"));
+        assertTrue(prefs.contains("public boolean suppressResume"));
+        assertTrue(prefs.contains("suppressResume = false"));
+        assertTrue(playerLayout.contains("@layout/view_ua_empty_state"));
+        assertTrue(textureLayout.contains("@layout/view_ua_empty_state"));
+        assertTrue(emptyLayout.contains("@+id/ua_empty_state"));
+        assertTrue(emptyLayout.contains("@+id/ua_empty_state_open"));
+        assertTrue(emptyLayout.contains("@+id/ua_empty_state_together"));
+        assertTrue(emptyLayout.contains("@+id/ua_empty_state_settings"));
+        assertTrue(ukrainian.contains("name=\"empty_state_subtitle\""));
+        assertTrue(ukrainian.contains("name=\"empty_state_open\""));
     }
 
     @Test

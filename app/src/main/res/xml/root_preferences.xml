@@ -34,7 +34,7 @@
 
             <SwitchPreferenceCompat
                 app:key="showButtonOpen"
-                app:defaultValue="true"
+                app:defaultValue="false"
                 app:title="@string/button_open" />
 
             <SwitchPreferenceCompat
@@ -54,22 +54,22 @@
 
             <SwitchPreferenceCompat
                 app:key="showButtonAspectRatio"
-                app:defaultValue="true"
+                app:defaultValue="false"
                 app:title="@string/button_crop" />
 
             <SwitchPreferenceCompat
                 app:key="showButtonRotation"
-                app:defaultValue="true"
+                app:defaultValue="false"
                 app:title="@string/button_rotate" />
 
             <SwitchPreferenceCompat
                 app:key="showButtonLock"
-                app:defaultValue="true"
+                app:defaultValue="false"
                 app:title="@string/button_lock" />
 
             <SwitchPreferenceCompat
                 app:key="showButtonPiP"
-                app:defaultValue="true"
+                app:defaultValue="false"
                 app:title="@string/button_pip" />
 
             <SwitchPreferenceCompat
@@ -79,12 +79,12 @@
 
             <SwitchPreferenceCompat
                 app:key="showButtonTogether"
-                app:defaultValue="true"
+                app:defaultValue="false"
                 app:title="@string/together_title" />
 
             <SwitchPreferenceCompat
                 app:key="showButtonAppSettings"
-                app:defaultValue="true"
+                app:defaultValue="false"
                 app:title="@string/button_app_settings" />
 
         </PreferenceScreen>

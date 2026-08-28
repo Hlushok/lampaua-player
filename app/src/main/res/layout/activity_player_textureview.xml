@@ -13,4 +13,6 @@
         app:show_subtitle_button="true"
         app:dtpv_controller="@id/youtube_overlay" />
 
+    <include layout="@layout/view_ua_empty_state" />
+
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

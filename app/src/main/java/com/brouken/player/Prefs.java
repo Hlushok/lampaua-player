@@ -107,6 +107,9 @@ class Prefs {
     final SharedPreferences mSharedPreferences;
 
     public Uri mediaUri;
+    // A launcher start keeps the remembered URI for the next file picker, but must not replay it.
+    // This is session-only and is cleared by every real media selection.
+    public boolean suppressResume;
     public Uri subtitleUri;
     public Uri scopeUri;
     public String mediaType;
@@ -156,17 +159,17 @@ class Prefs {
     public int volumeBoost = 0;
     public boolean volumeGesturesEnabled = true;
     public boolean brightnessGesturesEnabled = true;
-    public boolean showButtonOpen = true;
+    public boolean showButtonOpen = false;
     public boolean showButtonPlaylist = true;
     public boolean showButtonQuality = true;
     public boolean showButtonSubtitles = true;
-    public boolean showButtonAspectRatio = true;
-    public boolean showButtonRotation = true;
-    public boolean showButtonLock = true;
-    public boolean showButtonPiP = true;
+    public boolean showButtonAspectRatio = false;
+    public boolean showButtonRotation = false;
+    public boolean showButtonLock = false;
+    public boolean showButtonPiP = false;
     public boolean showButtonPlaybackOptions = true;
-    public boolean showButtonTogether = true;
-    public boolean showButtonAppSettings = true;
+    public boolean showButtonTogether = false;
+    public boolean showButtonAppSettings = false;
     public String togetherNick = "";
     public String togetherPassword = "";
     public boolean togetherPublic = false;
@@ -409,6 +412,7 @@ class Prefs {
 
     public void updateMedia(final Context context, final Uri uri, final String type) {
         mediaUri = uri;
+        suppressResume = false;
         positionKey = uri == null ? null : uri.toString();
         mediaType = type;
         updateSubtitle(null);

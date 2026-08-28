@@ -218,6 +218,7 @@ public class PlayerActivity extends Activity {
     private static final int REQUEST_CHOOSER_VIDEO_MEDIASTORE = 20;
     private static final int REQUEST_CHOOSER_SUBTITLE_MEDIASTORE = 21;
     private static final int REQUEST_SETTINGS = 100;
+    private static final String STATE_SUPPRESS_RESUME = "ua.suppress_resume";
     public static final int CONTROLLER_TIMEOUT = 3500;
     private static final String ACTION_MEDIA_CONTROL = "media_control";
     private static final String EXTRA_CONTROL_TYPE = "control_type";
@@ -250,6 +251,8 @@ public class PlayerActivity extends Activity {
     private ImageButton buttonTogether;
     private ImageButton buttonUpdate;
     private ImageButton buttonAppSettings;
+    private View emptyStateView;
+    private View emptyStateOpen;
     private ImageButton exoSubtitle;
     private UpdateInfo pendingUpdate;
     private SwipeToUnlockView swipeToUnlock;
@@ -543,13 +546,24 @@ public class PlayerActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         // Rotate ASAP, before super/inflating to avoid glitches with activity launch animation
         mPrefs = new Prefs(this);
+        final Intent launchIntent = getIntent();
+        final Room.Invite launchRoomInvite = roomInviteFromIntent(launchIntent);
+        mPrefs.suppressResume = savedInstanceState == null
+                ? LaunchIntentPolicy.shouldSuppressResume(
+                        launchIntent.getAction(), launchIntent.getData() != null,
+                        launchRoomInvite != null)
+                : savedInstanceState.getBoolean(STATE_SUPPRESS_RESUME, false);
         systemVolume = mPrefs.systemVolume;
         playerVolume = mPrefs.playerVolume;
         maxVolumeBoost = mPrefs.volumeBoost;
         volumeGesturesEnabled = mPrefs.volumeGesturesEnabled;
         brightnessGesturesEnabled = mPrefs.brightnessGesturesEnabled;
         boostLevel = 0;
-        Utils.setOrientation(this, mPrefs.orientation);
+        if (mPrefs.suppressResume) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+        } else {
+            Utils.setOrientation(this, mPrefs.orientation);
+        }
 
         super.onCreate(savedInstanceState);
         if (Build.VERSION.SDK_INT == 28 && Build.MANUFACTURER.equalsIgnoreCase("xiaomi") &&
@@ -582,10 +596,8 @@ public class PlayerActivity extends Activity {
             AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
         }
 
-        final Intent launchIntent = getIntent();
         final String action = launchIntent.getAction();
         final String type = launchIntent.getType();
-        final Room.Invite launchRoomInvite = roomInviteFromIntent(launchIntent);
         awaitingRoomMedia = launchRoomInvite != null;
 
         if ("com.lampaua.player.action.SHORTCUT_VIDEOS".equals(action)) {
@@ -648,6 +660,7 @@ public class PlayerActivity extends Activity {
         coordinatorLayout = findViewById(R.id.coordinatorLayout);
         mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         playerView = findViewById(R.id.video_view);
+        setupEmptyState();
         exoPlayPause = findViewById(R.id.exo_play_pause);
         loadingProgressBar = findViewById(R.id.loading);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -737,8 +750,8 @@ public class PlayerActivity extends Activity {
         buttonPlaylist.setImageResource(R.drawable.ic_playlist_play_24dp);
         buttonPlaylist.setId(View.generateViewId());
         buttonPlaylist.setContentDescription(getString(R.string.button_playlist));
-        buttonPlaylist.setVisibility(mPrefs.showButtonPlaylist && lampaPlaylist != null
-                && lampaPlaylist.size() > 1 ? View.VISIBLE : View.GONE);
+        buttonPlaylist.setVisibility(barVisibility(mPrefs.showButtonPlaylist,
+                lampaPlaylist != null && lampaPlaylist.size() > 1));
         buttonPlaylist.setOnClickListener(view -> showLampaPlaylist());
 
         buttonQuality = new ImageButton(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
@@ -1100,21 +1113,23 @@ public class PlayerActivity extends Activity {
 
                 if (controllerVisible && playerView.isControllerFullyVisible()) {
                     if (mPrefs.firstRun) {
-                        TapTargetView.showFor(PlayerActivity.this,
-                                TapTarget.forView(buttonOpen, getString(R.string.onboarding_open_title), getString(R.string.onboarding_open_description))
-                                        .outerCircleColor(R.color.green)
-                                        .targetCircleColor(R.color.white)
-                                        .titleTextSize(22)
-                                        .titleTextColor(R.color.white)
-                                        .descriptionTextSize(14)
-                                        .cancelable(true),
-                                new TapTargetView.Listener() {
-                                    @Override
-                                    public void onTargetClick(TapTargetView view) {
-                                        super.onTargetClick(view);
-                                        buttonOpen.performClick();
-                                    }
-                                });
+                        if (buttonOpen != null && buttonOpen.isShown()) {
+                            TapTargetView.showFor(PlayerActivity.this,
+                                    TapTarget.forView(buttonOpen, getString(R.string.onboarding_open_title), getString(R.string.onboarding_open_description))
+                                            .outerCircleColor(R.color.green)
+                                            .targetCircleColor(R.color.white)
+                                            .titleTextSize(22)
+                                            .titleTextColor(R.color.white)
+                                            .descriptionTextSize(14)
+                                            .cancelable(true),
+                                    new TapTargetView.Listener() {
+                                        @Override
+                                        public void onTargetClick(TapTargetView view) {
+                                            super.onTargetClick(view);
+                                            buttonOpen.performClick();
+                                        }
+                                    });
+                        }
                         // TODO: Explain gestures?
                         //  "Use vertical and horizontal gestures to change brightness, volume and seek in video"
                         mPrefs.markFirstRun();
@@ -1183,6 +1198,13 @@ public class PlayerActivity extends Activity {
             playerView.removeCallbacks(sleepTimerRunnable);
             playerView.post(sleepTimerRunnable);
         }
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        outState.putBoolean(STATE_SUPPRESS_RESUME,
+                mPrefs != null && mPrefs.suppressResume);
+        super.onSaveInstanceState(outState);
     }
 
     @Override
@@ -1350,6 +1372,17 @@ public class PlayerActivity extends Activity {
             return;
         }
         final String action = intent.getAction();
+        if (LaunchIntentPolicy.shouldSuppressResume(
+                action, intent.getData() != null, false) && player == null) {
+            resetApiAccess();
+            mPrefs.suppressResume = true;
+            awaitingRoomMedia = false;
+            lampaPlaylist = null;
+            setIntent(intent);
+            if (buttonPlaylist != null) buttonPlaylist.setVisibility(View.GONE);
+            if (alive) initializePlayer();
+            return;
+        }
         if (Intent.ACTION_VIEW.equals(action) && intent.getData() != null) {
             applyViewIntent(intent, true);
         } else if (Intent.ACTION_SEND.equals(action)
@@ -1854,8 +1887,8 @@ public class PlayerActivity extends Activity {
                 mPrefs.setPersistent(false);
             }
             if (buttonPlaylist != null) {
-                buttonPlaylist.setVisibility(mPrefs.showButtonPlaylist
-                        && lampaPlaylist.size() > 1 ? View.VISIBLE : View.GONE);
+                buttonPlaylist.setVisibility(barVisibility(
+                        mPrefs.showButtonPlaylist, lampaPlaylist.size() > 1));
             }
         } catch (Exception e) {
             lampaPlaylist = null;
@@ -2278,6 +2311,62 @@ public class PlayerActivity extends Activity {
         startActivityForResult(intent, REQUEST_SETTINGS);
     }
 
+    private void setupEmptyState() {
+        emptyStateView = findViewById(R.id.ua_empty_state);
+        emptyStateOpen = findViewById(R.id.ua_empty_state_open);
+        final View togetherAction = findViewById(R.id.ua_empty_state_together);
+        final View settingsAction = findViewById(R.id.ua_empty_state_settings);
+        if (emptyStateOpen != null) {
+            emptyStateOpen.setOnClickListener(view -> openFile(mPrefs.mediaUri));
+        }
+        if (togetherAction != null) {
+            togetherAction.setOnClickListener(view -> showTogetherMenu());
+        }
+        if (settingsAction != null) {
+            settingsAction.setOnClickListener(view -> openAppSettings());
+        }
+    }
+
+    private boolean isEmptyStateVisible() {
+        return emptyStateView != null && emptyStateView.getVisibility() == View.VISIBLE;
+    }
+
+    private void showEmptyState() {
+        restorePlayState = false;
+        focusPlay = false;
+        cancelPlaybackWatchdogs();
+        updateLoading(false);
+        setEndControlsVisible(false);
+        playerView.setPlayer(null);
+        playerView.setControllerAutoShow(false);
+        playerView.hideController();
+        fadeAuxiliaryChrome(statsView, false, true);
+        fadeAuxiliaryChrome(roomPill, false, true);
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+        if (mBrightnessControl != null) {
+            mBrightnessControl.setScreenBrightness(
+                    android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE);
+        }
+        if (emptyStateView != null) {
+            emptyStateView.setVisibility(View.VISIBLE);
+            emptyStateView.bringToFront();
+        }
+        Utils.toggleSystemUi(this, playerView, true);
+        if (emptyStateOpen != null) emptyStateOpen.post(emptyStateOpen::requestFocus);
+    }
+
+    private void hideEmptyState() {
+        if (emptyStateView != null) emptyStateView.setVisibility(View.GONE);
+        playerView.setControllerAutoShow(true);
+        Utils.setOrientation(this, mPrefs.orientation);
+        if (mBrightnessControl != null) {
+            float brightness = mPrefs.brightness < 0
+                    ? android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                    : mBrightnessControl.levelToBrightness(mPrefs.brightness);
+            mBrightnessControl.setScreenBrightness(brightness);
+        }
+    }
+
     private void checkForUpdates(boolean manual) {
         Updater.find(this, manual, info -> runOnUiThread(() -> {
             if (isFinishing() || isDestroyed()) return;
@@ -2337,6 +2426,81 @@ public class PlayerActivity extends Activity {
     }
 
     private void showPlayerTools() {
+        final List<String> items = new ArrayList<>();
+        final List<Runnable> actions = new ArrayList<>();
+        addHiddenPlayerControls(items, actions);
+        items.add(getString(R.string.player_tools_utilities));
+        actions.add(this::showUtilityTools);
+        if (PlayerButtonPlacement.resolve(mPrefs.showButtonTogether,
+                togetherAvailable()) == PlayerButtonPlacement.MORE) {
+            final String summary = togetherSummary();
+            items.add(getString(R.string.together_title)
+                    + (summary == null ? "" : "  \u00B7  " + summary));
+            actions.add(this::showTogetherMenu);
+        }
+        if (PlayerButtonPlacement.resolve(mPrefs.showButtonAppSettings,
+                true) == PlayerButtonPlacement.MORE) {
+            items.add(getString(R.string.button_app_settings));
+            actions.add(this::openAppSettings);
+        }
+        showActionDialog(getString(R.string.player_tools), items, actions);
+    }
+
+    private void addHiddenPlayerControls(List<String> items, List<Runnable> actions) {
+        final List<String> mediaItems = new ArrayList<>();
+        final List<Runnable> mediaActions = new ArrayList<>();
+        addOverflowAction(mediaItems, mediaActions, mPrefs.showButtonOpen, true,
+                getString(R.string.button_open), () -> openFile(mPrefs.mediaUri));
+        addOverflowAction(mediaItems, mediaActions, mPrefs.showButtonPlaylist,
+                lampaPlaylist != null && lampaPlaylist.size() > 1,
+                getString(R.string.button_playlist), this::showLampaPlaylist);
+        addOverflowAction(mediaItems, mediaActions, mPrefs.showButtonQuality,
+                player != null && haveMedia,
+                getString(R.string.button_quality), this::showQualityDialog);
+        addOverflowAction(mediaItems, mediaActions, mPrefs.showButtonSubtitles,
+                exoSubtitle != null && exoSubtitle.isEnabled(),
+                getString(R.string.pref_player_button_subtitles), this::showSubtitleDialog);
+        addOverflowAction(mediaItems, mediaActions, mPrefs.showButtonPlaybackOptions,
+                player != null && haveMedia,
+                getString(R.string.button_playback_options), () -> exoSettings.performClick());
+        if (!mediaItems.isEmpty()) {
+            items.add(getString(R.string.player_tools_media));
+            actions.add(() -> showActionDialog(
+                    getString(R.string.player_tools_media), mediaItems, mediaActions));
+        }
+
+        final List<String> screenItems = new ArrayList<>();
+        final List<Runnable> screenActions = new ArrayList<>();
+        addOverflowAction(screenItems, screenActions, mPrefs.showButtonAspectRatio,
+                player != null && haveMedia,
+                getString(R.string.button_crop), this::showVideoScaleModePicker);
+        addOverflowAction(screenItems, screenActions, mPrefs.showButtonRotation,
+                !isTvBox && player != null && haveMedia,
+                getString(R.string.button_rotate), () -> buttonRotation.performClick());
+        addOverflowAction(screenItems, screenActions, mPrefs.showButtonLock,
+                !isTvBox && player != null && haveMedia,
+                getString(R.string.button_lock), () -> playerView.toggleLock());
+        addOverflowAction(screenItems, screenActions, mPrefs.showButtonPiP,
+                buttonPiP != null && player != null && haveMedia,
+                getString(R.string.button_pip), () -> buttonPiP.performClick());
+        if (!screenItems.isEmpty()) {
+            items.add(getString(R.string.player_tools_screen));
+            actions.add(() -> showActionDialog(
+                    getString(R.string.player_tools_screen), screenItems, screenActions));
+        }
+    }
+
+    private void addOverflowAction(List<String> items, List<Runnable> actions,
+                                   boolean pinned, boolean available,
+                                   String label, Runnable action) {
+        if (PlayerButtonPlacement.resolve(pinned, available) != PlayerButtonPlacement.MORE) {
+            return;
+        }
+        items.add(label);
+        actions.add(action);
+    }
+
+    private void showUtilityTools() {
         String timerSummary = sleepTimer.isAtMediaEnd()
                 ? getString(R.string.sleep_timer_end_of_item)
                 : sleepTimer.remainingMs() > 0 ? Utils.formatMilis(sleepTimer.remainingMs()) : null;
@@ -2353,18 +2517,13 @@ public class PlayerActivity extends Activity {
         }
         items.add(getString(R.string.playback_statistics_title));
         actions.add(this::showPlaybackStatistics);
-        if (togetherAvailable()) {
-            final String summary = togetherSummary();
-            items.add(getString(R.string.together_title)
-                    + (summary == null ? "" : "  \u00B7  " + summary));
-            actions.add(this::showTogetherMenu);
-        }
-        if (!mPrefs.showButtonAppSettings) {
-            items.add(getString(R.string.button_app_settings));
-            actions.add(this::openAppSettings);
-        }
+        showActionDialog(getString(R.string.player_tools_utilities), items, actions);
+    }
+
+    private void showActionDialog(CharSequence title, List<String> items,
+                                  List<Runnable> actions) {
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(R.string.player_tools)
+                .setTitle(title)
                 .setItems(items.toArray(new String[0]), (selected, which) -> {
                     selected.dismiss();
                     actions.get(which).run();
@@ -3029,8 +3188,8 @@ public class PlayerActivity extends Activity {
     private void updateRoomBadge() {
         final boolean active = together != null && together.isActive();
         if (buttonTogether != null) {
-            buttonTogether.setVisibility(mPrefs.showButtonTogether && togetherAvailable()
-                    ? View.VISIBLE : View.GONE);
+            buttonTogether.setVisibility(barVisibility(
+                    mPrefs.showButtonTogether, togetherAvailable()));
         }
         if (roomPill != null) {
             final boolean visible = active && controllerChromeVisible && !inPip && !locked;
@@ -3819,6 +3978,10 @@ public class PlayerActivity extends Activity {
     }
 
     private void requestPrimaryTvFocus() {
+        if (isEmptyStateVisible()) {
+            if (emptyStateOpen != null) emptyStateOpen.requestFocus();
+            return;
+        }
         if (playerView == null || exoPlayPause == null) return;
         TvFocusPolicy.Target target = TvFocusPolicy.choose(isTvBox,
                 playerView.isControllerFullyVisible(), isSkipActionEnabled(),
@@ -3897,8 +4060,8 @@ public class PlayerActivity extends Activity {
 
     private void updateEpisodeControls() {
         if (buttonPlaylist != null) {
-            buttonPlaylist.setVisibility(mPrefs.showButtonPlaylist && lampaPlaylist != null
-                    && lampaPlaylist.size() > 1 ? View.VISIBLE : View.GONE);
+            buttonPlaylist.setVisibility(barVisibility(mPrefs.showButtonPlaylist,
+                    lampaPlaylist != null && lampaPlaylist.size() > 1));
         }
         if (exoPrevious == null || exoNext == null || lampaPlaylist == null) return;
         int index = lampaPlaylist.getCurrentIndex();
@@ -4814,8 +4977,7 @@ public class PlayerActivity extends Activity {
                 }
             }
         }
-        exoSubtitle.setVisibility(mPrefs.showButtonSubtitles && hasSubtitles
-                ? View.VISIBLE : View.GONE);
+        exoSubtitle.setVisibility(barVisibility(mPrefs.showButtonSubtitles, hasSubtitles));
         Utils.setButtonEnabled(this, exoSubtitle, hasSubtitles);
         exoSubtitle.setSelected(selected);
     }
@@ -5361,7 +5523,7 @@ public class PlayerActivity extends Activity {
         cancelFrameRateSwitchWait();
         play = false;
         boolean isNetworkUri = Utils.isSupportedNetworkUri(mPrefs.mediaUri);
-        haveMedia = mPrefs.mediaUri != null;
+        haveMedia = mPrefs.mediaUri != null && !mPrefs.suppressResume;
         av1DroppedFrames = 0;
         totalDroppedFrames = 0;
         bandwidthBitrate = 0;
@@ -5391,6 +5553,15 @@ public class PlayerActivity extends Activity {
             player.clearMediaItems();
             player.release();
             player = null;
+        }
+
+        if (!haveMedia) {
+            if (mediaSession != null) {
+                mediaSession.release();
+                mediaSession = null;
+            }
+            showEmptyState();
+            return;
         }
 
         trackSelector = new DefaultTrackSelector(this);
@@ -5546,6 +5717,7 @@ public class PlayerActivity extends Activity {
 
         youTubeOverlay.player(player);
         playerView.setPlayer(player);
+        hideEmptyState();
 
         if (mediaSession != null) {
             mediaSession.release();
@@ -5657,8 +5829,6 @@ public class PlayerActivity extends Activity {
 
             player.setHandleAudioBecomingNoisy(!isTvBox);
 //            mediaSession.setActive(true);
-        } else {
-            playerView.showController();
         }
 
         player.addListener(playerListener);
@@ -7197,39 +7367,42 @@ public class PlayerActivity extends Activity {
 
     private void applyControlVisibility() {
         if (buttonOpen != null) {
-            buttonOpen.setVisibility(mPrefs.showButtonOpen ? View.VISIBLE : View.GONE);
+            buttonOpen.setVisibility(barVisibility(mPrefs.showButtonOpen, true));
         }
         updateEpisodeControls();
         if (buttonQuality != null) {
-            buttonQuality.setVisibility(mPrefs.showButtonQuality ? View.VISIBLE : View.GONE);
+            buttonQuality.setVisibility(barVisibility(mPrefs.showButtonQuality, true));
         }
         if (exoSubtitle != null) updateSubtitleButton();
         if (buttonAspectRatio != null) {
-            buttonAspectRatio.setVisibility(
-                    mPrefs.showButtonAspectRatio ? View.VISIBLE : View.GONE);
+            buttonAspectRatio.setVisibility(barVisibility(mPrefs.showButtonAspectRatio, true));
         }
         if (buttonRotation != null) {
-            buttonRotation.setVisibility(mPrefs.showButtonRotation ? View.VISIBLE : View.GONE);
+            buttonRotation.setVisibility(barVisibility(
+                    mPrefs.showButtonRotation, !isTvBox));
         }
         if (buttonLock != null) {
-            buttonLock.setVisibility(mPrefs.showButtonLock ? View.VISIBLE : View.GONE);
+            buttonLock.setVisibility(barVisibility(mPrefs.showButtonLock, !isTvBox));
         }
         if (buttonPiP != null) {
-            buttonPiP.setVisibility(mPrefs.showButtonPiP ? View.VISIBLE : View.GONE);
+            buttonPiP.setVisibility(barVisibility(mPrefs.showButtonPiP, true));
         }
         if (exoSettings != null) {
-            exoSettings.setVisibility(
-                    mPrefs.showButtonPlaybackOptions ? View.VISIBLE : View.GONE);
+            exoSettings.setVisibility(barVisibility(mPrefs.showButtonPlaybackOptions, true));
         }
         if (buttonTogether != null) {
-            buttonTogether.setVisibility(mPrefs.showButtonTogether && togetherAvailable()
-                    ? View.VISIBLE : View.GONE);
+            buttonTogether.setVisibility(barVisibility(
+                    mPrefs.showButtonTogether, togetherAvailable()));
         }
         if (buttonAppSettings != null) {
-            buttonAppSettings.setVisibility(
-                    mPrefs.showButtonAppSettings ? View.VISIBLE : View.GONE);
+            buttonAppSettings.setVisibility(barVisibility(mPrefs.showButtonAppSettings, true));
         }
         if (buttonTools != null) buttonTools.setVisibility(View.VISIBLE);
+    }
+
+    private int barVisibility(boolean pinned, boolean available) {
+        return PlayerButtonPlacement.resolve(pinned, available) == PlayerButtonPlacement.BAR
+                ? View.VISIBLE : View.GONE;
     }
 
     private void scaleStart() {

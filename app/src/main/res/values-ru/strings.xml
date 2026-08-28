@@ -3,7 +3,13 @@
     <string name="video_scale_title">Размер видео</string>
     <string name="button_lock">Заблокировать управление</string>
     <string name="swipe_unlock">Проведите вправо, чтобы разблокировать</string>
-    <string name="player_tools">Инструменты плеера</string>
+    <string name="player_tools">Ещё</string>
+    <string name="player_tools_media">Медиа</string>
+    <string name="player_tools_screen">Экран</string>
+    <string name="player_tools_utilities">Инструменты</string>
+    <string name="empty_state_subtitle">Видео не открыто</string>
+    <string name="empty_state_open">Открыть видео</string>
+    <string name="empty_state_together">Совместный просмотр</string>
     <string name="sleep_timer_title">Таймер сна</string>
     <string name="sleep_timer_off">Выключено</string>
     <string name="sleep_timer_custom">Своя длительность</string>
