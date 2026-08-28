@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * An external subtitle held in memory and addressable by media time.
@@ -34,13 +35,31 @@ final class SubtitleTimeline {
     private final long[] endUs;
     private final List<ImmutableList<Cue>> cues;
 
+    private static Uri pendingUri;
+    private static SubtitleTimeline pending;
+
     SubtitleTimeline(long[] startUs, long[] endUs, List<ImmutableList<Cue>> cues) {
         this.startUs = startUs;
         this.endUs = endUs;
         this.cues = cues;
     }
 
+    private static synchronized SubtitleTimeline take(Uri uri) {
+        if (pendingUri == null || !pendingUri.equals(uri)) return null;
+        SubtitleTimeline timeline = pending;
+        pendingUri = null;
+        pending = null;
+        return timeline;
+    }
+
+    private static synchronized void offer(Uri uri, SubtitleTimeline timeline) {
+        pendingUri = uri;
+        pending = timeline;
+    }
+
     static SubtitleTimeline load(Context context, Uri uri, String mimeType) {
+        SubtitleTimeline reused = take(uri);
+        if (reused != null) return reused;
         try {
             Format format = new Format.Builder().setSampleMimeType(mimeType).build();
             SubtitleParser.Factory factory = new DefaultSubtitleParserFactory();
@@ -67,24 +86,76 @@ final class SubtitleTimeline {
             Collections.sort(ordered, (left, right) ->
                     Long.compare(left.startTimeUs, right.startTimeUs));
 
-            int count = ordered.size();
+            List<CuesWithTiming> kept = withoutPromos(ordered);
+            if (kept.isEmpty()) return null;
+
+            int count = kept.size();
             long[] startUs = new long[count];
             long[] endUs = new long[count];
             List<ImmutableList<Cue>> cues = new ArrayList<>(count);
             for (int i = 0; i < count; i++) {
-                CuesWithTiming block = ordered.get(i);
+                CuesWithTiming block = kept.get(i);
                 startUs[i] = block.startTimeUs;
                 endUs[i] = block.durationUs != C.TIME_UNSET && block.durationUs > 0
                         ? block.startTimeUs + block.durationUs
-                        : (i + 1 < count ? ordered.get(i + 1).startTimeUs
+                        : (i + 1 < count ? kept.get(i + 1).startTimeUs
                         : block.startTimeUs + OPEN_ENDED_US);
                 cues.add(block.cues);
             }
-            return new SubtitleTimeline(startUs, endUs, cues);
+            SubtitleTimeline timeline = new SubtitleTimeline(startUs, endUs, cues);
+            offer(uri, timeline);
+            return timeline;
         } catch (Throwable error) {
             Utils.log("subtitles: timeline failed " + error.getClass().getSimpleName());
             return null;
         }
+    }
+
+    int size() {
+        return startUs.length;
+    }
+
+    long startUs(int index) {
+        return startUs[index];
+    }
+
+    long endUs(int index) {
+        return endUs[index];
+    }
+
+    ImmutableList<Cue> cuesAt(int index) {
+        return cues.get(index);
+    }
+
+    private static final Pattern PROMO_URL = Pattern.compile(
+            "https?://|www\\.|[a-z0-9][a-z0-9-]*\\.(?:app|com|net|org|io|tv|me|info|link|ru|ua|pl)\\b",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern PROMO_WORDS = Pattern.compile(
+            "subtitl|субтитр|переклад|перевод|translat|download|скача|завантаж|"
+                    + "extension|browser|расширени|розширенн|\\bfree\\b|бесплатн|безкоштовн|"
+                    + "\\bai\\b|нейросет|нейромереж|оцените|оцініть|watch any",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+
+    private static List<CuesWithTiming> withoutPromos(List<CuesWithTiming> ordered) {
+        int count = ordered.size();
+        List<CuesWithTiming> kept = new ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
+            CuesWithTiming block = ordered.get(index);
+            if ((index == 0 || index == count - 1) && isPromo(block)) {
+                Utils.log("subtitles: dropped an ad at block " + (index + 1) + " of " + count);
+            } else {
+                kept.add(block);
+            }
+        }
+        return kept;
+    }
+
+    private static boolean isPromo(CuesWithTiming block) {
+        StringBuilder text = new StringBuilder();
+        for (Cue cue : block.cues) {
+            if (cue.text != null) text.append(cue.text).append('\n');
+        }
+        return PROMO_URL.matcher(text).find() && PROMO_WORDS.matcher(text).find();
     }
 
     int[] visibleAt(long timeUs) {
