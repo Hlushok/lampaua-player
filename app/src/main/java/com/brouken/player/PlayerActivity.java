@@ -95,13 +95,14 @@ import androidx.media3.common.TrackGroup;
 import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
+import androidx.media3.common.Timeline;
 import androidx.media3.common.audio.AudioProcessor;
 import androidx.media3.common.util.Util;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.datasource.HttpDataSource;
-import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
+import androidx.media3.exoplayer.DecoderCounters;
 import androidx.media3.exoplayer.ExoPlaybackException;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.Renderer;
@@ -111,7 +112,9 @@ import androidx.media3.exoplayer.audio.AudioSink;
 import androidx.media3.exoplayer.audio.DefaultAudioSink;
 import androidx.media3.exoplayer.audio.ForwardingAudioSink;
 import androidx.media3.exoplayer.hls.playlist.HlsPlaylistTracker;
+import androidx.media3.exoplayer.mediacodec.MediaCodecInfo;
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
+import androidx.media3.exoplayer.mediacodec.MediaCodecUtil;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.source.TrackGroupArray;
 import androidx.media3.exoplayer.text.TextOutput;
@@ -238,6 +241,7 @@ public class PlayerActivity extends Activity {
     private static final int CONTROL_TYPE_PLAY = 1;
     private static final int CONTROL_TYPE_PAUSE = 2;
     private static final long VIDEO_LOAD_TIMEOUT_MS = 30_000L;
+    private static final long LOADING_INDICATOR_DELAY_MS = 250L;
     private static final long STALL_CHECK_INTERVAL_MS = 1_500L;
     private static final long STALL_TIMEOUT_MS = 10_000L;
     private static final long STABLE_PLAYBACK_MS = 15_000L;
@@ -384,6 +388,7 @@ public class PlayerActivity extends Activity {
     private long transferSampleAt;
     private String videoDecoderName;
     private String audioDecoderName;
+    private String softwareDecodeStatus = "none";
     private String forcedStreamMimeType;
     private volatile String resolverControlUri;
     private volatile String detectedManifestUri;
@@ -396,9 +401,14 @@ public class PlayerActivity extends Activity {
     private long playbackWaitStartedAt;
     private long lastPositionAdvanceAt;
     private long lastObservedPosition = C.TIME_UNSET;
+    private long lastObservedPeriodPosition = C.TIME_UNSET;
     private long stablePlaybackStartedAt;
     private long stablePlaybackStartPosition = C.TIME_UNSET;
+    private long stablePlaybackStartPeriodPosition = C.TIME_UNSET;
     private boolean playbackEverReady;
+    private final Timeline.Period stallPeriod = new Timeline.Period();
+    private final VideoFreezePolicy videoFreezePolicy = new VideoFreezePolicy();
+    private String lastVideoFreezeRecovery = "none";
     private boolean controllerChromeVisible;
     private final Map<View, Boolean> auxiliaryChromeTargets = new WeakHashMap<>();
     private long loadWatchdogBytes;
@@ -408,21 +418,44 @@ public class PlayerActivity extends Activity {
             player.prepare();
         }
     };
+    private boolean recoveryNoticePending;
+    private final Runnable showLoadingRunnable = () -> {
+        boolean buffering = player != null
+                && player.getPlaybackState() == Player.STATE_BUFFERING;
+        LoadingUiPolicy.Decision decision = LoadingUiPolicy.decide(
+                haveMedia, buffering, player != null && player.isPlaying(),
+                true, recoveryNoticePending);
+        if (!decision.showIndicator) {
+            if (!buffering) recoveryNoticePending = false;
+            return;
+        }
+        updateLoading(true);
+        if (decision.showRecoveryNotice) {
+            Utils.showText(playerView, getString(R.string.playback_recovery_retry), 2500);
+        }
+        recoveryNoticePending = false;
+    };
     private final Runnable swipeHider = this::hideSwipeToUnlock;
     private final Runnable frameRateGiveUpRunnable = this::frameRateSettled;
     private final Runnable stallWatchdogRunnable = new Runnable() {
         @Override public void run() {
             if (player == null || !player.isPlaying()) return;
+            if (videoFreezeTick()) return;
             long now = SystemClock.elapsedRealtime();
             long position = player.getCurrentPosition();
+            long periodPosition = currentPeriodPositionMs();
             boolean live = player.isCurrentMediaItemLive();
-            if (LiveRecoveryPolicy.hasPlaybackProgress(lastObservedPosition, position, live)) {
+            if (LiveRecoveryPolicy.hasPlaybackProgress(
+                    lastObservedPeriodPosition, periodPosition, live)) {
                 lastObservedPosition = position;
+                lastObservedPeriodPosition = periodPosition;
                 lastPositionAdvanceAt = now;
             } else if (now - lastPositionAdvanceAt >= STALL_TIMEOUT_MS) {
+                if (recoverFromSlowSoftwareDecoder(player.getVideoFormat(), false)) return;
                 PlaybackRecoveryPolicy.FailureKind kind = live
                         ? PlaybackRecoveryPolicy.FailureKind.LIVE_STALL
-                        : (playbackEverReady && position - stablePlaybackStartPosition >= 2_000
+                        : (playbackEverReady && stablePlaybackStartPeriodPosition != C.TIME_UNSET
+                        && periodPosition - stablePlaybackStartPeriodPosition >= 2_000
                         ? PlaybackRecoveryPolicy.FailureKind.STALL_MIDSTREAM
                         : PlaybackRecoveryPolicy.FailureKind.STALL_AT_START);
                 if (!recoverPlayback(kind)) stopPlaybackAfterRecoveryFailure(kind, null, null);
@@ -433,7 +466,8 @@ public class PlayerActivity extends Activity {
     };
     private final Runnable stablePlaybackRunnable = () -> {
         if (player == null || !player.isPlaying() || player.getPlaybackState() != Player.STATE_READY) return;
-        long progress = player.getCurrentPosition() - stablePlaybackStartPosition;
+        long progress = stablePlaybackStartPeriodPosition == C.TIME_UNSET ? 0L
+                : currentPeriodPositionMs() - stablePlaybackStartPeriodPosition;
         if (SystemClock.elapsedRealtime() - stablePlaybackStartedAt >= STABLE_PLAYBACK_MS
                 && progress >= 5_000) {
             sourceRecoveryAttempts = 0;
@@ -1673,6 +1707,7 @@ public class PlayerActivity extends Activity {
     public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, Configuration newConfig) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
         inPip = isInPictureInPictureMode;
+        videoFreezePolicy.resetWindow();
 
         if (isInPictureInPictureMode) {
             playerView.cancelHoldSpeed();
@@ -3572,6 +3607,7 @@ public class PlayerActivity extends Activity {
                     .append('\n');
         }
         report.append("Video decoder: ").append(emptyReportValue(videoDecoderName)).append('\n');
+        report.append("Software decode: ").append(softwareDecodeStatus).append('\n');
         report.append("Audio decoder: ").append(emptyReportValue(audioDecoderName)).append('\n');
         report.append(String.format(Locale.US,
                 "Bitrate: video=%.2f Mbps, transfer=%.2f Mbps, estimate=%.2f Mbps%n",
@@ -3588,6 +3624,8 @@ public class PlayerActivity extends Activity {
                 .append(", lowerQuality=").append(decoderQualityFallbackTried)
                 .append(", decoderCompatibility=").append(decoderCompatibilityMode)
                 .append('\n');
+        report.append("Video freeze: attempts=").append(videoFreezePolicy.recoveries())
+                .append(", last=").append(lastVideoFreezeRecovery).append('\n');
         report.append("Dolby Vision: mapProfile7=").append(mPrefs != null && mPrefs.mapDV7ToHevc)
                 .append(", forceHevc=").append(forceHevcForDolbyVision)
                 .append(", status=").append(dv7Converter == null
@@ -6417,12 +6455,8 @@ public class PlayerActivity extends Activity {
                 .setMediaSourceFactory(new DefaultMediaSourceFactory(
                         this, activeExtractorsFactory));
 
-        if (optimize4k) {
-            playerBuilder.setLoadControl(new DefaultLoadControl.Builder()
-                    .setBufferDurationsMs(20_000, 90_000, 5_000, 8_000)
-                    .setPrioritizeTimeOverSizeThresholds(true)
-                    .build());
-        }
+        playerBuilder.setLoadControl(
+                RebufferPolicy.forMedia(isNetworkUri, optimize4k).build());
 
         if (haveMedia && isNetworkUri) {
             if (mPrefs.mediaUri.getScheme().toLowerCase().startsWith("http")) {
@@ -6430,6 +6464,12 @@ public class PlayerActivity extends Activity {
                 String userInfo = mPrefs.mediaUri.getUserInfo();
                 if (userInfo != null && userInfo.length() > 0 && userInfo.contains(":")) {
                     headers.put("Authorization", "Basic " + Base64.encodeToString(userInfo.getBytes(), Base64.NO_WRAP));
+                }
+                String streamMimeType = getStreamMimeType(mPrefs.mediaUri, mPrefs.mediaType);
+                if (RangeRequestPolicy.shouldSeed(
+                        mPrefs.mediaUri.toString(), streamMimeType, headers)) {
+                    // Default properties are lower priority than Media3's calculated seek/segment range.
+                    headers.put("Range", RangeRequestPolicy.WHOLE_RESOURCE);
                 }
                 DefaultHttpDataSource.Factory defaultHttpDataSourceFactory = new DefaultHttpDataSource.Factory()
                         .setAllowCrossProtocolRedirects(true)
@@ -6640,6 +6680,7 @@ public class PlayerActivity extends Activity {
 
     public void releasePlayer(boolean save) {
         cancelFrameRateSwitchWait();
+        videoFreezePolicy.resetWindow();
         cancelSubtitleSearch();
         play = false;
         cancelPlaybackWatchdogs();
@@ -6760,11 +6801,13 @@ public class PlayerActivity extends Activity {
         @Override
         public void onRenderedFirstFrame() {
             frameRendered = true;
+            videoFreezePolicy.resetWindow();
         }
 
         @Override
         public void onPositionDiscontinuity(Player.PositionInfo oldPosition,
                                             Player.PositionInfo newPosition, int reason) {
+            videoFreezePolicy.resetWindow();
             if (subtitleOffset != null) subtitleOffset.clear();
             if (secondarySubtitleOffset != null) secondarySubtitleOffset.clear();
             if (secondarySubtitles != null) secondarySubtitles.clear();
@@ -6784,6 +6827,7 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onIsPlayingChanged(boolean isPlaying) {
+            videoFreezePolicy.resetWindow();
             if (subtitleOffset != null) subtitleOffset.wake();
             if (secondarySubtitleOffset != null) secondarySubtitleOffset.wake();
             playerView.setKeepScreenOn(isPlaying);
@@ -6820,6 +6864,7 @@ public class PlayerActivity extends Activity {
                     requestPassthroughAudioRestart();
                 }
                 lastObservedPosition = player.getCurrentPosition();
+                lastObservedPeriodPosition = currentPeriodPositionMs();
                 lastPositionAdvanceAt = SystemClock.elapsedRealtime();
                 playerView.removeCallbacks(stallWatchdogRunnable);
                 playerView.postDelayed(stallWatchdogRunnable, STALL_CHECK_INTERVAL_MS);
@@ -6847,7 +6892,9 @@ public class PlayerActivity extends Activity {
                 playbackEverReady = true;
                 stablePlaybackStartedAt = SystemClock.elapsedRealtime();
                 stablePlaybackStartPosition = player.getCurrentPosition();
+                stablePlaybackStartPeriodPosition = currentPeriodPositionMs();
                 lastObservedPosition = stablePlaybackStartPosition;
+                lastObservedPeriodPosition = stablePlaybackStartPeriodPosition;
                 lastPositionAdvanceAt = stablePlaybackStartedAt;
                 playerView.removeCallbacks(stablePlaybackRunnable);
                 playerView.postDelayed(stablePlaybackRunnable, STABLE_PLAYBACK_MS);
@@ -6951,6 +6998,7 @@ public class PlayerActivity extends Activity {
                 updateLoading(false);
             } else if (state == Player.STATE_BUFFERING) {
                 if (playbackWaitStartedAt == 0L) playbackWaitStartedAt = SystemClock.elapsedRealtime();
+                scheduleLoadingIndicator(false);
                 armLoadWatchdog();
             } else if (state == Player.STATE_ENDED) {
                 cancelPlaybackWatchdogs();
@@ -7050,6 +7098,8 @@ public class PlayerActivity extends Activity {
                     return;
                 }
                 if (error.errorCode == PlaybackException.ERROR_CODE_TIMEOUT) {
+                    if (recoverFromSlowSoftwareDecoder(player == null
+                            ? null : player.getVideoFormat(), false)) return;
                     if (recoverFromStuckPlayback()) return;
                     PlaybackRecoveryPolicy.FailureKind kind = player != null
                             && player.isCurrentMediaItemLive()
@@ -7062,6 +7112,9 @@ public class PlayerActivity extends Activity {
                     return;
                 }
                 if (exoPlaybackException.type == ExoPlaybackException.TYPE_RENDERER) {
+                    if (error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED
+                            && recoverFromSlowSoftwareDecoder(
+                            exoPlaybackException.rendererFormat, true)) return;
                     if (recoverPlayback(PlaybackRecoveryPolicy.FailureKind.DECODER)) return;
                 }
                 showError(exoPlaybackException);
@@ -7197,14 +7250,178 @@ public class PlayerActivity extends Activity {
         playbackWaitStartedAt = 0L;
         lastPositionAdvanceAt = 0L;
         lastObservedPosition = C.TIME_UNSET;
+        lastObservedPeriodPosition = C.TIME_UNSET;
         stablePlaybackStartedAt = 0L;
         stablePlaybackStartPosition = C.TIME_UNSET;
+        stablePlaybackStartPeriodPosition = C.TIME_UNSET;
         playbackEverReady = false;
+        recoveryNoticePending = false;
+        videoFreezePolicy.resetItem();
+        lastVideoFreezeRecovery = "none";
+        softwareDecodeStatus = "none";
+    }
+
+    private boolean recoverFromSlowSoftwareDecoder(Format format, boolean decoderInitFailure) {
+        if (player == null || format == null || !MimeTypes.isVideo(format.sampleMimeType)) {
+            return false;
+        }
+        LampaPlaylist.Item item = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
+        Map<String, String> sourceVariants = item == null
+                ? Collections.emptyMap() : item.quality;
+        String currentUrl = item == null ? currentMediaKey() : item.url;
+        boolean software = videoUsesSoftwareDecoder(format);
+        SoftwareDecodePolicy.Decision decision;
+        if (decoderInitFailure) {
+            decision = SoftwareDecodePolicy.forDecoderInit(software,
+                    format.width, format.height, sourceVariants, currentUrl);
+        } else {
+            long activeMs = stablePlaybackStartedAt <= 0L ? 0L
+                    : Math.max(0L, SystemClock.elapsedRealtime() - stablePlaybackStartedAt);
+            decision = SoftwareDecodePolicy.evaluate(new SoftwareDecodePolicy.Evidence(
+                    software, format.width, format.height, videoFrameRate(),
+                    player.getPlayWhenReady() && player.getPlaybackState() == Player.STATE_READY,
+                    true, activeMs, player.getTotalBufferedDuration(),
+                    currentTransferBitrate(), videoBitrate(), totalDroppedFrames,
+                    sourceVariants, currentUrl));
+        }
+        if (!decision.slow) return false;
+
+        softwareDecodeStatus = decision.reason;
+        if (decision.fallback != null && applySoftwareSourceFallback(decision.fallback)) {
+            softwareDecodeStatus = "quality_lowered";
+            return true;
+        }
+        if (trySoftwareAdaptiveFallback(format.height)) {
+            softwareDecodeStatus = "adaptive_quality_lowered";
+            return true;
+        }
+
+        softwareDecodeStatus = "no_lower_quality";
+        String resolution = Math.max(format.width, format.height) + "x"
+                + Math.min(format.width, format.height);
+        String codec = shortCodec(format.sampleMimeType);
+        stopPlaybackAfterRecoveryFailure(PlaybackRecoveryPolicy.FailureKind.DECODER,
+                getString(R.string.error_software_video_too_slow,
+                        resolution, codec == null ? "video" : codec), null);
+        return true;
+    }
+
+    private boolean applySoftwareSourceFallback(SoftwareDecodePolicy.Variant fallback) {
+        if (player == null || fallback == null || decoderQualityFallbackTried
+                || lampaPlaylist == null) return false;
+        LampaPlaylist.Item item = lampaPlaylist.getCurrent();
+        if (item == null || fallback.url.equals(item.url)) return false;
+        item.positionMs = Math.max(0L, player.getCurrentPosition());
+        boolean resume = player.getPlayWhenReady();
+        item.url = fallback.url;
+        decoderQualityFallbackTried = true;
+        alternateStreamTypeTried = false;
+        forcedStreamMimeType = null;
+        applyPlaylistItem(item, false);
+        restorePlayState = resume;
+        Utils.showText(playerView, getString(
+                R.string.notice_software_quality_lowered, fallback.label), 3500);
+        initializePlayer();
+        return true;
+    }
+
+    private boolean trySoftwareAdaptiveFallback(int currentHeight) {
+        if (player == null || decoderQualityFallbackTried) return false;
+        VideoQualityChoice best = null;
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_VIDEO) continue;
+            for (int index = 0; index < group.length; index++) {
+                if (!group.isTrackSupported(index)) continue;
+                Format candidate = group.getTrackFormat(index);
+                if (candidate.height <= 0 || candidate.height > 1080
+                        || candidate.height >= currentHeight) continue;
+                if (best == null || candidate.height > qualityNumber(best.label)
+                        || (candidate.height == qualityNumber(best.label)
+                        && candidate.bitrate > best.bitrate)) {
+                    best = VideoQualityChoice.track(candidate.height + "p",
+                            group.getMediaTrackGroup(), index, candidate.bitrate);
+                }
+            }
+        }
+        if (best == null) return false;
+        decoderQualityFallbackTried = true;
+        Utils.showText(playerView, getString(
+                R.string.notice_software_quality_lowered, best.label), 3500);
+        applyVideoQuality(best);
+        return true;
+    }
+
+    private boolean videoUsesSoftwareDecoder(Format format) {
+        if (format == null || format.sampleMimeType == null) return false;
+        if (videoDecoderName != null) {
+            if (SoftwareDecodePolicy.isSoftwareName(videoDecoderName)) return true;
+            try {
+                for (MediaCodecInfo info : MediaCodecUtil.getDecoderInfos(
+                        format.sampleMimeType, false, false)) {
+                    if (videoDecoderName.equals(info.name)) return info.softwareOnly;
+                }
+            } catch (MediaCodecUtil.DecoderQueryException | RuntimeException ignored) { }
+            return false;
+        }
+
+        boolean listed = false;
+        try {
+            for (MediaCodecInfo info : MediaCodecUtil.getDecoderInfos(
+                    format.sampleMimeType, false, false)) {
+                if (info.hardwareAccelerated) return false;
+                listed = true;
+            }
+        } catch (MediaCodecUtil.DecoderQueryException | RuntimeException ignored) {
+            return false;
+        }
+        return listed;
+    }
+
+    private int videoOutputCount() {
+        DecoderCounters counters = player == null ? null : player.getVideoDecoderCounters();
+        return counters == null ? -1 : counters.renderedOutputBufferCount
+                + counters.droppedBufferCount + counters.skippedOutputBufferCount;
+    }
+
+    private boolean videoFreezeTick() {
+        if (player == null) return false;
+        boolean eligible = alive && player.isPlaying()
+                && player.getPlaybackState() == Player.STATE_READY
+                && player.getVideoFormat() != null
+                && !isScrubbing && frameRateSwitchThread == null && !play;
+        VideoFreezePolicy.Action action = videoFreezePolicy.evaluate(
+                new VideoFreezePolicy.Sample(
+                        SystemClock.elapsedRealtime(), player.getCurrentPosition(),
+                        videoOutputCount(), videoFrameRate(),
+                        player.isCurrentMediaItemSeekable(), eligible));
+        switch (action) {
+            case SEEK_BACK_ONE_MS:
+                lastVideoFreezeRecovery = "seek";
+                player.setSeekParameters(SeekParameters.EXACT);
+                player.seekTo(Math.max(0L, player.getCurrentPosition() - 1L));
+                return true;
+            case PREPARE:
+                lastVideoFreezeRecovery = "prepare";
+                scheduleLoadingIndicator(false);
+                player.prepare();
+                return true;
+            case EXHAUSTED:
+                lastVideoFreezeRecovery = "decoder_fallback";
+                if (!recoverPlayback(PlaybackRecoveryPolicy.FailureKind.DECODER)) {
+                    lastVideoFreezeRecovery = "exhausted";
+                }
+                return true;
+            case BASELINE:
+            case WAIT:
+            default:
+                return false;
+        }
     }
 
     private void cancelPlaybackWatchdogs() {
         if (playerView == null) return;
         cancelLoadWatchdog();
+        playerView.removeCallbacks(showLoadingRunnable);
         playerView.removeCallbacks(sourceRetryRunnable);
         playerView.removeCallbacks(stallWatchdogRunnable);
         playerView.removeCallbacks(stablePlaybackRunnable);
@@ -7324,13 +7541,24 @@ public class PlayerActivity extends Activity {
         boolean resume = player.getPlayWhenReady();
         liveRecoveryAttempts++;
         lastLiveRecoveryAt = now;
-        updateLoading(true);
-        Utils.showText(playerView, getString(R.string.playback_recovery_retry), 2500);
+        scheduleLoadingIndicator(true);
         player.seekToDefaultPosition();
         player.prepare();
         player.setPlayWhenReady(resume);
         armLoadWatchdog();
         return true;
+    }
+
+    private long currentPeriodPositionMs() {
+        if (player == null) return C.TIME_UNSET;
+        long position = player.getCurrentPosition();
+        Timeline timeline = player.getCurrentTimeline();
+        if (!timeline.isEmpty() && player.getCurrentAdGroupIndex() == C.INDEX_UNSET) {
+            long positionInWindow = timeline.getPeriod(
+                    player.getCurrentPeriodIndex(), stallPeriod).getPositionInWindowMs();
+            return LiveRecoveryPolicy.periodPosition(position, positionInWindow);
+        }
+        return position;
     }
 
     private int currentVideoHeight() {
@@ -7943,6 +8171,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void updateLoading(final boolean enableLoading) {
+        if (playerView != null) playerView.removeCallbacks(showLoadingRunnable);
         if (enableLoading) {
             boolean playPauseHadFocus = exoPlayPause.hasFocus();
             exoPlayPause.setVisibility(View.INVISIBLE);
@@ -7950,6 +8179,7 @@ public class PlayerActivity extends Activity {
             if (isTvBox && (playPauseHadFocus || focusPlay)) parkFocusOnLoadingRing();
             updateTransferRateUi();
         } else {
+            recoveryNoticePending = false;
             boolean loadingHadFocus = loadingProgressBar.hasFocus();
             loadingProgressBar.setFocusable(false);
             loadingProgressBar.setVisibility(View.GONE);
@@ -7965,6 +8195,13 @@ public class PlayerActivity extends Activity {
         }
     }
 
+    private void scheduleLoadingIndicator(boolean recovery) {
+        if (playerView == null) return;
+        recoveryNoticePending |= recovery;
+        playerView.removeCallbacks(showLoadingRunnable);
+        playerView.postDelayed(showLoadingRunnable, LOADING_INDICATOR_DELAY_MS);
+    }
+
     private void parkFocusOnLoadingRing() {
         loadingProgressBar.setFocusable(true);
         loadingProgressBar.requestFocus();
@@ -7972,6 +8209,7 @@ public class PlayerActivity extends Activity {
 
     void frameRateSettled() {
         cancelFrameRateSwitchWait();
+        videoFreezePolicy.resetWindow();
         playIfCan();
     }
 

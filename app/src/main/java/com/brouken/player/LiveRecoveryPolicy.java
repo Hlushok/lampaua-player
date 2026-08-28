@@ -22,4 +22,8 @@ final class LiveRecoveryPolicy {
         return change > MIN_POSITION_CHANGE_MS
                 || (live && change < -MIN_POSITION_CHANGE_MS);
     }
+
+    static long periodPosition(long windowPositionMs, long periodPositionInWindowMs) {
+        return windowPositionMs - periodPositionInWindowMs;
+    }
 }

@@ -188,6 +188,7 @@
     <string name="quality_source">Джерело</string>
     <string name="quality_bitrate">%1$.1f Мбіт/с</string>
     <string name="decoder_quality_fallback">Декодер не встигає. Вмикаю нижчу доступну якість</string>
+    <string name="notice_software_quality_lowered">Програмний декодер не встигає. Перемикаю на %1$s</string>
     <string name="decoder_compatibility_retry">Помилка декодера. Повторюю в режимі сумісності</string>
     <string name="resolver_preparing_retry">Потік готується. Повторюю спробу…</string>
     <string name="playback_recovery_retry">Відтворення перервано. Перепідключаюся…</string>
@@ -239,6 +240,7 @@
     <string name="update_checking">Перевіряю оновлення…</string>
     <string name="update_none">У вас уже встановлена найновіша версія</string>
     <string name="error_playback_stalled">Відтворення зупинилося. Декодер пристрою може не підтримувати цей потік.</string>
+    <string name="error_software_video_too_slow">Програмний декодер не встигає відтворювати %1$s (%2$s). Спробуйте нижчу якість.</string>
     <string name="update_available">Доступне оновлення: %1$s → %2$s</string>
     <string name="update_stops_playback">Встановлення оновлення закриє поточне відео.</string>
     <string name="update_now">Завантажити й установити</string>

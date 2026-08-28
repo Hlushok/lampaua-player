@@ -173,6 +173,8 @@
     <string name="update_checking">Проверяю обновления…</string>
     <string name="update_none">У вас уже установлена последняя версия</string>
     <string name="error_playback_stalled">Воспроизведение остановилось. Декодер устройства может не поддерживать этот поток.</string>
+    <string name="notice_software_quality_lowered">Программный декодер не успевает. Переключаю на %1$s</string>
+    <string name="error_software_video_too_slow">Программный декодер не успевает воспроизводить %1$s (%2$s). Попробуйте более низкое качество.</string>
     <string name="decoder_compatibility_retry">Ошибка декодера. Повторяю в режиме совместимости</string>
     <string name="resolver_preparing_retry">Поток подготавливается. Повторяю попытку…</string>
     <string name="playback_recovery_retry">Воспроизведение прервано. Переподключаюсь…</string>

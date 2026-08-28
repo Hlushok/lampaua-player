@@ -93,6 +93,7 @@
     <string name="playlist_invalid">Invalid episode list</string>
     <string name="playlist_resolve_error">Cannot open episode: %1$s</string>
     <string name="decoder_quality_fallback">The decoder cannot keep up. Trying a lower available quality</string>
+    <string name="notice_software_quality_lowered">Software decoding is too slow. Switching to %1$s</string>
     <string name="decoder_compatibility_retry">Decoder error. Retrying in compatibility mode</string>
     <string name="resolver_preparing_retry">The stream is being prepared. Retrying…</string>
     <string name="playback_recovery_retry">Playback interrupted. Reconnecting…</string>
@@ -240,6 +241,7 @@
     <string name="update_checking">Checking for updates…</string>
     <string name="update_none">You already have the latest version</string>
     <string name="error_playback_stalled">Playback stalled. The device decoder may not support this stream.</string>
+    <string name="error_software_video_too_slow">Software decoding cannot keep up with %1$s (%2$s). Try a lower quality.</string>
     <string name="update_available">Update available: %1$s → %2$s</string>
     <string name="update_stops_playback">Installing the update will close the current video.</string>
     <string name="update_now">Download and install</string>

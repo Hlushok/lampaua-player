@@ -28,4 +28,11 @@ public class LiveRecoveryPolicyTest {
         assertTrue(LiveRecoveryPolicy.hasPlaybackProgress(10_000L, 11_500L, false));
         assertFalse(LiveRecoveryPolicy.hasPlaybackProgress(10_000L, 9_000L, false));
     }
+
+    @Test public void periodPositionStaysMonotonicWhenLiveWindowSlides() {
+        long before = LiveRecoveryPolicy.periodPosition(5_800L, 0L);
+        long after = LiveRecoveryPolicy.periodPosition(900L, -6_000L);
+
+        assertTrue(LiveRecoveryPolicy.hasPlaybackProgress(before, after, true));
+    }
 }
