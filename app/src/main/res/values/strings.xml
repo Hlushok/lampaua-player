@@ -318,9 +318,9 @@
     <string name="pref_subtitle_secondary_mode_off">Never</string>
     <string name="pref_subtitle_secondary_mode_always">Always, below the main subtitles</string>
     <string name="pref_subtitle_secondary_mode_demand">On pause or on demand</string>
-    <string name="pref_subtitle_translate">Automatic translation</string>
-    <string name="pref_subtitle_translate_on">Missing subtitles can be sent to an online translation service</string>
-    <string name="pref_subtitle_translate_off">Show subtitles only in their original language</string>
+    <string name="pref_subtitle_translate">Auto-translate to Ukrainian</string>
+    <string name="pref_subtitle_translate_on">If Ukrainian subtitles are unavailable, translate a suitable original track into Ukrainian</string>
+    <string name="pref_subtitle_translate_off">Use original subtitle languages only</string>
     <string name="pref_language_subtitle_translate">Translation language</string>
     <string name="pref_language_subtitle_translate_summary">Ukrainian by default; used only for automatic translation</string>
     <string name="pref_subtitle_secondary_scale">Secondary text size</string>
@@ -348,4 +348,12 @@
     <string name="menu_playback">Playback</string>
     <string name="menu_session">Session and media</string>
     <string name="menu_system">Open and settings</string>
+    <string name="pref_subtitle_secondary_header">Secondary subtitles</string>
+    <string name="pref_subtitle_search_screen">Search online</string>
+    <string name="pref_subtitle_search_language">Ask for the source language</string>
+    <string name="pref_subtitle_search_language_summary">A manual search offers the source-language list first, for that search only</string>
+    <string name="pref_subtitle_translate_backends">Translation services</string>
+    <string name="pref_subtitle_translate_backends_none">Not set — subtitles cannot be translated</string>
+    <string name="pref_subtitle_translate_backends_add">Add a service</string>
+    <string name="subtitle_search_language_title">Choose source language</string>
 </resources>

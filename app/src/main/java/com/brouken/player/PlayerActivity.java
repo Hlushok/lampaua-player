@@ -6006,11 +6006,28 @@ public class PlayerActivity extends Activity {
     }
 
     private void startManualSubtitleSearch(boolean secondary) {
+        if (mPrefs != null && mPrefs.subtitleSearchLanguage) {
+            List<String> initial = secondary
+                    ? secondarySubtitleLanguages()
+                    : AudioLanguagePriority.parse(mPrefs.languageSubtitle);
+            LanguagePriorityDialog.show(this,
+                    getString(R.string.subtitle_search_language_title),
+                    R.string.pref_language_subtitle_none,
+                    R.string.pref_language_audio_add,
+                    initial, Utils.allLanguages(), manualSearchPinnedLanguages(),
+                    picked -> startManualSubtitleSearch(secondary, picked));
+            return;
+        }
+        startManualSubtitleSearch(secondary, null);
+    }
+
+    private void startManualSubtitleSearch(boolean secondary, List<String> oneShotLanguages) {
         if (player == null) return;
         MediaId id = currentMediaId();
-        List<String> wanted = secondary
-                ? secondarySubtitleLanguages()
-                : AudioLanguagePriority.parse(mPrefs.languageSubtitle);
+        List<String> wanted = oneShotLanguages == null
+                ? secondary ? secondarySubtitleLanguages()
+                        : AudioLanguagePriority.parse(mPrefs.languageSubtitle)
+                : AudioLanguagePriority.parse(TextUtils.join(",", oneShotLanguages));
         if (wanted.isEmpty()) {
             wanted = Collections.singletonList(LanguagePriorityModel.targetOrUkrainian(
                     mPrefs.languageSubtitleTranslate));
@@ -6042,6 +6059,21 @@ public class PlayerActivity extends Activity {
         worker.setDaemon(true);
         subtitleSearchThread = worker;
         worker.start();
+    }
+
+    private List<String> manualSearchPinnedLanguages() {
+        List<String> pinned = new ArrayList<>(Arrays.asList(Utils.getDeviceLanguages()));
+        if (player == null) return pinned;
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_AUDIO
+                    && group.getType() != C.TRACK_TYPE_TEXT) continue;
+            for (int index = 0; index < group.length; index++) {
+                String language = AudioLanguagePriority.normalize(
+                        group.getTrackFormat(index).language);
+                if (language != null && !pinned.contains(language)) pinned.add(language);
+            }
+        }
+        return pinned;
     }
 
     private List<Uri> externalSubtitleUris() {

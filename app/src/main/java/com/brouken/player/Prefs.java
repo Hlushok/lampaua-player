@@ -67,9 +67,15 @@ class Prefs {
     private static final String PREF_KEY_SUBTITLE_SEARCH_MODE = "subtitleSearchMode";
     private static final String PREF_KEY_SUBTITLE_SEARCH = "subtitleSearch";
     private static final String PREF_KEY_SUBTITLE_SEARCH_STRICT = "subtitleSearchStrict";
+    private static final String PREF_KEY_SUBTITLE_SEARCH_LANGUAGE = "subtitleSearchLanguage";
     private static final String PREF_KEY_SUBTITLE_TRANSLATE_ON = "subtitleTranslateOn";
     private static final String PREF_KEY_SUBTITLE_TRANSLATE_BACKENDS =
             "subtitleTranslateBackends";
+    private static final String PREF_KEY_SOURCE_OPENSUBTITLES =
+            "subtitleSourceOpenSubtitles";
+    private static final String PREF_KEY_SOURCE_SHEGU = "subtitleSourceShegu";
+    private static final String PREF_KEY_SOURCE_STREMIO = "subtitleSourceStremio";
+    private static final String PREF_KEY_SOURCE_REST = "subtitleSourceRest";
     private static final String PREF_KEY_SUBTITLE_AUTO_TRANSLATE_UKRAINIAN =
             "subtitleAutoTranslateUkrainian";
     private static final String PREF_KEY_SUBTITLE_STYLE_EMBEDDED = "subtitleStyleEmbedded";
@@ -164,6 +170,7 @@ class Prefs {
     // Opt-in because searches disclose the title identifiers to third-party services.
     public boolean subtitleSearch = false;
     public boolean subtitleSearchStrict = false;
+    public boolean subtitleSearchLanguage = false;
     public boolean subtitleAutoTranslateUkrainian = true;
     public boolean subtitleTranslate = true;
     public String subtitleTranslateBackends = SubtitleTranslate.DEFAULT_BACKENDS;
@@ -261,11 +268,23 @@ class Prefs {
         String subtitleSearchMode = getSubtitleSearchMode(mContext);
         subtitleSearch = !SEARCH_OFF.equals(subtitleSearchMode);
         subtitleSearchStrict = SEARCH_NONE.equals(subtitleSearchMode);
+        subtitleSearchLanguage = mSharedPreferences.getBoolean(
+                PREF_KEY_SUBTITLE_SEARCH_LANGUAGE, subtitleSearchLanguage);
         subtitleAutoTranslateUkrainian = mSharedPreferences.getBoolean(
                 PREF_KEY_SUBTITLE_AUTO_TRANSLATE_UKRAINIAN,
                 subtitleAutoTranslateUkrainian);
         subtitleTranslate = getSubtitleTranslate(mContext);
         subtitleTranslateBackends = getSubtitleTranslateBackends(mContext);
+        if (BuildConfig.DEBUG) {
+            subtitleSourceOpenSubtitles = mSharedPreferences.getBoolean(
+                    PREF_KEY_SOURCE_OPENSUBTITLES, subtitleSourceOpenSubtitles);
+            subtitleSourceShegu = mSharedPreferences.getBoolean(
+                    PREF_KEY_SOURCE_SHEGU, subtitleSourceShegu);
+            subtitleSourceStremio = mSharedPreferences.getBoolean(
+                    PREF_KEY_SOURCE_STREMIO, subtitleSourceStremio);
+            subtitleSourceRest = mSharedPreferences.getBoolean(
+                    PREF_KEY_SOURCE_REST, subtitleSourceRest);
+        }
         subtitleStyleEmbedded = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_STYLE_EMBEDDED, subtitleStyleEmbedded);
         subtitleStyleBold = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_STYLE_BOLD, subtitleStyleBold);
         subtitleScale = readFloat(PREF_KEY_SUBTITLE_SCALE, subtitleScale, 0.25f, 2.0f);
@@ -440,6 +459,12 @@ class Prefs {
                 PREF_KEY_SUBTITLE_TRANSLATE_BACKENDS, SubtitleTranslate.DEFAULT_BACKENDS));
         preferences.edit().putString(PREF_KEY_SUBTITLE_TRANSLATE_BACKENDS, normalized).apply();
         return normalized;
+    }
+
+    public static void setSubtitleTranslateBackends(Context context, String backends) {
+        String normalized = SubtitleTranslate.normalize(backends);
+        PreferenceManager.getDefaultSharedPreferences(context).edit()
+                .putString(PREF_KEY_SUBTITLE_TRANSLATE_BACKENDS, normalized).apply();
     }
 
     public static boolean getSubtitleSearch(Context context) {

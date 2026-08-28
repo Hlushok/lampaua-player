@@ -43,13 +43,11 @@ import com.brouken.player.together.Room;
 import com.brouken.player.update.UpdateUi;
 import com.brouken.player.update.Updater;
 
-import java.text.Collator;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
-import java.util.MissingResourceException;
 
 public class SettingsActivity extends AppCompatActivity
         implements PreferenceFragmentCompat.OnPreferenceStartScreenCallback {
@@ -297,70 +295,76 @@ public class SettingsActivity extends AppCompatActivity
                 listPreferenceFileAccess.setEntryValues(values.toArray(new String[0]));
             }
 
-            Preference preferenceLanguageAudio = findPreference("languageAudio");
-            Preference preferenceLanguageSubtitle = findPreference("languageSubtitle");
-            Preference preferenceLanguageSubtitleSecondary =
-                    findPreference("languageSubtitleSecondary");
-            if (preferenceLanguageAudio != null || preferenceLanguageSubtitle != null
-                    || preferenceLanguageSubtitleSecondary != null) {
-                LinkedHashMap<String, String> languages = getLanguages();
-                if (preferenceLanguageAudio != null) {
-                    updateLanguageSummary(preferenceLanguageAudio, languages,
-                            Prefs.getLanguageAudio(requireContext()),
-                            R.string.pref_language_audio_none);
-                    preferenceLanguageAudio.setOnPreferenceClickListener(preference -> {
-                        AudioLanguagePriorityDialog.show(requireContext(),
-                                R.string.pref_language_audio,
-                                R.string.pref_language_audio_none,
-                                AudioLanguagePriority.parse(
-                                        Prefs.getLanguageAudio(requireContext())),
-                                languages, pinnedLanguages(), false, picked -> {
-                                    String stored = AudioLanguagePriority.serialize(picked);
-                                    Prefs.setLanguageAudio(requireContext(), stored);
-                                    updateLanguageSummary(preference, languages, stored,
-                                            R.string.pref_language_audio_none);
-                                });
-                        return true;
-                    });
-                }
-                if (preferenceLanguageSubtitle != null) {
-                    updateLanguageSummary(preferenceLanguageSubtitle, languages,
-                            Prefs.getLanguageSubtitle(requireContext()),
-                            R.string.pref_language_subtitle_none);
-                    preferenceLanguageSubtitle.setOnPreferenceClickListener(preference -> {
-                        AudioLanguagePriorityDialog.show(requireContext(),
-                                R.string.pref_language_subtitle,
-                                R.string.pref_language_subtitle_none,
-                                AudioLanguagePriority.parse(
-                                        Prefs.getLanguageSubtitle(requireContext())),
-                                languages, pinnedLanguages(), false, picked -> {
-                                    String stored = AudioLanguagePriority.serialize(picked);
-                                    Prefs.setLanguageSubtitle(requireContext(), stored);
-                                    updateLanguageSummary(preference, languages, stored,
-                                            R.string.pref_language_subtitle_none);
-                                });
-                        return true;
-                    });
-                }
-                if (preferenceLanguageSubtitleSecondary != null) {
-                    updateLanguageSummary(preferenceLanguageSubtitleSecondary, languages,
-                            Prefs.getLanguageSubtitleSecondary(requireContext()),
-                            R.string.pref_language_subtitle_secondary_none);
-                    preferenceLanguageSubtitleSecondary.setOnPreferenceClickListener(preference -> {
-                        AudioLanguagePriorityDialog.show(requireContext(),
-                                R.string.pref_language_subtitle_secondary,
-                                R.string.pref_language_subtitle_secondary_none,
-                                AudioLanguagePriority.parse(
-                                        Prefs.getLanguageSubtitleSecondary(requireContext())),
-                                languages, pinnedLanguages(), false, picked -> {
-                                    String stored = AudioLanguagePriority.serialize(picked);
-                                    Prefs.setLanguageSubtitleSecondary(requireContext(), stored);
-                                    updateLanguageSummary(preference, languages, stored,
-                                            R.string.pref_language_subtitle_secondary_none);
-                                });
-                        return true;
-                    });
-                }
+            final LinkedHashMap<String, String> languages = Utils.allLanguages();
+            bindLanguageRow("languageAudio", languages, R.string.pref_language_audio,
+                    R.string.pref_language_audio_none,
+                    Prefs.getLanguageAudio(requireContext()), Prefs::setLanguageAudio);
+            bindLanguageRow("languageSubtitle", languages, R.string.pref_language_subtitle,
+                    R.string.pref_language_subtitle_none,
+                    Prefs.getLanguageSubtitle(requireContext()), Prefs::setLanguageSubtitle);
+            bindLanguageRow("languageSubtitleSecondary", languages,
+                    R.string.pref_language_subtitle_secondary,
+                    R.string.pref_language_subtitle_secondary_none,
+                    Prefs.getLanguageSubtitleSecondary(requireContext()),
+                    Prefs::setLanguageSubtitleSecondary);
+
+            final ListPreference secondaryMode = findPreference("subtitleSecondaryMode");
+            if (secondaryMode != null) {
+                applySecondaryMode(secondaryMode, secondaryMode.getValue());
+                secondaryMode.setOnPreferenceChangeListener((preference, value) -> {
+                    applySecondaryMode(secondaryMode, String.valueOf(value));
+                    return true;
+                });
+            }
+
+            final ListPreference searchMode = findPreference("subtitleSearchMode");
+            final SwitchPreferenceCompat translate = findPreference("subtitleTranslateOn");
+            if (searchMode != null) {
+                applySearchMode(searchMode, searchMode.getValue(), translate);
+                searchMode.setOnPreferenceChangeListener((preference, value) -> {
+                    applySearchMode(searchMode, String.valueOf(value), translate);
+                    Prefs.setSubtitleSearchMode(requireContext(), String.valueOf(value));
+                    SubtitleUtils.clearTranslatedCache(requireContext());
+                    return true;
+                });
+            }
+            if (translate != null) {
+                translate.setOnPreferenceChangeListener((preference, value) -> {
+                    enableTranslateBackends(searchMode == null
+                                    || SubtitleSettingsPolicy.translationEnabled(
+                                            searchMode.getValue()),
+                            Boolean.TRUE.equals(value));
+                    SubtitleUtils.clearTranslatedCache(requireContext());
+                    return true;
+                });
+            }
+            updateSubtitleParentSummaries();
+
+            final Preference sources = findPreference("subtitleSourcesCategory");
+            final Preference translateBackends = findPreference("subtitleTranslateBackends");
+            if (sources != null) sources.setVisible(BuildConfig.DEBUG);
+            if (translateBackends != null) {
+                translateBackends.setVisible(SubtitleSettingsPolicy.translationBackendsVisible(
+                        BuildConfig.DEBUG, translate == null || translate.isChecked()));
+                final LinkedHashMap<String, String> services = SubtitleTranslate.backends();
+                updateLanguageSummary(translateBackends, services,
+                        Prefs.getSubtitleTranslateBackends(requireContext()),
+                        R.string.pref_subtitle_translate_backends_none);
+                translateBackends.setOnPreferenceClickListener(preference -> {
+                    LanguagePriorityDialog.show(requireContext(),
+                            getString(R.string.pref_subtitle_translate_backends),
+                            R.string.pref_subtitle_translate_backends_none,
+                            R.string.pref_subtitle_translate_backends_add,
+                            Utils.splitLanguages(Prefs.getSubtitleTranslateBackends(
+                                    requireContext())), services, Collections.emptyList(), picked -> {
+                                String stored = TextUtils.join(",", picked);
+                                Prefs.setSubtitleTranslateBackends(requireContext(), stored);
+                                updateLanguageSummary(preference, services, stored,
+                                        R.string.pref_subtitle_translate_backends_none);
+                                SubtitleUtils.clearTranslatedCache(requireContext());
+                            });
+                    return true;
+                });
             }
 
             ListPreference textColor = findPreference("subtitleTextColor");
@@ -599,10 +603,90 @@ public class SettingsActivity extends AppCompatActivity
             }
         }
 
+        private interface LanguageWriter {
+            void write(android.content.Context context, String languages);
+        }
+
+        private void bindLanguageRow(String key, LinkedHashMap<String, String> languages,
+                                     int titleRes, int noneRes, String stored,
+                                     LanguageWriter writer) {
+            Preference row = findPreference(key);
+            if (row == null) return;
+            final String[] current = {stored};
+            updateLanguageSummary(row, languages, current[0], noneRes);
+            row.setOnPreferenceClickListener(preference -> {
+                LanguagePriorityDialog.show(requireContext(), getString(titleRes), noneRes,
+                        R.string.pref_language_audio_add,
+                        Utils.splitLanguages(current[0]), languages, pinnedLanguages(), picked -> {
+                            current[0] = TextUtils.join(",", picked);
+                            writer.write(requireContext(), current[0]);
+                            updateLanguageSummary(preference, languages, current[0], noneRes);
+                        });
+                return true;
+            });
+        }
+
+        private static final String[] SECONDARY_DEPENDENTS = {
+                "languageSubtitleSecondary", "subtitleSecondaryScale",
+                "subtitleSecondaryTextColor", "subtitleSecondaryBackground"
+        };
+
+        private static final String[] SEARCH_DEPENDENTS = {
+                "subtitleTranslateOn", "subtitleSearchLanguage",
+                "subtitleSourceOpenSubtitles", "subtitleSourceRest",
+                "subtitleSourceStremio", "subtitleSourceShegu"
+        };
+
+        private void applySecondaryMode(ListPreference secondaryMode, String mode) {
+            boolean enabled = SubtitleSettingsPolicy.secondaryLanguagesEnabled(mode);
+            for (String key : SECONDARY_DEPENDENTS) {
+                Preference dependent = findPreference(key);
+                if (dependent != null) dependent.setEnabled(enabled);
+            }
+            updateParentSummary("subtitleSecondaryScreen", secondaryMode, mode);
+        }
+
+        private void applySearchMode(ListPreference searchMode, String mode,
+                                     SwitchPreferenceCompat translate) {
+            boolean searching = SubtitleSettingsPolicy.translationEnabled(mode);
+            for (String key : SEARCH_DEPENDENTS) {
+                Preference dependent = findPreference(key);
+                if (dependent != null) dependent.setEnabled(searching);
+            }
+            enableTranslateBackends(searching, translate == null || translate.isChecked());
+            updateParentSummary("subtitleSearchScreen", searchMode, mode);
+        }
+
+        private void enableTranslateBackends(boolean searching, boolean translating) {
+            Preference backends = findPreference("subtitleTranslateBackends");
+            if (backends != null) backends.setEnabled(searching && translating);
+        }
+
+        private void updateSubtitleParentSummaries() {
+            ListPreference secondary = findPreference("subtitleSecondaryMode");
+            if (secondary != null) {
+                updateParentSummary("subtitleSecondaryScreen", secondary, secondary.getValue());
+            }
+            ListPreference search = findPreference("subtitleSearchMode");
+            if (search != null) {
+                updateParentSummary("subtitleSearchScreen", search, search.getValue());
+            }
+        }
+
+        private void updateParentSummary(String parentKey, ListPreference mode,
+                                         String value) {
+            Preference parent = findPreference(parentKey);
+            int index = mode.findIndexOfValue(value);
+            if (parent != null && index >= 0 && mode.getEntries() != null
+                    && index < mode.getEntries().length) {
+                parent.setSummary(mode.getEntries()[index]);
+            }
+        }
+
         private void updateLanguageSummary(Preference preference,
                                            LinkedHashMap<String, String> languages,
                                            String stored, int emptyRes) {
-            List<String> selected = AudioLanguagePriority.parse(stored);
+            List<String> selected = Utils.splitLanguages(stored);
             if (selected.isEmpty()) {
                 preference.setSummary(emptyRes);
                 return;
@@ -654,28 +738,5 @@ public class SettingsActivity extends AppCompatActivity
             return pinned;
         }
 
-        LinkedHashMap<String, String> getLanguages() {
-            LinkedHashMap<String, String> languages = new LinkedHashMap<>();
-            for (Locale locale : Locale.getAvailableLocales()) {
-                try {
-                    // MissingResourceException: Couldn't find 3-letter language code for zz
-                    String key = AudioLanguagePriority.normalize(locale.toLanguageTag());
-                    if (key == null || languages.containsKey(key)) continue;
-                    String language = locale.getDisplayLanguage();
-                    int length = language.offsetByCodePoints(0, 1);
-                    if (!language.isEmpty()) {
-                        language = language.substring(0, length).toUpperCase(locale) + language.substring(length);
-                    }
-                    String value = language + " [" + key + "]";
-                    languages.put(key, value);
-                } catch (MissingResourceException e) {
-                    e.printStackTrace();
-                }
-            }
-            Collator collator = Collator.getInstance();
-            collator.setStrength(Collator.PRIMARY);
-            Utils.orderByValue(languages, collator::compare);
-            return languages;
-        }
     }
 }

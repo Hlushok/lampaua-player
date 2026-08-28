@@ -221,9 +221,12 @@ public class ResourceContractTest {
     }
 
     @Test
-    public void onlineSubtitleSearchKeepsHiddenSourceAndPrivacyContracts() throws Exception {
+    public void onlineSubtitleSearchUsesDonorScreensAndDebugOnlyDiagnostics() throws Exception {
         String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
         String prefs = readProjectFile("src/main/java/com/brouken/player/Prefs.java");
+        String settings = readProjectFile(
+                "src/main/java/com/brouken/player/SettingsActivity.java");
+        String ukrainian = readProjectFile("src/main/res/values-uk/strings.xml");
         String search = readProjectFile("src/main/java/com/brouken/player/SubtitleSearch.java");
         String openSubtitles = readProjectFile(
                 "src/main/java/com/brouken/player/OpenSubtitles.java");
@@ -232,11 +235,23 @@ public class ResourceContractTest {
         String activity = readProjectFile(
                 "src/main/java/com/brouken/player/PlayerActivity.java");
 
-        assertFalse(preferences.contains("app:key=\"subtitleSources\""));
-        assertFalse(preferences.contains("app:key=\"subtitleSourceRest\""));
-        assertFalse(preferences.contains("app:key=\"subtitleSourceStremio\""));
-        assertFalse(preferences.contains("app:key=\"subtitleSourceShegu\""));
-        assertFalse(preferences.contains("app:key=\"subtitleSourceOpenSubtitles\""));
+        int primary = preferences.indexOf("app:key=\"languageSubtitle\"");
+        int secondary = preferences.indexOf("app:key=\"subtitleSecondaryScreen\"");
+        int online = preferences.indexOf("app:key=\"subtitleSearchScreen\"");
+        int appearance = preferences.indexOf("app:key=\"subtitleAppearance\"");
+        assertTrue(primary >= 0 && primary < secondary);
+        assertTrue(secondary < online);
+        assertTrue(online < appearance);
+        assertTrue(preferences.contains("app:key=\"subtitleTranslateOn\""));
+        assertFalse(preferences.contains("app:key=\"languageSubtitleTranslate\""));
+        assertTrue(preferences.contains("app:key=\"subtitleSourceRest\""));
+        assertTrue(preferences.contains("app:key=\"subtitleSourceStremio\""));
+        assertTrue(preferences.contains("app:key=\"subtitleSourceShegu\""));
+        assertTrue(preferences.contains("app:key=\"subtitleSourceOpenSubtitles\""));
+        assertTrue(settings.contains("sources.setVisible(BuildConfig.DEBUG)"));
+        assertTrue(settings.contains("translationBackendsVisible("));
+        assertTrue(ukrainian.contains(
+                "name=\"pref_subtitle_translate\">Автопереклад українською"));
         assertTrue(prefs.contains("public boolean subtitleSearch = false"));
         assertTrue(prefs.contains("subtitleSourceOpenSubtitles = true"));
         assertTrue(prefs.contains("subtitleSourceShegu = true"));

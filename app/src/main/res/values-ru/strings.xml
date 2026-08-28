@@ -266,9 +266,9 @@
     <string name="pref_subtitle_secondary_mode_off">Никогда</string>
     <string name="pref_subtitle_secondary_mode_always">Всегда, под основными субтитрами</string>
     <string name="pref_subtitle_secondary_mode_demand">На паузе или по запросу</string>
-    <string name="pref_subtitle_translate">Автоматический перевод</string>
-    <string name="pref_subtitle_translate_on">Отсутствующие субтитры можно отправить в онлайн-сервис перевода</string>
-    <string name="pref_subtitle_translate_off">Показывать субтитры только на языке оригинала</string>
+    <string name="pref_subtitle_translate">Автоперевод на украинский</string>
+    <string name="pref_subtitle_translate_on">Если украинских субтитров нет, перевести подходящую оригинальную дорожку на украинский</string>
+    <string name="pref_subtitle_translate_off">Использовать только оригинальные языки субтитров</string>
     <string name="pref_language_subtitle_translate">Язык автоперевода</string>
     <string name="pref_language_subtitle_translate_summary">По умолчанию украинский; используется только для автоматического перевода</string>
     <string name="pref_subtitle_secondary_scale">Размер дополнительного текста</string>
@@ -296,4 +296,12 @@
     <string name="menu_playback">Воспроизведение</string>
     <string name="menu_session">Сеанс и медиа</string>
     <string name="menu_system">Открыть и настроить</string>
+    <string name="pref_subtitle_secondary_header">Дополнительные субтитры</string>
+    <string name="pref_subtitle_search_screen">Поиск онлайн</string>
+    <string name="pref_subtitle_search_language">Спрашивать язык оригинала</string>
+    <string name="pref_subtitle_search_language_summary">Ручной поиск сначала предлагает язык источника — только для этого поиска</string>
+    <string name="pref_subtitle_translate_backends">Сервисы перевода</string>
+    <string name="pref_subtitle_translate_backends_none">Не задано — перевод субтитров недоступен</string>
+    <string name="pref_subtitle_translate_backends_add">Добавить сервис</string>
+    <string name="subtitle_search_language_title">Выбор языка оригинала</string>
 </resources>

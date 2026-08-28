@@ -156,32 +156,108 @@
             app:key="languageSubtitle"
             app:title="@string/pref_language_subtitle" />
 
-        <ListPreference
-            app:key="subtitleSearchMode"
-            app:defaultValue="off"
-            app:entries="@array/subtitle_search_entries"
-            app:entryValues="@array/subtitle_search_values"
-            app:title="@string/pref_subtitle_search_when"
-            app:useSimpleSummaryProvider="true" />
+        <PreferenceScreen
+            app:key="subtitleSecondaryScreen"
+            app:title="@string/pref_subtitle_secondary_header">
 
-        <Preference
-            app:key="languageSubtitleSecondary"
-            app:title="@string/pref_language_subtitle_secondary" />
+            <ListPreference
+                app:key="subtitleSecondaryMode"
+                app:defaultValue="always"
+                app:entries="@array/subtitle_secondary_mode_entries"
+                app:entryValues="@array/subtitle_secondary_mode_values"
+                app:title="@string/pref_subtitle_secondary_mode"
+                app:useSimpleSummaryProvider="true" />
 
-        <ListPreference
-            app:key="subtitleSecondaryMode"
-            app:defaultValue="always"
-            app:entries="@array/subtitle_secondary_mode_entries"
-            app:entryValues="@array/subtitle_secondary_mode_values"
-            app:title="@string/pref_subtitle_secondary_mode"
-            app:useSimpleSummaryProvider="true" />
+            <Preference
+                app:key="languageSubtitleSecondary"
+                app:title="@string/pref_language_subtitle_secondary" />
 
-        <SwitchPreferenceCompat
-            app:key="subtitleTranslateOn"
-            app:defaultValue="true"
-            app:summaryOn="@string/pref_subtitle_translate_on"
-            app:summaryOff="@string/pref_subtitle_translate_off"
-            app:title="@string/pref_subtitle_translate" />
+            <ListPreference
+                app:key="subtitleSecondaryScale"
+                app:defaultValue="1.0"
+                app:entries="@array/subtitle_scale_entries"
+                app:entryValues="@array/subtitle_scale_values"
+                app:title="@string/pref_subtitle_scale"
+                app:useSimpleSummaryProvider="true" />
+
+            <ListPreference
+                app:key="subtitleSecondaryTextColor"
+                app:defaultValue="#FFCCCCCC"
+                app:entries="@array/subtitle_text_color_entries"
+                app:entryValues="@array/subtitle_text_color_values"
+                app:title="@string/pref_subtitle_text_color"
+                app:useSimpleSummaryProvider="true" />
+
+            <ListPreference
+                app:key="subtitleSecondaryBackground"
+                app:defaultValue="#80000000"
+                app:entries="@array/subtitle_background_entries"
+                app:entryValues="@array/subtitle_background_values"
+                app:title="@string/pref_subtitle_background"
+                app:useSimpleSummaryProvider="true" />
+
+        </PreferenceScreen>
+
+        <PreferenceScreen
+            app:key="subtitleSearchScreen"
+            app:title="@string/pref_subtitle_search_screen">
+
+            <ListPreference
+                app:key="subtitleSearchMode"
+                app:defaultValue="off"
+                app:entries="@array/subtitle_search_entries"
+                app:entryValues="@array/subtitle_search_values"
+                app:title="@string/pref_subtitle_search_when"
+                app:useSimpleSummaryProvider="true" />
+
+            <SwitchPreferenceCompat
+                app:key="subtitleTranslateOn"
+                app:defaultValue="true"
+                app:summaryOn="@string/pref_subtitle_translate_on"
+                app:summaryOff="@string/pref_subtitle_translate_off"
+                app:title="@string/pref_subtitle_translate" />
+
+            <SwitchPreferenceCompat
+                app:key="subtitleSearchLanguage"
+                app:defaultValue="false"
+                app:summary="@string/pref_subtitle_search_language_summary"
+                app:title="@string/pref_subtitle_search_language" />
+
+            <Preference
+                app:key="subtitleTranslateBackends"
+                app:title="@string/pref_subtitle_translate_backends" />
+
+            <PreferenceCategory
+                app:key="subtitleSourcesCategory"
+                app:title="@string/pref_subtitle_sources">
+
+                <SwitchPreferenceCompat
+                    app:key="subtitleSourceOpenSubtitles"
+                    app:defaultValue="true"
+                    app:summary="@string/pref_subtitle_source_opensubtitles_summary"
+                    app:title="@string/pref_subtitle_source_opensubtitles" />
+
+                <SwitchPreferenceCompat
+                    app:key="subtitleSourceRest"
+                    app:defaultValue="true"
+                    app:summary="@string/pref_subtitle_source_rest_summary"
+                    app:title="@string/pref_subtitle_source_rest" />
+
+                <SwitchPreferenceCompat
+                    app:key="subtitleSourceStremio"
+                    app:defaultValue="true"
+                    app:summary="@string/pref_subtitle_source_stremio_summary"
+                    app:title="@string/pref_subtitle_source_stremio" />
+
+                <SwitchPreferenceCompat
+                    app:key="subtitleSourceShegu"
+                    app:defaultValue="true"
+                    app:summary="@string/pref_subtitle_source_shegu_summary"
+                    app:title="@string/pref_subtitle_source_shegu" />
+
+            </PreferenceCategory>
+
+        </PreferenceScreen>
 
         <PreferenceScreen
             app:key="subtitleAppearance"
@@ -217,30 +293,6 @@
                 app:entries="@array/subtitle_background_entries"
                 app:entryValues="@array/subtitle_background_values"
                 app:title="@string/pref_subtitle_background"
-                app:useSimpleSummaryProvider="true" />
-
-            <ListPreference
-                app:key="subtitleSecondaryScale"
-                app:defaultValue="1.0"
-                app:entries="@array/subtitle_scale_entries"
-                app:entryValues="@array/subtitle_scale_values"
-                app:title="@string/pref_subtitle_secondary_scale"
-                app:useSimpleSummaryProvider="true" />
-
-            <ListPreference
-                app:key="subtitleSecondaryTextColor"
-                app:defaultValue="#FFCCCCCC"
-                app:entries="@array/subtitle_text_color_entries"
-                app:entryValues="@array/subtitle_text_color_values"
-                app:title="@string/pref_subtitle_secondary_text_color"
-                app:useSimpleSummaryProvider="true" />
-
-            <ListPreference
-                app:key="subtitleSecondaryBackground"
-                app:defaultValue="#80000000"
-                app:entries="@array/subtitle_background_entries"
-                app:entryValues="@array/subtitle_background_values"
-                app:title="@string/pref_subtitle_secondary_background"
                 app:useSimpleSummaryProvider="true" />
 
             <ListPreference
