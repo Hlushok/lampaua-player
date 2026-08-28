@@ -307,6 +307,7 @@ public class PlayerActivity extends Activity {
     public static boolean focusPlay = false;
     private Uri nextUri;
     private static boolean isTvBox;
+    private UiMetrics ui;
     public static boolean locked = false;
     private Thread nextUriThread;
     public Thread frameRateSwitchThread;
@@ -709,6 +710,7 @@ public class PlayerActivity extends Activity {
         }
 
         isTvBox = Utils.isTvBox(this);
+        ui = UiMetrics.of(this, isTvBox);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
@@ -1058,23 +1060,19 @@ public class PlayerActivity extends Activity {
 
                 int insetLeft = windowInsets.getSystemWindowInsetLeft();
                 int insetRight = windowInsets.getSystemWindowInsetRight();
-
-                int paddingLeft = 0;
-                int marginLeft = insetLeft;
-
-                int paddingRight = 0;
-                int marginRight = insetRight;
-
-                if (Build.VERSION.SDK_INT >= 28 && windowInsets.getDisplayCutout() != null) {
-                    if (windowInsets.getDisplayCutout().getSafeInsetLeft() == insetLeft) {
-                        paddingLeft = insetLeft;
-                        marginLeft = 0;
-                    }
-                    if (windowInsets.getDisplayCutout().getSafeInsetRight() == insetRight) {
-                        paddingRight = insetRight;
-                        marginRight = 0;
-                    }
-                }
+                int insetHorizontal = Math.max(
+                        WindowInsetPolicy.symmetricHorizontalInset(insetLeft, insetRight),
+                        ui.overscanH());
+                int paddingLeft = insetHorizontal;
+                int marginLeft = 0;
+                int paddingRight = insetHorizontal;
+                int marginRight = 0;
+                int insetTopIgnoringVisibility = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                        ? windowInsets.getInsetsIgnoringVisibility(
+                                WindowInsets.Type.statusBars()).top : 0;
+                int stableTopInset = WindowInsetPolicy.stableTopInset(
+                        windowInsets.getSystemWindowInsetTop(), insetTopIgnoringVisibility);
+                int bottomInset = windowInsets.getSystemWindowInsetBottom() + ui.overscanV();
 
                 int bottomBarPaddingBottom = 0;
                 int progressBarMarginBottom = 0;
@@ -1084,30 +1082,41 @@ public class PlayerActivity extends Activity {
                     final int right = windowInsets.getInsets(WindowInsets.Type.navigationBars()).right;
 
                     final View exoTop = findViewById(R.id.exo_top);
-                    exoTop.getLayoutParams().height = windowInsets.getSystemWindowInsetTop();
-                    Utils.setViewMargins(exoTop, left, 0, right, 0);
+                    exoTop.getLayoutParams().height = 0;
+                    Utils.setViewMargins(exoTop, 0, 0, 0, 0);
 
                     final FrameLayout exoBottomBar = findViewById(R.id.exo_bottom_bar);
                     ViewGroup.LayoutParams params = exoBottomBar.getLayoutParams();
-                    params.height = getResources().getDimensionPixelSize(R.dimen.exo_styled_bottom_bar_height) + windowInsets.getSystemWindowInsetBottom();
+                    params.height = getResources().getDimensionPixelSize(
+                            R.dimen.exo_styled_bottom_bar_height) + bottomInset;
                     exoBottomBar.setLayoutParams(params);
 
                     findViewById(R.id.exo_left).getLayoutParams().width = left;
                     findViewById(R.id.exo_right).getLayoutParams().width = right;
 
-                    bottomBarPaddingBottom = windowInsets.getSystemWindowInsetBottom();
-                    progressBarMarginBottom = windowInsets.getSystemWindowInsetBottom();
+                    bottomBarPaddingBottom = bottomInset;
+                    progressBarMarginBottom = bottomInset;
                 } else {
-                    view.setPadding(0, windowInsets.getSystemWindowInsetTop(),0, windowInsets.getSystemWindowInsetBottom());
+                    view.setPadding(0, 0, 0, bottomInset);
                 }
 
                 Utils.setViewParams(titleView, paddingLeft + titleViewPaddingHorizontal, titleViewPaddingVertical, paddingRight + titleViewPaddingHorizontal, titleViewPaddingVertical,
-                        marginLeft, windowInsets.getSystemWindowInsetTop(), marginRight, 0);
+                        marginLeft, stableTopInset + ui.overscanV(), marginRight, 0);
+
+                if (lampaTopPanel != null
+                        && lampaTopPanel.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                    FrameLayout.LayoutParams topParams =
+                            (FrameLayout.LayoutParams) lampaTopPanel.getLayoutParams();
+                    topParams.leftMargin = insetHorizontal + ui.gridH();
+                    topParams.rightMargin = insetHorizontal + ui.gridH();
+                    topParams.topMargin = stableTopInset + ui.overscanV() + ui.dp(8);
+                    lampaTopPanel.setLayoutParams(topParams);
+                }
 
                 Utils.setViewParams(findViewById(R.id.exo_bottom_bar), paddingLeft, 0, paddingRight, bottomBarPaddingBottom,
                         marginLeft, 0, marginRight, 0);
 
-                Utils.setViewParams(findViewById(R.id.exo_progress), windowInsets.getSystemWindowInsetLeft(), 0, windowInsets.getSystemWindowInsetRight(), 0,
+                Utils.setViewParams(findViewById(R.id.exo_progress), insetHorizontal, 0, insetHorizontal, 0,
                         0, 0, 0, getResources().getDimensionPixelSize(R.dimen.exo_styled_progress_margin_bottom) + progressBarMarginBottom);
 
                 Utils.setViewMargins(findViewById(R.id.exo_error_message), 0, windowInsets.getSystemWindowInsetTop() / 2, 0, getResources().getDimensionPixelSize(R.dimen.exo_error_message_margin_bottom) + windowInsets.getSystemWindowInsetBottom() / 2);
@@ -8325,6 +8334,11 @@ public class PlayerActivity extends Activity {
 
         if (!isInPip()) {
             setSubtitleTextSize(newConfig.orientation);
+        }
+        UiMetrics updatedUi = UiMetrics.of(this, isTvBox);
+        if (!updatedUi.sameClassAndWidth(ui)) {
+            ui = updatedUi;
+            if (controlView != null) controlView.requestApplyInsets();
         }
         updateSubtitleViewMargin();
 

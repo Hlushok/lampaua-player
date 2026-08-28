@@ -30,6 +30,7 @@ import android.os.storage.StorageManager;
 import android.os.storage.StorageVolume;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
+import android.provider.Settings;
 import android.util.Log;
 import android.util.Rational;
 import android.view.Display;
@@ -68,6 +69,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.MissingResourceException;
 
 class Utils {
 
@@ -98,6 +100,12 @@ class Utils {
 
     public static int dpToPx(int dp) {
         return (int) (dp * Resources.getSystem().getDisplayMetrics().density);
+    }
+
+    /** True when the user has turned animations off system-wide. */
+    public static boolean isReducedMotion(Context context) {
+        return Settings.Global.getFloat(context.getContentResolver(),
+                Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f;
     }
 
     public static float pxToDp(float px) {
@@ -792,6 +800,57 @@ class Utils {
             if (!value.isEmpty() && !values.contains(value)) values.add(value);
         }
         return values;
+    }
+
+    /** Every ISO-3 language available to the priority pickers, ordered by display label. */
+    public static LinkedHashMap<String, String> allLanguages() {
+        final LinkedHashMap<String, String> languages = new LinkedHashMap<>();
+        for (final Locale locale : Locale.getAvailableLocales()) {
+            try {
+                final String key = locale.getISO3Language();
+                if (key.isEmpty() || languages.containsKey(key)) continue;
+                String language = locale.getDisplayLanguage();
+                if (language.isEmpty()) continue;
+                final int firstCodePoint = language.offsetByCodePoints(0, 1);
+                language = language.substring(0, firstCodePoint).toUpperCase(locale)
+                        + language.substring(firstCodePoint);
+                languages.put(key, language + " [" + key + "]");
+            } catch (MissingResourceException ignored) {
+                // Older Android locale tables contain a few incomplete entries.
+            }
+        }
+        final Collator collator = Collator.getInstance();
+        collator.setStrength(Collator.PRIMARY);
+        orderByValue(languages, collator::compare);
+        return languages;
+    }
+
+    /** Apply stable status/navigation-bar and TV-overscan padding to a picker body. */
+    public static void padForPickerInsets(final Activity activity, final UiMetrics ui,
+                                          final View insetSource, final View target,
+                                          final int horizontalPad, final int extraTopPx,
+                                          final int extraBottomPx) {
+        final boolean landscape = activity.getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_LANDSCAPE;
+        int top = landscape ? ui.pickerTopPadLand() : ui.dp(24);
+        int bottom = ui.overscanV();
+        final WindowInsets rootInsets = insetSource.getRootWindowInsets();
+        if (rootInsets != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                if (!landscape) {
+                    top = Math.max(top, rootInsets.getInsetsIgnoringVisibility(
+                            WindowInsets.Type.statusBars()).top);
+                }
+                bottom = rootInsets.getInsetsIgnoringVisibility(
+                        WindowInsets.Type.navigationBars()).bottom + ui.overscanV();
+            } else {
+                if (!landscape) top = Math.max(top, rootInsets.getSystemWindowInsetTop());
+                bottom = Math.max(bottom,
+                        rootInsets.getSystemWindowInsetBottom() + ui.overscanV());
+            }
+        }
+        target.setPadding(horizontalPad, top + extraTopPx,
+                horizontalPad, bottom + extraBottomPx);
     }
 
     public static ComponentName getSystemComponent(Context context, Intent intent) {
