@@ -242,12 +242,6 @@
             app:summaryOff="@string/pref_subtitle_translate_off"
             app:title="@string/pref_subtitle_translate" />
 
-        <Preference
-            app:key="languageSubtitleTranslate"
-            app:dependency="subtitleTranslateOn"
-            app:summary="@string/pref_language_subtitle_translate_summary"
-            app:title="@string/pref_language_subtitle_translate" />
-
         <PreferenceScreen
             app:key="subtitleAppearance"
             app:summary="@string/pref_subtitle_appearance_summary"

@@ -475,10 +475,11 @@ public class ResourceContractTest {
         String ukrainian = readProjectFile("src/main/res/values-uk/strings.xml");
 
         assertTrue(preferences.contains("app:key=\"subtitleTranslateOn\""));
-        assertTrue(preferences.contains("app:key=\"languageSubtitleTranslate\""));
+        assertFalse(preferences.contains("app:key=\"languageSubtitleTranslate\""));
         assertTrue(preferences.contains("app:defaultValue=\"true\""));
         assertTrue(prefs.contains("public boolean subtitleSearch = false"));
         assertTrue(prefs.contains("languageSubtitleTranslate = \"ukr\""));
+        assertTrue(prefs.contains("return \"ukr\";"));
         assertTrue(prefs.contains("public boolean subtitleTranslate = true"));
         assertTrue(activity.contains("LanguagePriorityModel.targetOrUkrainian"));
         assertTrue(activity.contains("SubtitleTranslate.sourcesFor"));
@@ -496,6 +497,11 @@ public class ResourceContractTest {
         assertTrue(ukrainian.contains("name=\"subtitle_translate_progress\""));
         assertTrue(ukrainian.contains("name=\"subtitle_translate_success\""));
         assertTrue(ukrainian.contains("name=\"subtitle_translate_failed\""));
+
+        String settings = readProjectFile(
+                "src/main/java/com/brouken/player/SettingsActivity.java");
+        assertFalse(settings.contains("TranslationLanguageDialog.show"));
+        assertTrue(settings.contains("UaListPreferenceDialogFragment"));
 
         String search = readProjectFile(
                 "src/main/java/com/brouken/player/SubtitleSearch.java");

@@ -62,7 +62,8 @@ final class OffsetPanel {
                 .create();
         SeekBar focus = firstSeek;
         dialog.setOnShowListener(ignored -> {
-            if (focus != null) focus.requestFocus();
+            UaDialogStyler.style(context, dialog, UaDialogStyler.FocusTarget.CONTENT, -1);
+            if (focus != null) focus.post(focus::requestFocus);
         });
         return dialog;
     }

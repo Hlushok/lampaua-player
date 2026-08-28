@@ -17,10 +17,10 @@ final class DurationPanel {
         minutes.setSingleLine(true);
         int padding = Utils.dpToPx(24);
         minutes.setPadding(padding, padding / 2, padding, padding / 2);
-        return new AlertDialog.Builder(context)
+        AlertDialog dialog = new AlertDialog.Builder(context)
                 .setTitle(R.string.sleep_timer_custom)
                 .setView(minutes)
-                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                .setPositiveButton(android.R.string.ok, (selectedDialog, which) -> {
                     try {
                         int value = Integer.parseInt(minutes.getText().toString().trim());
                         if (value > 0 && callback != null) callback.onMinutes(value);
@@ -29,5 +29,10 @@ final class DurationPanel {
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .create();
+        dialog.setOnShowListener(ignored -> {
+            UaDialogStyler.style(context, dialog, UaDialogStyler.FocusTarget.CONTENT, -1);
+            minutes.post(minutes::requestFocus);
+        });
+        return dialog;
     }
 }

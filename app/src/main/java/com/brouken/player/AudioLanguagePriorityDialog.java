@@ -73,6 +73,8 @@ final class AudioLanguagePriorityDialog {
                 })
                 .create();
         rebuild(context, list, languages, allLanguages, pinned, emptyRes, -1, 0);
+        dialog.setOnShowListener(ignored -> UaDialogStyler.style(context, dialog,
+                UaDialogStyler.FocusTarget.POSITIVE, -1));
         dialog.show();
     }
 
@@ -149,15 +151,18 @@ final class AudioLanguagePriorityDialog {
         for (String code : allLanguages.keySet()) if (!selected.contains(code) && !codes.contains(code)) codes.add(code);
         String[] labels = new String[codes.size()];
         for (int i = 0; i < codes.size(); i++) labels[i] = label(allLanguages, codes.get(i));
-        new AlertDialog.Builder(context)
+        AlertDialog dialog = new AlertDialog.Builder(context)
                 .setTitle(R.string.pref_language_audio_add)
-                .setItems(labels, (dialog, which) -> {
+                .setItems(labels, (selectedDialog, which) -> {
                     selected.add(codes.get(which));
                     rebuild(context, list, selected, allLanguages, pinned, emptyRes,
                             selected.size() - 1, UP);
                 })
                 .setNegativeButton(android.R.string.cancel, null)
-                .show();
+                .create();
+        dialog.setOnShowListener(ignored -> UaDialogStyler.style(context, dialog,
+                UaDialogStyler.FocusTarget.LIST, 0));
+        dialog.show();
     }
 
     private static void restoreFocus(LinearLayout list, int focusRow, int focusChild,

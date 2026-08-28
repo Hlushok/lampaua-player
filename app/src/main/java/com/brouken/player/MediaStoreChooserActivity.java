@@ -161,7 +161,12 @@ public class MediaStoreChooserActivity extends Activity {
             });
         }
         alertDialogBuilder.setOnCancelListener(dialogInterface -> finish());
-        alertDialogBuilder.show();
+        AlertDialog dialog = alertDialogBuilder.create();
+        dialog.setOnShowListener(ignored -> UaDialogStyler.style(this, dialog,
+                buckets.isEmpty() ? UaDialogStyler.FocusTarget.POSITIVE
+                        : UaDialogStyler.FocusTarget.LIST,
+                0));
+        dialog.show();
     }
 
     @RequiresApi(api = Build.VERSION_CODES.R)
@@ -193,6 +198,9 @@ public class MediaStoreChooserActivity extends Activity {
             finish();
         });
         alertDialogBuilder.setOnCancelListener(dialogInterface -> finish());
-        alertDialogBuilder.show();
+        AlertDialog dialog = alertDialogBuilder.create();
+        dialog.setOnShowListener(ignored -> UaDialogStyler.style(this, dialog,
+                UaDialogStyler.FocusTarget.LIST, 0));
+        dialog.show();
     }
 }

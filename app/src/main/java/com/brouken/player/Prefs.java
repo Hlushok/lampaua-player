@@ -431,18 +431,15 @@ class Prefs {
 
     public static String getLanguageSubtitleTranslate(Context context) {
         SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
-        String stored = preferences.getString(PREF_KEY_LANGUAGE_SUBTITLE_TRANSLATE, null);
-        String target = LanguagePriorityModel.targetOrUkrainian(stored);
-        if (!target.equals(stored)) {
-            preferences.edit().putString(PREF_KEY_LANGUAGE_SUBTITLE_TRANSLATE, target).apply();
+        if (preferences.contains(PREF_KEY_LANGUAGE_SUBTITLE_TRANSLATE)) {
+            preferences.edit().remove(PREF_KEY_LANGUAGE_SUBTITLE_TRANSLATE).apply();
         }
-        return target;
+        return "ukr";
     }
 
     public static void setLanguageSubtitleTranslate(Context context, String language) {
         PreferenceManager.getDefaultSharedPreferences(context).edit()
-                .putString(PREF_KEY_LANGUAGE_SUBTITLE_TRANSLATE,
-                        LanguagePriorityModel.targetOrUkrainian(language)).apply();
+                .remove(PREF_KEY_LANGUAGE_SUBTITLE_TRANSLATE).apply();
     }
 
     public static String getSubtitleSearchMode(Context context) {

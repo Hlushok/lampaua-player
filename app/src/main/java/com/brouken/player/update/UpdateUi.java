@@ -5,7 +5,6 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.graphics.Typeface;
 import android.graphics.Color;
-import android.graphics.drawable.GradientDrawable;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.method.LinkMovementMethod;
@@ -18,6 +17,7 @@ import android.widget.Toast;
 
 import com.brouken.player.BuildConfig;
 import com.brouken.player.R;
+import com.brouken.player.UaDialogStyler;
 
 /**
  * Shared, Activity-agnostic UI for the self-updater: the "update available" dialog and the
@@ -69,7 +69,8 @@ public final class UpdateUi {
             builder.setNeutralButton(R.string.update_skip, (dialog, which) -> onSkip.run());
         }
         final AlertDialog dialog = builder.create();
-        dialog.setOnShowListener(ignored -> style(dialog));
+        dialog.setOnShowListener(ignored -> UaDialogStyler.style(activity, dialog,
+                UaDialogStyler.FocusTarget.POSITIVE, -1));
         dialog.show();
     }
 
@@ -104,7 +105,8 @@ public final class UpdateUi {
                 // any context. Cancelling is not dismissing, so a normal finish does not come through here.
                 .setOnCancelListener(d -> cancelDownload(download[0]))
                 .create();
-        dialog.setOnShowListener(ignored -> style(dialog));
+        dialog.setOnShowListener(ignored -> UaDialogStyler.style(activity, dialog,
+                UaDialogStyler.FocusTarget.NEGATIVE, -1));
         dialog.show();
 
         download[0] = Updater.downloadApkAsync(activity, info,
@@ -149,19 +151,4 @@ public final class UpdateUi {
         return Math.round(value * context.getResources().getDisplayMetrics().density);
     }
 
-    private static void style(AlertDialog dialog) {
-        if (dialog.getWindow() != null) {
-            GradientDrawable background = new GradientDrawable();
-            background.setColor(Color.rgb(4, 18, 40));
-            background.setCornerRadius(dp(dialog.getContext(), 12));
-            background.setStroke(dp(dialog.getContext(), 1), Color.rgb(240, 183, 38));
-            dialog.getWindow().setBackgroundDrawable(background);
-        }
-        for (int button : new int[]{AlertDialog.BUTTON_POSITIVE,
-                AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_NEUTRAL}) {
-            if (dialog.getButton(button) != null) {
-                dialog.getButton(button).setTextColor(Color.rgb(240, 183, 38));
-            }
-        }
-    }
 }

@@ -1,5 +1,6 @@
 package com.brouken.player;
 
+import android.app.Dialog;
 import android.content.res.Configuration;
 import android.content.SharedPreferences;
 import android.graphics.Canvas;
@@ -26,6 +27,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.OneShotPreDrawListener;
 import androidx.preference.EditTextPreference;
 import androidx.preference.ListPreference;
+import androidx.preference.ListPreferenceDialogFragmentCompat;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceGroup;
@@ -302,11 +304,8 @@ public class SettingsActivity extends AppCompatActivity
             Preference preferenceLanguageSubtitle = findPreference("languageSubtitle");
             Preference preferenceLanguageSubtitleSecondary =
                     findPreference("languageSubtitleSecondary");
-            Preference preferenceLanguageSubtitleTranslate =
-                    findPreference("languageSubtitleTranslate");
             if (preferenceLanguageAudio != null || preferenceLanguageSubtitle != null
-                    || preferenceLanguageSubtitleSecondary != null
-                    || preferenceLanguageSubtitleTranslate != null) {
+                    || preferenceLanguageSubtitleSecondary != null) {
                 LinkedHashMap<String, String> languages = getLanguages();
                 if (preferenceLanguageAudio != null) {
                     updateLanguageSummary(preferenceLanguageAudio, languages,
@@ -365,22 +364,6 @@ public class SettingsActivity extends AppCompatActivity
                         return true;
                     });
                 }
-                if (preferenceLanguageSubtitleTranslate != null) {
-                    updateLanguageSummary(preferenceLanguageSubtitleTranslate, languages,
-                            Prefs.getLanguageSubtitleTranslate(requireContext()),
-                            R.string.pref_language_subtitle_none);
-                    preferenceLanguageSubtitleTranslate.setOnPreferenceClickListener(preference -> {
-                        TranslationLanguageDialog.show(requireContext(),
-                                R.string.pref_language_subtitle_translate,
-                                Prefs.getLanguageSubtitleTranslate(requireContext()),
-                                languages, pinnedLanguages(), picked -> {
-                                    Prefs.setLanguageSubtitleTranslate(requireContext(), picked);
-                                    updateLanguageSummary(preference, languages, picked,
-                                            R.string.pref_language_subtitle_none);
-                                });
-                        return true;
-                    });
-                }
             }
 
             ListPreference textColor = findPreference("subtitleTextColor");
@@ -425,6 +408,20 @@ public class SettingsActivity extends AppCompatActivity
                     return true;
                 });
             }
+        }
+
+        @Override
+        public void onDisplayPreferenceDialog(@NonNull Preference preference) {
+            if (!(preference instanceof ListPreference)) {
+                super.onDisplayPreferenceDialog(preference);
+                return;
+            }
+            String tag = UaListPreferenceDialogFragment.class.getName();
+            if (getParentFragmentManager().findFragmentByTag(tag) != null) return;
+            UaListPreferenceDialogFragment dialog =
+                    UaListPreferenceDialogFragment.newInstance(preference.getKey());
+            dialog.setTargetFragment(this, 0);
+            dialog.show(getParentFragmentManager(), tag);
         }
 
         @Override
@@ -576,6 +573,32 @@ public class SettingsActivity extends AppCompatActivity
                 canvas.translate(x, middle - chip.getBounds().height() / 2f);
                 chip.draw(canvas);
                 canvas.restore();
+            }
+        }
+
+        public static final class UaListPreferenceDialogFragment
+                extends ListPreferenceDialogFragmentCompat {
+            public static UaListPreferenceDialogFragment newInstance(String key) {
+                UaListPreferenceDialogFragment fragment =
+                        new UaListPreferenceDialogFragment();
+                Bundle arguments = new Bundle(1);
+                arguments.putString("key", key);
+                fragment.setArguments(arguments);
+                return fragment;
+            }
+
+            @Override
+            public void onStart() {
+                super.onStart();
+                Dialog rawDialog = getDialog();
+                Preference preference = getPreference();
+                if (!(rawDialog instanceof androidx.appcompat.app.AlertDialog)
+                        || !(preference instanceof ListPreference)) return;
+                ListPreference listPreference = (ListPreference) preference;
+                UaDialogStyler.style(requireContext(),
+                        (androidx.appcompat.app.AlertDialog) rawDialog,
+                        UaDialogStyler.FocusTarget.LIST,
+                        listPreference.findIndexOfValue(listPreference.getValue()));
             }
         }
 

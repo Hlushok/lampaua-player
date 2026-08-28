@@ -2516,7 +2516,6 @@ public class PlayerActivity extends Activity {
         subtitleOffsetDialog.setIcon(R.drawable.ic_subtitle_offset_24dp);
         subtitleOffsetDialog.setOnDismissListener(ignored -> subtitleOffsetDialog = null);
         subtitleOffsetDialog.show();
-        styleUaAlertDialog(subtitleOffsetDialog, false);
     }
 
     private boolean hasActiveSubtitle() {
@@ -2642,7 +2641,7 @@ public class PlayerActivity extends Activity {
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .create();
-        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+        dialog.setOnShowListener(ignored -> styleUaPickerDialog(dialog, 0));
         dialog.show();
     }
 
@@ -2845,7 +2844,7 @@ public class PlayerActivity extends Activity {
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .create();
-        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+        dialog.setOnShowListener(ignored -> styleUaPickerDialog(dialog, 0));
         dialog.show();
     }
 
@@ -2882,7 +2881,7 @@ public class PlayerActivity extends Activity {
                     })
                     .setNegativeButton(android.R.string.cancel, null)
                     .create();
-            dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+            dialog.setOnShowListener(ignored -> styleUaPickerDialog(dialog, 0));
             dialog.show();
         });
     }
@@ -3490,13 +3489,12 @@ public class PlayerActivity extends Activity {
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .create();
-        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+        dialog.setOnShowListener(ignored -> styleUaPickerDialog(dialog, 0));
         dialog.show();
     }
 
     private void showCustomSleepTimer() {
         AlertDialog dialog = DurationPanel.create(this, this::armSleepAfterMinutes);
-        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, true));
         dialog.show();
     }
 
@@ -5166,7 +5164,8 @@ public class PlayerActivity extends Activity {
                     (selected, which) -> showSubtitleOffsetDialog());
         }
         AlertDialog dialog = builder.create();
-        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+        final int initialSelection = checked;
+        dialog.setOnShowListener(ignored -> styleUaPickerDialog(dialog, initialSelection));
         dialog.show();
     }
 
@@ -5415,7 +5414,8 @@ public class PlayerActivity extends Activity {
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .create();
-        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+        final int initialSelection = checked;
+        dialog.setOnShowListener(ignored -> styleUaPickerDialog(dialog, initialSelection));
         dialog.show();
     }
 
@@ -5474,7 +5474,7 @@ public class PlayerActivity extends Activity {
                                 chooseManualSubtitleTitle(titles.get(which), secondary))
                         .setNegativeButton(android.R.string.cancel, null)
                         .create();
-                choices.setOnShowListener(ignored -> styleUaAlertDialog(choices, false));
+                choices.setOnShowListener(ignored -> styleUaPickerDialog(choices, 0));
                 choices.show();
             });
         }, "SubtitleTitleSearch");
@@ -5508,6 +5508,7 @@ public class PlayerActivity extends Activity {
                 .create();
         dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
         dialog.show();
+        season.post(season::requestFocus);
     }
 
     private EditText numericField(int value, int hint) {
@@ -8314,38 +8315,14 @@ public class PlayerActivity extends Activity {
     }
 
     private void styleUaAlertDialog(AlertDialog dialog, boolean focusPositive) {
-        if (dialog == null) return;
-        Window window = dialog.getWindow();
-        if (window != null) {
-            window.setBackgroundDrawableResource(R.drawable.ua_dialog_background);
-            int screenWidth = getResources().getDisplayMetrics().widthPixels;
-            int width = Math.min((int) (screenWidth * (isTvBox ? 0.62f : 0.76f)),
-                    Utils.dpToPx(760));
-            window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT);
-        }
-        TextView message = dialog.findViewById(android.R.id.message);
-        if (message != null) {
-            message.setTextColor(Color.WHITE);
-            message.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-            message.setLineSpacing(0f, 1.12f);
-        }
-        Button positive = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
-        Button negative = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
-        Button neutral = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
-        styleUaDialogButton(positive);
-        styleUaDialogButton(negative);
-        styleUaDialogButton(neutral);
-        Button preferred = focusPositive ? positive : negative;
-        if (preferred != null) preferred.requestFocus();
+        UaDialogStyler.style(this, dialog, focusPositive
+                        ? UaDialogStyler.FocusTarget.POSITIVE
+                        : UaDialogStyler.FocusTarget.NEGATIVE,
+                -1);
     }
 
-    private void styleUaDialogButton(Button button) {
-        if (button == null) return;
-        button.setTextColor(Color.rgb(240, 183, 38));
-        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        button.setAllCaps(false);
-        button.setBackgroundResource(R.drawable.ua_dialog_button_background);
-        button.setPadding(Utils.dpToPx(16), 0, Utils.dpToPx(16), 0);
+    private void styleUaPickerDialog(AlertDialog dialog, int checkedIndex) {
+        UaDialogStyler.style(this, dialog, UaDialogStyler.FocusTarget.LIST, checkedIndex);
     }
 
     void deleteMedia() {
@@ -8539,14 +8516,8 @@ public class PlayerActivity extends Activity {
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .create();
-        dialog.setOnShowListener(ignored -> {
-            styleUaAlertDialog(dialog, false);
-            if (dialog.getListView() != null) {
-                dialog.getListView().setSelector(lampaBackground(
-                        Color.rgb(10, 39, 76), Color.rgb(240, 183, 38), 7));
-                dialog.getListView().requestFocus();
-            }
-        });
+        final int initialSelection = checked;
+        dialog.setOnShowListener(ignored -> styleUaPickerDialog(dialog, initialSelection));
         dialog.show();
     }
 
