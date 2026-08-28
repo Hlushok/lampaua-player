@@ -384,6 +384,8 @@ public class ResourceContractTest {
                 "src/main/java/com/brouken/player/PlayerActivity.java");
         String launcher = readProjectFile(
                 "src/main/res/layout/view_ua_empty_state.xml");
+        String launcherLandscape = readProjectFile(
+                "src/main/res/layout-land/view_ua_empty_state.xml");
         String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
         String more = section(activity, "private void showMoreMenu()",
                 "private void showPlaybackTools()");
@@ -411,6 +413,7 @@ public class ResourceContractTest {
         assertFalse(subtitles.contains("R.string.subtitle_offset_title"));
         assertTrue(secondary.contains("format.sampleMimeType == null"));
         assertTrue(launcher.contains("@+id/ua_empty_state_link"));
+        assertTrue(launcherLandscape.contains("@+id/ua_empty_state_link"));
 
         int translate = preferences.indexOf("app:key=\"subtitleTranslateOn\"");
         int backends = preferences.indexOf("app:key=\"subtitleTranslateBackends\"");
