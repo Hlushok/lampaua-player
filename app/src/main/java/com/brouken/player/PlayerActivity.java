@@ -113,8 +113,10 @@ import androidx.media3.exoplayer.audio.ForwardingAudioSink;
 import androidx.media3.exoplayer.hls.playlist.HlsPlaylistTracker;
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+import androidx.media3.exoplayer.source.TrackGroupArray;
 import androidx.media3.exoplayer.text.TextOutput;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
+import androidx.media3.exoplayer.trackselection.MappingTrackSelector;
 import androidx.media3.extractor.DefaultExtractorsFactory;
 import androidx.media3.extractor.text.DefaultSubtitleParserFactory;
 import androidx.media3.extractor.text.SubtitleParser;
@@ -192,6 +194,15 @@ public class PlayerActivity extends Activity {
     public CustomPlayerView playerView;
     public static ExoPlayer player;
     private YouTubeOverlay youTubeOverlay;
+    private final SubtitleOffset.Position subtitlePosition = new SubtitleOffset.Position() {
+        @Override public long currentMs() {
+            return player == null ? C.TIME_UNSET : player.getCurrentPosition();
+        }
+
+        @Override public boolean playing() {
+            return player != null && player.isPlaying();
+        }
+    };
 
     private Object mPictureInPictureParamsBuilder;
 
@@ -234,8 +245,8 @@ public class PlayerActivity extends Activity {
     private static final long FRAME_RATE_SWITCH_TIMEOUT_MS = 1_500L;
     private static final long CHROME_FADE_MS = 250L;
     private static final long SUBTITLE_MISS_TTL_MS = 30 * 60 * 1000L;
-    private static final double SUBTITLE_OFFSET_MAX_SEC = 30.0;
-    private static final double SUBTITLE_OFFSET_STEP_SEC = 0.5;
+    private static final double SUBTITLE_OFFSET_MAX_SEC = 180.0;
+    private static final double SUBTITLE_OFFSET_STEP_SEC = 0.25;
     private static final Map<String, Long> subtitleSearchMisses = new ConcurrentHashMap<>();
 
     private CoordinatorLayout coordinatorLayout;
@@ -268,6 +279,7 @@ public class PlayerActivity extends Activity {
     private boolean restorePlayStateAllowed;
     private boolean play;
     private float subtitlesScale;
+    private float secondarySubtitlesScale;
     private boolean isScrubbing;
     private boolean scrubbingNoticeable;
     private long scrubbingStart;
@@ -312,6 +324,26 @@ public class PlayerActivity extends Activity {
     private SubtitleTimeline subtitleTimeline;
     private Uri subtitleTimelineUri;
     private Uri paintedSubtitleUri;
+    private double secondarySubtitleOffsetSec;
+    private SecondarySubtitles secondarySubtitles;
+    private SubtitleOffset secondarySubtitleOffset;
+    private SubtitleTimeline secondarySubtitleTimeline;
+    private Uri secondarySubtitleUri;
+    private final SecondaryTextTrack secondaryTextTrack = new SecondaryTextTrack();
+    private TrackGroup secondaryTrackGroup;
+    private int secondaryTrackIndex;
+    private boolean secondaryTrackPending;
+    private TrackGroup mainTrackGroup;
+    private int mainTrackIndex;
+    private boolean mainLineOff;
+    private Uri secondaryChoiceMedia;
+    private Uri manualSubtitleMedia;
+    private String manualSubtitleTmdb;
+    private boolean manualSubtitleMovie;
+    private int manualSubtitleSeason = -1;
+    private int manualSubtitleEpisode = -1;
+    private int titleSearchGeneration;
+    private int subtitleViewHeight;
     private AlertDialog subtitleOffsetDialog;
     private boolean switchingPlaylistItem;
     private boolean inPip;
@@ -660,6 +692,18 @@ public class PlayerActivity extends Activity {
         coordinatorLayout = findViewById(R.id.coordinatorLayout);
         mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         playerView = findViewById(R.id.video_view);
+        TextView secondaryHint = playerView.findViewById(R.id.subtitle_secondary);
+        secondarySubtitles = new SecondarySubtitles(
+                secondaryHint, this::updateSecondaryState, subtitlePosition);
+        secondarySubtitleUri = mPrefs.subtitleSecondaryUri;
+        if (secondarySubtitleUri != null) paintSecondarySubtitle(secondarySubtitleUri);
+        SubtitleView subtitleView = playerView.getSubtitleView();
+        if (subtitleView != null) {
+            subtitleView.addOnLayoutChangeListener((view, left, top, right, bottom,
+                                                    oldLeft, oldTop, oldRight, oldBottom) -> {
+                if (bottom - top != subtitleViewHeight) updateSubtitleLayout();
+            });
+        }
         setupEmptyState();
         exoPlayPause = findViewById(R.id.exo_play_pause);
         loadingProgressBar = findViewById(R.id.loading);
@@ -1254,6 +1298,7 @@ public class PlayerActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        titleSearchGeneration++;
         hideSwipeToUnlock();
         if (together != null) {
             together.leave();
@@ -2407,13 +2452,32 @@ public class PlayerActivity extends Activity {
         if (subtitleOffset != null) subtitleOffset.setOffsetSec(subtitleOffsetSec);
     }
 
+    private void applySecondarySubtitleOffset(double sec) {
+        secondarySubtitleOffsetSec = Math.max(-SUBTITLE_OFFSET_MAX_SEC,
+                Math.min(SUBTITLE_OFFSET_MAX_SEC, sec));
+        if (secondarySubtitleOffset != null) {
+            secondarySubtitleOffset.setOffsetSec(secondarySubtitleOffsetSec);
+        }
+    }
+
     private void showSubtitleOffsetDialog() {
         if (player == null) return;
         if (subtitleOffsetDialog != null) subtitleOffsetDialog.dismiss();
+        List<OffsetPanel.Line> lines = new ArrayList<>();
+        if (mainLineTrackSelected() || paintedSubtitleUri != null) {
+            lines.add(new OffsetPanel.Line(secondaryEnabled()
+                    ? getString(R.string.subtitle_main_title) : null,
+                    subtitleOffsetSec, this::applySubtitleOffset));
+        }
+        if (secondaryActive()) {
+            lines.add(new OffsetPanel.Line(getString(R.string.subtitle_secondary_title),
+                    secondarySubtitleOffsetSec, this::applySecondarySubtitleOffset));
+        }
+        if (lines.isEmpty()) return;
         subtitleOffsetDialog = OffsetPanel.create(this,
                 getString(R.string.subtitle_offset_title),
                 SUBTITLE_OFFSET_MAX_SEC, SUBTITLE_OFFSET_STEP_SEC,
-                subtitleOffsetSec, this::applySubtitleOffset);
+                lines.toArray(new OffsetPanel.Line[0]));
         subtitleOffsetDialog.setIcon(R.drawable.ic_subtitle_offset_24dp);
         subtitleOffsetDialog.setOnDismissListener(ignored -> subtitleOffsetDialog = null);
         subtitleOffsetDialog.show();
@@ -2422,7 +2486,20 @@ public class PlayerActivity extends Activity {
 
     private boolean hasActiveSubtitle() {
         return player != null && (paintedSubtitleUri != null
-                || player.getCurrentTracks().isTypeSelected(C.TRACK_TYPE_TEXT));
+                || mainLineTrackSelected() || secondaryActive());
+    }
+
+    private String subtitleOffsetSummary() {
+        boolean main = mainLineTrackSelected() || paintedSubtitleUri != null;
+        boolean second = secondaryActive();
+        if (main && second) {
+            if (Math.abs(subtitleOffsetSec) < 0.001
+                    && Math.abs(secondarySubtitleOffsetSec) < 0.001) return null;
+            return OffsetPanel.format(subtitleOffsetSec) + " / "
+                    + OffsetPanel.format(secondarySubtitleOffsetSec);
+        }
+        double value = second ? secondarySubtitleOffsetSec : subtitleOffsetSec;
+        return Math.abs(value) < 0.001 ? null : OffsetPanel.format(value);
     }
 
     private void showPlayerTools() {
@@ -2510,9 +2587,9 @@ public class PlayerActivity extends Activity {
                 + (timerSummary == null ? "" : "  \u00B7  " + timerSummary));
         actions.add(this::showSleepTimerMenu);
         if (hasActiveSubtitle()) {
+            String offsetSummary = subtitleOffsetSummary();
             items.add(getString(R.string.subtitle_offset_title)
-                    + (Math.abs(subtitleOffsetSec) < 0.001 ? ""
-                    : "  \u00B7  " + OffsetPanel.format(subtitleOffsetSec)));
+                    + (offsetSummary == null ? "" : "  \u00B7  " + offsetSummary));
             actions.add(this::showSubtitleOffsetDialog);
         }
         items.add(getString(R.string.playback_statistics_title));
@@ -4867,6 +4944,10 @@ public class PlayerActivity extends Activity {
             Utils.applyPlayerVolume();
             Utils.applyBoost();
             applyPreferredTextLanguages();
+            if (!secondaryEnabled()) {
+                setSecondaryTrack(null);
+                if (secondarySubtitles != null) secondarySubtitles.clear();
+            }
             updateSubtitleStyle(this);
             updateLampaSegmentMarkers();
             updateLampaSkipUi();
@@ -4964,15 +5045,18 @@ public class PlayerActivity extends Activity {
 
     private void updateSubtitleButton() {
         if (exoSubtitle == null) return;
-        boolean hasSubtitles = subtitleWithoutTrack() != null;
-        boolean selected = paintedSubtitleUri != null;
+        boolean hasSubtitles = subtitleWithoutTrack() != null || secondaryActive();
+        boolean selected = paintedSubtitleUri != null || secondaryActive();
         if (player != null) {
             for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
                 if (group.getType() != C.TRACK_TYPE_TEXT) continue;
                 for (int index = 0; index < group.length; index++) {
                     if (!isPhantomClosedCaption(group.getTrackFormat(index))) {
                         hasSubtitles = true;
-                        if (group.isTrackSelected(index)) selected = true;
+                        if (group.isTrackSelected(index)
+                                && !group.getTrackFormat(index).equals(secondaryTextTrack.get())) {
+                            selected = true;
+                        }
                     }
                 }
             }
@@ -4984,15 +5068,23 @@ public class PlayerActivity extends Activity {
 
     private void showSubtitleDialog() {
         if (player == null) return;
-        boolean textEnabled = player.getCurrentTracks().isTypeSelected(C.TRACK_TYPE_TEXT);
+        boolean textEnabled = mainLineTrackSelected();
         boolean painting = paintedSubtitleUri != null;
         Uri fileOnly = subtitleWithoutTrack();
         List<String> labels = new ArrayList<>();
         List<Runnable> actions = new ArrayList<>();
-        int checked = !textEnabled && !painting ? 0 : -1;
+        int checked = -1;
 
+        if (secondaryEnabled()) {
+            labels.add(getString(R.string.subtitle_secondary_title) + "  \u00B7  "
+                    + secondarySubtitleSummary());
+            actions.add(this::showSecondarySubtitleDialog);
+        }
+
+        int offIndex = labels.size();
         labels.add(getString(R.string.pref_subtitle_none));
         actions.add(this::disableSubtitles);
+        if (!textEnabled && !painting) checked = offIndex;
         if (fileOnly != null) {
             if (painting) checked = labels.size();
             labels.add(subtitleFileLabel(fileOnly));
@@ -5008,6 +5100,7 @@ public class PlayerActivity extends Activity {
             for (int index = 0; index < group.length; index++) {
                 Format format = group.getTrackFormat(index);
                 if (!group.isTrackSupported(index) || isPhantomClosedCaption(format)) continue;
+                if (format.equals(secondaryTextTrack.get())) continue;
                 if (!painting && group.isTrackSelected(index)) checked = labels.size();
                 String label = trackNameProvider == null
                         ? format.label : trackNameProvider.getTrackName(format);
@@ -5020,6 +5113,8 @@ public class PlayerActivity extends Activity {
                 actions.add(() -> applySubtitle(trackGroup, selectedIndex));
             }
         }
+        labels.add(getString(R.string.subtitle_search_manual));
+        actions.add(() -> showManualSubtitleSearch(false));
 
         AlertDialog.Builder builder = new AlertDialog.Builder(this)
                 .setTitle(R.string.pref_subtitle_header)
@@ -5046,8 +5141,24 @@ public class PlayerActivity extends Activity {
 
     private void resetSubtitleSessionForMediaChange() {
         subtitleOffsetSec = 0;
+        secondarySubtitleOffsetSec = 0;
         subtitleSearchSuppressed = null;
         clearSubtitleTimeline();
+        secondaryChoiceMedia = null;
+        manualSubtitleMedia = null;
+        manualSubtitleTmdb = null;
+        manualSubtitleMovie = false;
+        manualSubtitleSeason = -1;
+        manualSubtitleEpisode = -1;
+        secondaryTrackGroup = null;
+        secondaryTrackPending = false;
+        secondaryTextTrack.set(null);
+        mainTrackGroup = null;
+        mainLineOff = false;
+        secondarySubtitleUri = null;
+        secondarySubtitleTimeline = null;
+        if (secondarySubtitleOffset != null) secondarySubtitleOffset.setTimeline(null);
+        if (secondarySubtitles != null) secondarySubtitles.clear();
         if (subtitleOffsetDialog != null) {
             subtitleOffsetDialog.dismiss();
             subtitleOffsetDialog = null;
@@ -5100,7 +5211,9 @@ public class PlayerActivity extends Activity {
             if (group.getType() != C.TRACK_TYPE_TEXT) continue;
             for (int index = 0; index < group.length; index++) {
                 if (!group.isTrackSelected(index)) continue;
-                String formatId = group.getTrackFormat(index).id;
+                Format format = group.getTrackFormat(index);
+                if (format.equals(secondaryTextTrack.get())) continue;
+                String formatId = format.id;
                 for (MediaItem.SubtitleConfiguration configuration : configurations) {
                     if (carriesUri(formatId, configuration.uri)) return configuration;
                 }
@@ -5136,7 +5249,9 @@ public class PlayerActivity extends Activity {
     private void disableSubtitles() {
         if (player == null) return;
         suppressAutomaticSubtitleSearch();
+        chooseSecondarySubtitle(null);
         clearPaintedSubtitle();
+        mainLineOff = true;
         player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
                 .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
@@ -5147,12 +5262,560 @@ public class PlayerActivity extends Activity {
         if (player == null || group == null) return;
         suppressAutomaticSubtitleSearch();
         clearPaintedSubtitle();
+        mainLineOff = false;
+        mainTrackGroup = group;
+        mainTrackIndex = index;
         player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
                 .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                 .setOverrideForType(new TrackSelectionOverride(
                         group, Collections.singletonList(index)))
                 .build());
+        playerView.post(() -> {
+            applyMainLineTrackSelection();
+            applySecondaryTrackSelection();
+        });
+    }
+
+    private boolean secondaryEnabled() {
+        return mPrefs != null && !Prefs.SECONDARY_OFF.equals(mPrefs.subtitleSecondaryMode);
+    }
+
+    private boolean secondaryOnDemand() {
+        return mPrefs != null && Prefs.SECONDARY_DEMAND.equals(mPrefs.subtitleSecondaryMode);
+    }
+
+    private boolean secondaryActive() {
+        return secondaryEnabled()
+                && (secondarySubtitleUri != null || secondaryTextTrack.get() != null);
+    }
+
+    private SecondarySubtitles.State secondaryState() {
+        if (secondarySubtitles == null || player == null || !secondaryActive() || inPip) {
+            return SecondarySubtitles.State.HIDDEN;
+        }
+        if (!secondaryOnDemand()) return SecondarySubtitles.State.SHOWN;
+        return locked || !secondarySubtitles.isPeeking()
+                ? SecondarySubtitles.State.HIDDEN : SecondarySubtitles.State.SHOWN;
+    }
+
+    private void updateSecondaryState() {
+        updateSubtitleLayout();
+    }
+
+    private boolean peekSecondarySubtitle() {
+        if (secondarySubtitles == null || !secondaryOnDemand() || !secondaryActive()
+                || locked || inPip) return false;
+        if (!secondarySubtitles.peek(player == null ? 0 : player.getCurrentPosition())) return false;
+        updateSecondaryState();
+        return true;
+    }
+
+    private String secondarySubtitleSummary() {
+        Format track = secondaryTextTrack.get();
+        if (track != null) {
+            String label = trackNameProvider == null ? track.label : trackNameProvider.getTrackName(track);
+            if (label != null && !label.trim().isEmpty()) return label;
+            String language = displaySubtitleLanguage(track.language);
+            if (language != null && !language.trim().isEmpty()) return language;
+        }
+        return secondarySubtitleUri == null
+                ? getString(R.string.pref_subtitle_none) : subtitleFileLabel(secondarySubtitleUri);
+    }
+
+    private void showSecondarySubtitleDialog() {
+        if (player == null) return;
+        List<String> labels = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        int checked = -1;
+
+        labels.add(getString(R.string.pref_subtitle_none));
+        actions.add(() -> chooseSecondarySubtitle(null));
+        if (!secondaryActive()) checked = 0;
+
+        Format currentTrack = secondaryTextTrack.get();
+        int number = 0;
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            TrackGroup mediaGroup = group.getMediaTrackGroup();
+            for (int index = 0; index < group.length; index++) {
+                Format format = group.getTrackFormat(index);
+                if (!group.isTrackSupported(index) || isPhantomClosedCaption(format)
+                        || shownByMainLine(format)
+                        || (format.sampleMimeType != null && MimeTypes.isImage(format.sampleMimeType))) {
+                    continue;
+                }
+                number++;
+                String label = trackNameProvider == null
+                        ? format.label : trackNameProvider.getTrackName(format);
+                if (label == null || label.trim().isEmpty()) {
+                    label = displaySubtitleLanguage(format.language);
+                }
+                if (format.equals(currentTrack)) checked = labels.size();
+                int selectedIndex = index;
+                labels.add(label == null || label.trim().isEmpty()
+                        ? getString(R.string.pref_subtitle_header) + " " + number : label);
+                actions.add(() -> chooseSecondarySubtitleTrack(
+                        mediaGroup, selectedIndex, format));
+            }
+        }
+
+        for (Uri uri : externalSubtitleUris()) {
+            if (shownByMainLine(uri)) continue;
+            if (uri.equals(secondarySubtitleUri)) checked = labels.size();
+            labels.add(subtitleFileLabel(uri));
+            actions.add(() -> chooseSecondarySubtitle(uri));
+        }
+        labels.add(getString(R.string.subtitle_search_manual));
+        actions.add(() -> showManualSubtitleSearch(true));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.subtitle_secondary_title)
+                .setSingleChoiceItems(labels.toArray(new String[0]), checked, (selected, which) -> {
+                    actions.get(which).run();
+                    selected.dismiss();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+        dialog.show();
+    }
+
+    private void showManualSubtitleSearch(boolean secondary) {
+        EditText query = new EditText(this);
+        query.setSingleLine(true);
+        query.setHint(R.string.subtitle_search_query_hint);
+        String currentTitle = apiTitle;
+        LampaPlaylist.Item current = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
+        if (current != null && current.title != null && !current.title.trim().isEmpty()) {
+            currentTitle = current.title;
+        }
+        if (currentTitle != null) {
+            query.setText(currentTitle);
+            query.setSelection(query.length());
+        }
+        int pad = Utils.dpToPx(20);
+        query.setPadding(pad, query.getPaddingTop(), pad, query.getPaddingBottom());
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.subtitle_search_manual)
+                .setView(query)
+                .setPositiveButton(R.string.subtitle_search_action, (selected, which) ->
+                        runManualTitleSearch(query.getText().toString(), secondary))
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+        dialog.show();
+        query.requestFocus();
+    }
+
+    private void runManualTitleSearch(String query, boolean secondary) {
+        String text = query == null ? "" : query.trim();
+        if (text.isEmpty()) return;
+        int generation = ++titleSearchGeneration;
+        Toast.makeText(this, R.string.subtitle_search_searching, Toast.LENGTH_SHORT).show();
+        Thread worker = new Thread(() -> {
+            List<TitleSearch.Title> titles = TitleSearch.search(text);
+            runOnUiThread(() -> {
+                if (generation != titleSearchGeneration || isFinishing()) return;
+                if (titles.isEmpty()) {
+                    Toast.makeText(this, R.string.subtitle_search_none, Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                String[] labels = new String[titles.size()];
+                for (int index = 0; index < titles.size(); index++) {
+                    TitleSearch.Title title = titles.get(index);
+                    String kind = getString(title.movie
+                            ? R.string.subtitle_search_movie : R.string.subtitle_search_series);
+                    labels[index] = title.name
+                            + (title.year == null ? "" : " (" + title.year + ")")
+                            + "  \u00B7  " + kind;
+                }
+                AlertDialog choices = new AlertDialog.Builder(this)
+                        .setTitle(R.string.subtitle_search_results)
+                        .setItems(labels, (selected, which) ->
+                                chooseManualSubtitleTitle(titles.get(which), secondary))
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .create();
+                choices.setOnShowListener(ignored -> styleUaAlertDialog(choices, false));
+                choices.show();
+            });
+        }, "SubtitleTitleSearch");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private void chooseManualSubtitleTitle(TitleSearch.Title title, boolean secondary) {
+        if (title.movie) {
+            applyManualSubtitleTitle(title, -1, -1, secondary);
+            return;
+        }
+        MediaId current = currentMediaId();
+        EditText season = numericField(current.season > 0 ? current.season : 1,
+                R.string.subtitle_search_season);
+        EditText episode = numericField(current.episode > 0 ? current.episode : 1,
+                R.string.subtitle_search_episode);
+        LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        int pad = Utils.dpToPx(20);
+        fields.setPadding(pad, 0, pad, 0);
+        fields.addView(season);
+        fields.addView(episode);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(title.name)
+                .setView(fields)
+                .setPositiveButton(R.string.subtitle_search_action, (selected, which) ->
+                        applyManualSubtitleTitle(title, positiveNumber(season, 1),
+                                positiveNumber(episode, 1), secondary))
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
+        dialog.show();
+    }
+
+    private EditText numericField(int value, int hint) {
+        EditText field = new EditText(this);
+        field.setSingleLine(true);
+        field.setInputType(InputType.TYPE_CLASS_NUMBER);
+        field.setHint(hint);
+        field.setText(String.valueOf(value));
+        return field;
+    }
+
+    private static int positiveNumber(EditText field, int fallback) {
+        try {
+            return Math.max(1, Integer.parseInt(field.getText().toString().trim()));
+        } catch (RuntimeException ignored) {
+            return fallback;
+        }
+    }
+
+    private void applyManualSubtitleTitle(TitleSearch.Title title, int season, int episode,
+                                          boolean secondary) {
+        manualSubtitleMedia = mPrefs.mediaUri;
+        manualSubtitleTmdb = title.tmdb;
+        manualSubtitleMovie = title.movie;
+        manualSubtitleSeason = title.movie ? -1 : season;
+        manualSubtitleEpisode = title.movie ? -1 : episode;
+        startManualSubtitleSearch(secondary);
+    }
+
+    private void startManualSubtitleSearch(boolean secondary) {
+        if (player == null) return;
+        MediaId id = currentMediaId();
+        List<String> wanted = secondary
+                ? secondarySubtitleLanguages()
+                : AudioLanguagePriority.parse(mPrefs.languageSubtitle);
+        if (wanted.isEmpty()) {
+            wanted = Collections.singletonList(LanguagePriorityModel.targetOrUkrainian(
+                    mPrefs.languageSubtitleTranslate));
+        }
+        cancelSubtitleSearch();
+        int generation = subtitleSearchGeneration;
+        String key = "manual|" + id.key() + "|" + wanted + "|" + secondary;
+        subtitleSearchStarted = key;
+        subtitleSearchMisses.remove(key);
+        String cachePrefix = "subs." + id.key().replaceAll("[^A-Za-z0-9]", "-");
+        String target = LanguagePriorityModel.targetOrUkrainian(
+                mPrefs.languageSubtitleTranslate);
+        boolean translate = mPrefs.subtitleTranslate && wanted.get(0).equals(target);
+        if (attachCachedSubtitle(generation, id, cachePrefix, wanted,
+                secondary, translate)) return;
+        List<String> requested = new ArrayList<>(wanted);
+        Thread worker = new Thread(() -> {
+            boolean found = translate
+                    ? searchAndTranslate(generation, id, key, cachePrefix, target,
+                    SubtitleTranslate.sourcesFor(target), requested, secondary)
+                    : searchOriginalSubtitles(
+                    generation, id, key, cachePrefix, requested, secondary);
+            if (!found && generation == subtitleSearchGeneration
+                    && !Thread.currentThread().isInterrupted()) {
+                runOnUiThread(() -> Toast.makeText(
+                        this, R.string.subtitle_search_none, Toast.LENGTH_SHORT).show());
+            }
+        }, "ManualSubtitleSearch");
+        worker.setDaemon(true);
+        subtitleSearchThread = worker;
+        worker.start();
+    }
+
+    private List<Uri> externalSubtitleUris() {
+        List<Uri> uris = new ArrayList<>();
+        if (player != null) {
+            MediaItem item = player.getCurrentMediaItem();
+            if (item != null && item.localConfiguration != null) {
+                for (MediaItem.SubtitleConfiguration config
+                        : item.localConfiguration.subtitleConfigurations) {
+                    if (!uris.contains(config.uri)) uris.add(config.uri);
+                }
+            }
+        }
+        for (Uri uri : new Uri[]{paintedSubtitleUri,
+                mPrefs == null ? null : mPrefs.subtitleUri, secondarySubtitleUri}) {
+            if (uri != null && Utils.fileExists(this, uri) && !uris.contains(uri)) uris.add(uri);
+        }
+        return uris;
+    }
+
+    private void chooseSecondarySubtitle(Uri uri) {
+        secondaryChoiceMedia = mPrefs == null ? null : mPrefs.mediaUri;
+        setSecondarySubtitle(uri);
+        if (uri != null && secondaryOnDemand() && playerView != null) {
+            Utils.showText(playerView, getString(R.string.subtitle_secondary_peek_hint), 3000);
+        }
+    }
+
+    private void setSecondarySubtitle(Uri uri) {
+        if (secondarySubtitles == null) return;
+        if (uri != null && uri.equals(secondarySubtitleUri)) {
+            if (secondarySubtitleOffset != null) {
+                secondarySubtitleOffset.setTimeline(secondarySubtitleTimeline);
+                secondarySubtitleOffset.setOffsetSec(secondarySubtitleOffsetSec);
+            }
+            return;
+        }
+        mPrefs.updateSecondarySubtitle(uri);
+        setSecondaryTrack(null);
+        paintSecondarySubtitle(uri);
+        updateSubtitleLayout();
+        updateSubtitleButton();
+    }
+
+    private void paintSecondarySubtitle(Uri uri) {
+        secondarySubtitleUri = uri;
+        secondarySubtitleTimeline = null;
+        if (secondarySubtitleOffset != null) {
+            secondarySubtitleOffset.setTimeline(null);
+            secondarySubtitleOffset.setOffsetSec(secondarySubtitleOffsetSec);
+        }
+        if (secondarySubtitles != null) secondarySubtitles.clear();
+        if (uri == null) return;
+        String mimeType = SubtitleUtils.getSubtitleMime(uri);
+        Thread worker = new Thread(() -> {
+            SubtitleTimeline loaded = SubtitleTimeline.load(this, uri, mimeType);
+            runOnUiThread(() -> {
+                if (!uri.equals(secondarySubtitleUri)) return;
+                if (loaded == null) {
+                    secondarySubtitleUri = null;
+                    mPrefs.updateSecondarySubtitle(null);
+                    updateSubtitleLayout();
+                    updateSubtitleButton();
+                    return;
+                }
+                secondarySubtitleTimeline = loaded;
+                if (secondarySubtitleOffset != null) {
+                    secondarySubtitleOffset.setTimeline(loaded);
+                }
+                updateSubtitleLayout();
+                updateSubtitleButton();
+            });
+        }, "SecondarySubtitleTimeline");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private void chooseSecondarySubtitleTrack(TrackGroup group, int index, Format format) {
+        if (group.length > 1) {
+            Toast.makeText(this, R.string.subtitle_secondary_unavailable, Toast.LENGTH_LONG).show();
+            return;
+        }
+        secondaryChoiceMedia = mPrefs == null ? null : mPrefs.mediaUri;
+        secondaryTrackGroup = group;
+        secondaryTrackIndex = index;
+        setSecondaryTrack(format);
+        if (secondaryOnDemand() && playerView != null) {
+            Utils.showText(playerView, getString(R.string.subtitle_secondary_peek_hint), 3000);
+        }
+    }
+
+    private void setSecondaryTrack(Format format) {
+        if (Objects.equals(secondaryTextTrack.get(), format)) return;
+        rememberMainLineTrack();
+        secondaryTextTrack.set(format);
+        secondaryTrackPending = format != null;
+        if (format == null) secondaryTrackGroup = null;
+        if (format != null) {
+            paintSecondarySubtitle(null);
+            mPrefs.updateSecondarySubtitle(null);
+        }
+        if (secondarySubtitles != null) secondarySubtitles.clear();
+        applySecondaryTrackSelection();
+        updateSubtitleLayout();
+        updateSubtitleButton();
+    }
+
+    private int textRendererIndex(int ordinal) {
+        if (player == null) return -1;
+        int seen = 0;
+        for (int index = 0; index < player.getRendererCount(); index++) {
+            if (player.getRendererType(index) == C.TRACK_TYPE_TEXT && ++seen == ordinal) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private boolean mainLineTrackSelected() {
+        if (player == null) return false;
+        Format secondary = secondaryTextTrack.get();
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            for (int index = 0; index < group.length; index++) {
+                if (group.isTrackSelected(index)
+                        && !group.getTrackFormat(index).equals(secondary)) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean shownByMainLine(Format format) {
+        if (player == null || format == null || format.equals(secondaryTextTrack.get())) return false;
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            for (int index = 0; index < group.length; index++) {
+                if (group.isTrackSelected(index) && format.equals(group.getTrackFormat(index))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean shownByMainLine(Uri uri) {
+        return uri != null && (uri.equals(mPrefs.subtitleUri) || uri.equals(paintedSubtitleUri));
+    }
+
+    private void rememberMainLineTrack() {
+        if (player == null) return;
+        Format secondary = secondaryTextTrack.get();
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            for (int index = 0; index < group.length; index++) {
+                Format format = group.getTrackFormat(index);
+                if (group.isTrackSelected(index) && !format.equals(secondary)) {
+                    mainTrackGroup = group.getMediaTrackGroup();
+                    mainTrackIndex = index;
+                    return;
+                }
+            }
+        }
+    }
+
+    private void applyMainLineTrackSelection() {
+        if (trackSelector == null) return;
+        int renderer = textRendererIndex(1);
+        if (renderer < 0) return;
+        MappingTrackSelector.MappedTrackInfo info = trackSelector.getCurrentMappedTrackInfo();
+        TrackGroupArray groups = info == null ? null : info.getTrackGroups(renderer);
+        int group = groups == null || mainTrackGroup == null || secondaryTextTrack.get() == null
+                ? -1 : groups.indexOf(mainTrackGroup);
+        DefaultTrackSelector.Parameters.Builder builder = trackSelector.buildUponParameters();
+        if (group < 0) builder.clearSelectionOverrides(renderer);
+        else builder.setSelectionOverride(renderer, groups,
+                new DefaultTrackSelector.SelectionOverride(group, mainTrackIndex));
+        builder.setRendererDisabled(renderer, mainLineOff);
+        trackSelector.setParameters(builder);
+    }
+
+    private void applySecondaryTrackSelection() {
+        if (trackSelector == null) return;
+        int renderer = textRendererIndex(2);
+        if (renderer < 0) return;
+        DefaultTrackSelector.Parameters.Builder builder = trackSelector.buildUponParameters();
+        if (secondaryTextTrack.get() == null || secondaryTrackGroup == null) {
+            builder.clearSelectionOverrides(renderer);
+        } else {
+            builder.setSelectionOverride(renderer, new TrackGroupArray(secondaryTrackGroup),
+                    new DefaultTrackSelector.SelectionOverride(0, secondaryTrackIndex));
+        }
+        builder.setRendererDisabled(renderer, false);
+        trackSelector.setParameters(builder);
+    }
+
+    private void verifySecondaryTrackReached() {
+        if (!secondaryTrackPending || trackSelector == null || secondaryTextTrack.get() == null) return;
+        MappingTrackSelector.MappedTrackInfo info = trackSelector.getCurrentMappedTrackInfo();
+        int renderer = textRendererIndex(2);
+        if (info == null || renderer < 0 || renderer >= info.getRendererCount()) return;
+        secondaryTrackPending = false;
+        if (info.getTrackGroups(renderer).length > 0) return;
+        setSecondaryTrack(null);
+        Toast.makeText(this, R.string.subtitle_secondary_unavailable, Toast.LENGTH_LONG).show();
+    }
+
+    private List<String> secondarySubtitleLanguages() {
+        return Utils.splitLanguages(mPrefs.languageSubtitleSecondary);
+    }
+
+    private String mainLineLanguage() {
+        Uri uri = paintedSubtitleUri != null ? paintedSubtitleUri : mPrefs.subtitleUri;
+        if (uri != null) {
+            String language = Utils.toIso3Language(SubtitleUtils.getSubtitleLanguage(uri));
+            if (language != null) return language;
+        }
+        if (player != null) {
+            Format secondary = secondaryTextTrack.get();
+            for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+                if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+                for (int index = 0; index < group.length; index++) {
+                    Format format = group.getTrackFormat(index);
+                    if (group.isTrackSelected(index) && !format.equals(secondary)) {
+                        return Utils.toIso3Language(format.language);
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private void autoFillSecondarySubtitle() {
+        if (secondarySubtitles == null || player == null || !secondaryEnabled()
+                || mPrefs.mediaUri == null || mPrefs.mediaUri.equals(secondaryChoiceMedia)
+                || secondaryActive()) return;
+        List<String> wanted = secondarySubtitleLanguages();
+        if (wanted.isEmpty()) return;
+        String mainLanguage = mainLineLanguage();
+        int best = wanted.size();
+        TrackGroup bestGroup = null;
+        int bestIndex = -1;
+        Format bestFormat = null;
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            TrackGroup mediaGroup = group.getMediaTrackGroup();
+            if (mediaGroup.length > 1) continue;
+            for (int index = 0; index < group.length; index++) {
+                Format format = group.getTrackFormat(index);
+                String language = Utils.toIso3Language(format.language);
+                int rank = language == null ? -1 : wanted.indexOf(language);
+                if (rank >= 0 && rank < best && !Objects.equals(language, mainLanguage)
+                        && !shownByMainLine(format)) {
+                    best = rank;
+                    bestGroup = mediaGroup;
+                    bestIndex = index;
+                    bestFormat = format;
+                }
+            }
+        }
+        if (bestFormat != null) {
+            secondaryChoiceMedia = mPrefs.mediaUri;
+            secondaryTrackGroup = bestGroup;
+            secondaryTrackIndex = bestIndex;
+            setSecondaryTrack(bestFormat);
+            return;
+        }
+        Uri bestUri = null;
+        for (Uri uri : externalSubtitleUris()) {
+            if (shownByMainLine(uri)) continue;
+            String language = Utils.toIso3Language(SubtitleUtils.getSubtitleLanguage(uri));
+            int rank = language == null ? -1 : wanted.indexOf(language);
+            if (rank >= 0 && rank < best && !Objects.equals(language, mainLanguage)) {
+                best = rank;
+                bestUri = uri;
+            }
+        }
+        if (bestUri != null) {
+            secondaryChoiceMedia = mPrefs.mediaUri;
+            setSecondarySubtitle(bestUri);
+        }
     }
 
     private void suppressAutomaticSubtitleSearch() {
@@ -5206,7 +5869,8 @@ public class PlayerActivity extends Activity {
             return;
         }
         List<String> preferred = AudioLanguagePriority.parse(mPrefs.languageSubtitle);
-        if (preferred.isEmpty()) return;
+        List<String> secondaryPreferred = secondarySubtitleLanguages();
+        if (preferred.isEmpty() && secondaryPreferred.isEmpty()) return;
 
         Set<String> present = new HashSet<>();
         for (Tracks.Group group : tracks.getGroups()) {
@@ -5220,21 +5884,42 @@ public class PlayerActivity extends Activity {
         }
         List<String> wanted = SubtitleLanguagePolicy.missing(
                 preferred, present, mPrefs.subtitleSearchStrict);
-        if (wanted.isEmpty()) return;
+        String translateTarget = LanguagePriorityModel.targetOrUkrainian(
+                mPrefs.languageSubtitleTranslate);
+        boolean translateMissing = !preferred.isEmpty() && mPrefs.subtitleTranslate
+                && !present.contains(translateTarget);
+        if (translateMissing && !wanted.contains(translateTarget)) {
+            wanted.add(0, translateTarget);
+        }
+        List<String> secondaryWanted = new ArrayList<>();
+        if (secondaryEnabled() && !secondaryActive()
+                && (mPrefs.mediaUri == null || !mPrefs.mediaUri.equals(secondaryChoiceMedia))) {
+            String mainLanguage = mainLineLanguage();
+            for (String language : secondaryPreferred) {
+                if (!Objects.equals(language, mainLanguage) && !secondaryWanted.contains(language)) {
+                    secondaryWanted.add(language);
+                }
+            }
+        }
+        if (!wanted.isEmpty() && !secondaryWanted.isEmpty()) {
+            secondaryWanted.remove(wanted.get(0));
+        }
+        if (wanted.isEmpty() && secondaryWanted.isEmpty()) return;
 
         MediaId id = currentMediaId();
         String sources = enabledSubtitleSources();
         if (id.isEmpty() || sources.isEmpty() || id.key().equals(subtitleSearchSuppressed)) return;
-        boolean translateUkrainian = wanted.contains(UkrainianSubtitlePolicy.SEARCH_LANGUAGE)
-                && UkrainianSubtitlePolicy.enabled(
-                mPrefs.subtitleAutoTranslateUkrainian, preferred);
-        List<String> direct = translateUkrainian
-                ? UkrainianSubtitlePolicy.directLanguages(preferred) : wanted;
-        List<String> fallback = translateUkrainian
-                ? UkrainianSubtitlePolicy.fallbackLanguages(preferred)
-                : Collections.emptyList();
-        String mode = translateUkrainian ? "auto-ukr|" + fallback : "direct";
-        String key = id.key() + "|" + direct + "|" + sources + "|" + mode;
+        List<String> direct = translateMissing
+                ? Collections.singletonList(translateTarget) : wanted;
+        List<String> fallback = translateMissing
+                ? SubtitleTranslate.sourcesFor(translateTarget) : Collections.emptyList();
+        boolean secondaryTranslate = !secondaryWanted.isEmpty() && mPrefs.subtitleTranslate
+                && secondaryWanted.get(0).equals(translateTarget);
+        String mode = translateMissing
+                ? "translate|" + translateTarget + "|" + fallback + "|"
+                + mPrefs.subtitleTranslateBackends : "direct";
+        String key = id.key() + "|main=" + direct + "|secondary=" + secondaryWanted
+                + "|" + sources + "|" + mode;
         if (key.equals(subtitleSearchStarted)) return;
         Long missedAt = subtitleSearchMisses.get(key);
         if (missedAt != null && System.currentTimeMillis() - missedAt < SUBTITLE_MISS_TTL_MS) {
@@ -5242,29 +5927,40 @@ public class PlayerActivity extends Activity {
         }
 
         String cachePrefix = "subs." + id.key().replaceAll("[^A-Za-z0-9]", "-");
-        for (String language : direct) {
-            File cached = new File(getCacheDir(), cachePrefix + "." + language + ".srt");
-            if (cached.isFile() && cached.length() > 0) {
-                cached.setLastModified(System.currentTimeMillis());
-                cancelSubtitleSearch();
-                subtitleSearchStarted = key;
-                attachSearchedSubtitle(subtitleSearchGeneration, id,
-                        Uri.fromFile(cached), language);
-                return;
-            }
-        }
-
         cancelSubtitleSearch();
         subtitleSearchStarted = key;
         int generation = subtitleSearchGeneration;
+        boolean mainCached = attachCachedSubtitle(
+                generation, id, cachePrefix, direct, false, translateMissing);
+        boolean secondaryCached = attachCachedSubtitle(
+                generation, id, cachePrefix, secondaryWanted, true, secondaryTranslate);
+        if ((direct.isEmpty() || mainCached)
+                && (secondaryWanted.isEmpty() || secondaryCached)) return;
+
         Thread worker = new Thread(() -> {
             try {
-                if (translateUkrainian) {
-                    searchAndTranslateUkrainian(generation, id, key, cachePrefix,
-                            preferred, fallback);
-                } else {
-                    searchOriginalSubtitles(generation, id, key, cachePrefix, direct);
+                boolean found = mainCached;
+                if (!direct.isEmpty() && !mainCached) {
+                    found = translateMissing
+                            ? searchAndTranslate(generation, id, key, cachePrefix,
+                            translateTarget, fallback, wanted, false)
+                            : searchOriginalSubtitles(
+                            generation, id, key, cachePrefix, direct, false);
                 }
+                if (!secondaryWanted.isEmpty() && !secondaryCached
+                        && generation == subtitleSearchGeneration
+                        && !Thread.currentThread().isInterrupted()) {
+                    List<String> secondFallback = secondaryTranslate
+                            ? SubtitleTranslate.sourcesFor(secondaryWanted.get(0))
+                            : Collections.emptyList();
+                    boolean secondFound = secondaryTranslate
+                            ? searchAndTranslate(generation, id, key, cachePrefix,
+                            secondaryWanted.get(0), secondFallback, secondaryWanted, true)
+                            : searchOriginalSubtitles(generation, id, key, cachePrefix,
+                            secondaryWanted, true);
+                    found = found || secondFound;
+                }
+                if (found) subtitleSearchMisses.remove(key);
             } catch (Throwable error) {
                 Utils.log("subtitles: search failed " + error.getClass().getSimpleName());
             }
@@ -5274,115 +5970,145 @@ public class PlayerActivity extends Activity {
         worker.start();
     }
 
-    private void searchOriginalSubtitles(int generation, MediaId id, String key,
-                                         String cachePrefix, List<String> wanted) {
+    private boolean attachCachedSubtitle(int generation, MediaId id, String cachePrefix,
+                                         List<String> wanted, boolean secondary,
+                                         boolean allowTranslated) {
+        for (String language : wanted) {
+            List<File> candidates = new ArrayList<>();
+            candidates.add(new File(getCacheDir(), cachePrefix + "." + language + ".srt"));
+            if (allowTranslated) {
+                for (String source : SubtitleTranslate.sourcesFor(language)) {
+                    candidates.add(new File(getCacheDir(),
+                            translatedCacheName(cachePrefix, source, language)));
+                }
+            }
+            for (File cached : candidates) {
+                if (!cached.isFile() || cached.length() <= 0) continue;
+                cached.setLastModified(System.currentTimeMillis());
+                attachSearchedSubtitle(generation, id, Uri.fromFile(cached), language, secondary);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean searchOriginalSubtitles(int generation, MediaId id, String key,
+                                             String cachePrefix, List<String> wanted,
+                                             boolean secondary) {
         AtomicBoolean answered = new AtomicBoolean();
-        SubtitleSearch.Result found = SubtitleSearch.find(id, wanted, result -> {
+        long durationMs = player == null ? C.TIME_UNSET : player.getDuration();
+        SubtitleSearch.Result found = SubtitleSearch.find(id, wanted, mPrefs, durationMs, result -> {
             if (generation != subtitleSearchGeneration
                     || Thread.currentThread().isInterrupted()) return false;
             Uri file = downloadSubtitle(result,
-                    cachePrefix + "." + result.language + ".srt");
+                    cachePrefix + "." + result.language + ".srt", durationMs);
             if (file == null) return false;
             runOnUiThread(() -> attachSearchedSubtitle(
-                    generation, id, file, result.language));
+                    generation, id, file, result.language, secondary));
             return true;
         }, answered);
         if (found == null && answered.get() && !Thread.currentThread().isInterrupted()
                 && generation == subtitleSearchGeneration) {
             subtitleSearchMisses.put(key, System.currentTimeMillis());
         }
+        return found != null;
     }
 
-    private void searchAndTranslateUkrainian(int generation, MediaId id, String key,
-                                             String cachePrefix, List<String> preferred,
-                                             List<String> fallback) {
+    private boolean searchAndTranslate(int generation, MediaId id, String key,
+                                       String cachePrefix, String targetLanguage,
+                                       List<String> fallback, List<String> wanted,
+                                       boolean secondary) {
         for (String source : fallback) {
-            String translatedName = UkrainianSubtitlePolicy.translatedCacheName(
-                    cachePrefix, source);
-            if (translatedName == null) continue;
+            String translatedName = translatedCacheName(cachePrefix, source, targetLanguage);
             File cached = new File(getCacheDir(), translatedName);
-            if (UkrainianSubtitleTranslator.isUsableCache(cached)) {
+            if (cached.isFile() && cached.length() > 0) {
                 cached.setLastModified(System.currentTimeMillis());
                 runOnUiThread(() -> attachTranslatedSubtitle(
-                        generation, id, Uri.fromFile(cached)));
-                return;
+                        generation, id, Uri.fromFile(cached), targetLanguage, secondary));
+                return true;
             }
             if (cached.exists()) cached.delete();
         }
 
         AtomicBoolean directAnswered = new AtomicBoolean();
+        long durationMs = player == null ? C.TIME_UNSET : player.getDuration();
         SubtitleSearch.Result direct = SubtitleSearch.find(id,
-                UkrainianSubtitlePolicy.directLanguages(preferred), result -> {
+                Collections.singletonList(targetLanguage), mPrefs, durationMs, result -> {
                     if (generation != subtitleSearchGeneration
                             || Thread.currentThread().isInterrupted()) return false;
-                    Uri file = downloadSubtitle(result,
-                            cachePrefix + "." + UkrainianSubtitlePolicy.SEARCH_LANGUAGE + ".srt");
+            Uri file = downloadSubtitle(result,
+                            cachePrefix + "." + targetLanguage + ".srt", durationMs);
                     if (file == null) return false;
                     runOnUiThread(() -> attachSearchedSubtitle(generation, id, file,
-                            UkrainianSubtitlePolicy.SEARCH_LANGUAGE));
+                            targetLanguage, secondary));
                     return true;
                 }, directAnswered);
-        if (direct != null || generation != subtitleSearchGeneration
-                || Thread.currentThread().isInterrupted()) {
-            return;
+        if (direct != null) return true;
+        if (generation != subtitleSearchGeneration || Thread.currentThread().isInterrupted()) {
+            return false;
         }
         if (!directAnswered.get()) {
-            runOnUiThread(() -> {
-                if (generation == subtitleSearchGeneration
-                        && key.equals(subtitleSearchStarted)) {
-                    subtitleSearchStarted = null;
-                }
-            });
-            return;
+            return false;
         }
 
         AtomicBoolean foreignAnswered = new AtomicBoolean();
         AtomicBoolean translationAttempted = new AtomicBoolean();
         AtomicBoolean progressShown = new AtomicBoolean();
-        SubtitleSearch.Result translated = SubtitleSearch.find(id, fallback, result -> {
+        SubtitleSearch.Result translated = SubtitleSearch.find(id, fallback, mPrefs, durationMs, result -> {
             if (generation != subtitleSearchGeneration
                     || Thread.currentThread().isInterrupted()) return false;
-            String source = UkrainianSubtitlePolicy.normalizeIso3(result.language);
-            String translatedName = UkrainianSubtitlePolicy.translatedCacheName(
-                    cachePrefix, source);
-            if (translatedName == null) return false;
+            String source = AudioLanguagePriority.normalize(result.language);
+            if (source == null || source.equals(targetLanguage)) return false;
+            String translatedName = translatedCacheName(cachePrefix, source, targetLanguage);
             Uri downloaded = downloadSubtitle(result,
-                    cachePrefix + ".source." + source + ".srt");
-            File sourceFile = localSubtitleFile(downloaded);
-            if (sourceFile == null) return false;
+                    cachePrefix + ".source." + source + ".srt", durationMs);
+            if (downloaded == null) return false;
             translationAttempted.set(true);
             if (progressShown.compareAndSet(false, true)) {
                 showSubtitleTranslationNotice(
                         generation, id, R.string.subtitle_translate_progress);
             }
             File target = new File(getCacheDir(), translatedName);
-            if (!UkrainianSubtitleTranslator.translate(sourceFile, target, source,
-                    new GoogleSubtitleTranslationTransport())) {
+            Uri translatedFile = SubtitleTranslate.translate(this, downloaded, source,
+                    targetLanguage, target, mPrefs.subtitleTranslateBackends);
+            if (translatedFile == null) {
                 return false;
             }
             if (generation != subtitleSearchGeneration
                     || Thread.currentThread().isInterrupted()) return false;
             runOnUiThread(() -> attachTranslatedSubtitle(
-                    generation, id, Uri.fromFile(target)));
+                    generation, id, translatedFile, targetLanguage, secondary));
             return true;
         }, foreignAnswered);
 
-        if (translated != null || generation != subtitleSearchGeneration
-                || Thread.currentThread().isInterrupted()) {
-            return;
+        if (translated != null) return true;
+        if (generation != subtitleSearchGeneration || Thread.currentThread().isInterrupted()) {
+            return false;
         }
         if (translationAttempted.get()) {
             showSubtitleTranslationNotice(
                     generation, id, R.string.subtitle_translate_failed);
         } else if (foreignAnswered.get()) {
             subtitleSearchMisses.put(key, System.currentTimeMillis());
+        } else {
+            List<String> remaining = new ArrayList<>(wanted);
+            remaining.remove(targetLanguage);
+            if (!remaining.isEmpty()) {
+                return searchOriginalSubtitles(
+                        generation, id, key, cachePrefix, remaining, secondary);
+            }
         }
+        return false;
     }
 
-    private Uri downloadSubtitle(SubtitleSearch.Result result, String cacheName) {
+    private static String translatedCacheName(String cachePrefix, String source, String target) {
+        return cachePrefix + ".translated." + source + "-" + target + ".srt";
+    }
+
+    private Uri downloadSubtitle(SubtitleSearch.Result result, String cacheName, long durationMs) {
         List<Uri> urls = new ArrayList<>(result.urls.size());
         for (String url : result.urls) urls.add(Uri.parse(url));
-        return new SubtitleFetcher(this, urls, cacheName).fetchNow();
+        return new SubtitleFetcher(this, urls, cacheName, durationMs).fetchNow();
     }
 
     private static File localSubtitleFile(Uri uri) {
@@ -5399,9 +6125,16 @@ public class PlayerActivity extends Activity {
         });
     }
 
-    private void attachSearchedSubtitle(int generation, MediaId id, Uri file, String language) {
+    private void attachSearchedSubtitle(int generation, MediaId id, Uri file, String language,
+                                        boolean secondary) {
         if (generation != subtitleSearchGeneration || player == null
                 || !currentMediaId().sameAs(id)) {
+            return;
+        }
+        if (secondary) {
+            chooseSecondarySubtitle(file);
+            Toast.makeText(this, getString(R.string.subtitle_search_found_secondary,
+                    displaySubtitleLanguage(language)), Toast.LENGTH_SHORT).show();
             return;
         }
         mPrefs.updateSubtitle(file);
@@ -5411,10 +6144,19 @@ public class PlayerActivity extends Activity {
         }
     }
 
-    private void attachTranslatedSubtitle(int generation, MediaId id, Uri file) {
+    private void attachTranslatedSubtitle(int generation, MediaId id, Uri file,
+                                           String targetLanguage, boolean secondary) {
         if (generation != subtitleSearchGeneration || player == null
-                || !mPrefs.subtitleSearch || !mPrefs.subtitleAutoTranslateUkrainian
+                || !mPrefs.subtitleTranslate
+                || !LanguagePriorityModel.targetOrUkrainian(
+                mPrefs.languageSubtitleTranslate).equals(targetLanguage)
                 || !currentMediaId().sameAs(id)) {
+            return;
+        }
+        if (secondary) {
+            chooseSecondarySubtitle(file);
+            Toast.makeText(this, getString(R.string.subtitle_search_found_secondary,
+                    displaySubtitleLanguage(targetLanguage)), Toast.LENGTH_SHORT).show();
             return;
         }
         mPrefs.updateSubtitle(file);
@@ -5425,7 +6167,10 @@ public class PlayerActivity extends Activity {
     }
 
     private String enabledSubtitleSources() {
-        return "automatic-v1";
+        return (mPrefs.subtitleSourceRest ? "1" : "")
+                + (mPrefs.subtitleSourceStremio ? "2" : "")
+                + (mPrefs.subtitleSourceShegu ? "3" : "")
+                + (mPrefs.subtitleSourceOpenSubtitles ? "4" : "");
     }
 
     private static String displaySubtitleLanguage(String language) {
@@ -5435,6 +6180,11 @@ public class PlayerActivity extends Activity {
     }
 
     private MediaId currentMediaId() {
+        if (manualSubtitleTmdb != null && Objects.equals(manualSubtitleMedia, mPrefs.mediaUri)) {
+            return new MediaId(null, manualSubtitleTmdb,
+                    manualSubtitleMovie ? -1 : manualSubtitleSeason,
+                    manualSubtitleMovie ? -1 : manualSubtitleEpisode);
+        }
         LampaPlaylist.Item item = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
         if (item != null) {
             return new MediaId(item.imdbId,
@@ -5616,18 +6366,10 @@ public class PlayerActivity extends Activity {
 
             @Override
             protected void buildTextRenderers(Context context, TextOutput output,
-                                              Looper outputLooper, int extensionRendererMode,
-                                              ArrayList<Renderer> out) {
-                SubtitleOffset offset = new SubtitleOffset(output, outputLooper,
-                        new SubtitleOffset.Position() {
-                            @Override public long currentMs() {
-                                return player == null ? C.TIME_UNSET : player.getCurrentPosition();
-                            }
-
-                            @Override public boolean playing() {
-                                return player != null && player.isPlaying();
-                            }
-                        });
+                                               Looper outputLooper, int extensionRendererMode,
+                                               ArrayList<Renderer> out) {
+                SubtitleOffset offset = new SubtitleOffset(
+                        output, outputLooper, subtitlePosition);
                 offset.setOffsetSec(subtitleOffsetSec);
                 offset.setTimeline(subtitleTimeline);
                 subtitleOffset = offset;
@@ -5635,7 +6377,19 @@ public class PlayerActivity extends Activity {
                 super.buildTextRenderers(context, offset, outputLooper,
                         extensionRendererMode, out);
                 for (int index = first; index < out.size(); index++) {
-                    out.set(index, offset.wrap(out.get(index)));
+                    out.set(index, secondaryTextTrack.forPrimary(offset.wrap(out.get(index))));
+                }
+
+                SubtitleOffset second = new SubtitleOffset(
+                        secondarySubtitles, outputLooper, subtitlePosition);
+                second.setOffsetSec(secondarySubtitleOffsetSec);
+                second.setTimeline(secondarySubtitleTimeline);
+                secondarySubtitleOffset = second;
+                int firstSecondary = out.size();
+                super.buildTextRenderers(context, second, outputLooper,
+                        extensionRendererMode, out);
+                for (int index = firstSecondary; index < out.size(); index++) {
+                    out.set(index, secondaryTextTrack.forSecondary(second.wrap(out.get(index))));
                 }
             }
         };
@@ -5921,6 +6675,8 @@ public class PlayerActivity extends Activity {
             boostProcessor = null;
         }
         subtitleOffset = null;
+        secondarySubtitleOffset = null;
+        if (secondarySubtitles != null) secondarySubtitles.clear();
         titleView.setVisibility(View.GONE);
         updateButtons(false);
     }
@@ -6010,6 +6766,8 @@ public class PlayerActivity extends Activity {
         public void onPositionDiscontinuity(Player.PositionInfo oldPosition,
                                             Player.PositionInfo newPosition, int reason) {
             if (subtitleOffset != null) subtitleOffset.clear();
+            if (secondarySubtitleOffset != null) secondarySubtitleOffset.clear();
+            if (secondarySubtitles != null) secondarySubtitles.clear();
             if (reason == Player.DISCONTINUITY_REASON_SEEK
                     && oldPosition.mediaItemIndex == newPosition.mediaItemIndex) {
                 audioRecoveryState.onSeek();
@@ -6027,6 +6785,7 @@ public class PlayerActivity extends Activity {
         @Override
         public void onIsPlayingChanged(boolean isPlaying) {
             if (subtitleOffset != null) subtitleOffset.wake();
+            if (secondarySubtitleOffset != null) secondarySubtitleOffset.wake();
             playerView.setKeepScreenOn(isPlaying);
 
             if (Utils.isPiPSupported(PlayerActivity.this)) {
@@ -6226,7 +6985,12 @@ public class PlayerActivity extends Activity {
             }
             resolveTrackNames();
             updateLampaTrackDetails();
+            rememberMainLineTrack();
+            applySecondaryTrackSelection();
+            applyMainLineTrackSelection();
+            verifySecondaryTrackReached();
             updateSubtitleTimeline(tracks);
+            autoFillSecondarySubtitle();
             if (playerView != null) playerView.post(PlayerActivity.this::updateSubtitleButton);
             maybeSearchSubtitlesOnline(tracks);
         }
@@ -6833,65 +7597,111 @@ public class PlayerActivity extends Activity {
     }
 
     void setSubtitleTextSize() {
-        setSubtitleTextSize(getResources().getConfiguration().orientation);
+        updateSubtitleLayout();
     }
 
     void setSubtitleTextSize(final int orientation) {
-        // Tweak text size as fraction size doesn't work well in portrait
-        final SubtitleView subtitleView = playerView.getSubtitleView();
-        if (subtitleView != null) {
-            final float size;
-            if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
-                size = SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * subtitlesScale;
-            } else {
-                DisplayMetrics metrics = getResources().getDisplayMetrics();
-                float ratio = ((float)metrics.heightPixels / (float)metrics.widthPixels);
-                if (ratio < 1)
-                    ratio = 1 / ratio;
-                size = SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * subtitlesScale / ratio;
-            }
-
-            subtitleView.setFractionalTextSize(size);
-        }
+        updateSubtitleLayout(orientation, player == null ? null : player.getVideoFormat());
     }
 
     void updateSubtitleViewMargin() {
-        if (player == null) {
-            return;
-        }
-
-        updateSubtitleViewMargin(player.getVideoFormat());
+        updateSubtitleLayout();
     }
 
-    // Set margins to fix PGS aspect as subtitle view is outside of content frame
     void updateSubtitleViewMargin(Format format) {
-        if (format == null) {
-            return;
-        }
-
-        final Rational aspectVideo = Utils.getRational(format);
-        final DisplayMetrics metrics = getResources().getDisplayMetrics();
-        final Rational aspectDisplay = new Rational(metrics.widthPixels, metrics.heightPixels);
-
-        int marginHorizontal = 0;
-        int marginVertical = 0;
-
-        if (getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            if (aspectDisplay.floatValue() > aspectVideo.floatValue()) {
-                // Left & right bars
-                int videoWidth = metrics.heightPixels / aspectVideo.getDenominator() * aspectVideo.getNumerator();
-                marginHorizontal = (metrics.widthPixels - videoWidth) / 2;
-            }
-        }
-
-        Utils.setViewParams(playerView.getSubtitleView(), 0, 0, 0, 0,
-                marginHorizontal, marginVertical, marginHorizontal, marginVertical);
+        updateSubtitleLayout(getResources().getConfiguration().orientation, format);
     }
 
     void setSubtitleTextSizePiP() {
         final SubtitleView subtitleView = playerView.getSubtitleView();
-        if (subtitleView != null)
-            subtitleView.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * 2);
+        if (secondarySubtitles != null) {
+            secondarySubtitles.setState(SecondarySubtitles.State.HIDDEN);
+        }
+        if (subtitleView != null) {
+            subtitleView.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * 1.4f);
+            subtitleView.setBottomPaddingFraction(subtitleBaseBottomFraction());
+            subtitleView.setPadding(0, 0, 0, 0);
+            Utils.setViewParams(subtitleView, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+    }
+
+    private static final float SECONDARY_LINE_HEIGHT = 1.3f;
+    private static final int SECONDARY_MAX_LINES = 2;
+
+    private void updateSubtitleLayout() {
+        updateSubtitleLayout(getResources().getConfiguration().orientation,
+                player == null ? null : player.getVideoFormat());
+    }
+
+    private void updateSubtitleLayout(int orientation, Format format) {
+        if (playerView == null) return;
+        SubtitleView subtitleView = playerView.getSubtitleView();
+        if (subtitleView == null) return;
+        if (secondarySubtitles != null) secondarySubtitles.setState(secondaryState());
+        if (inPip) {
+            setSubtitleTextSizePiP();
+            return;
+        }
+
+        int height = subtitleView.getHeight();
+        if (height <= 0) height = getResources().getDisplayMetrics().heightPixels;
+        subtitleViewHeight = height;
+        float mainPx = subtitleTextFraction(orientation, subtitlesScale) * height;
+        float secondaryPx = subtitleTextFraction(orientation, secondarySubtitlesScale) * height;
+        int band = secondaryActive() && !secondaryOnDemand()
+                ? secondaryBandPx(secondaryPx) : 0;
+        int gap = Math.round(subtitleBaseBottomFraction() * height);
+
+        subtitleView.setFixedTextSize(TypedValue.COMPLEX_UNIT_PX, mainPx);
+        subtitleView.setBottomPaddingFraction(subtitleBaseBottomFraction());
+        int margin = subtitleSideMargin(orientation, format);
+        Utils.setViewParams(subtitleView, 0, 0, 0, band,
+                margin, 0, margin, 0);
+
+        TextView hint = playerView.findViewById(R.id.subtitle_secondary);
+        if (hint != null) {
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) hint.getLayoutParams();
+            params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+            params.bottomMargin = gap + (secondaryOnDemand() ? secondaryBandPx(mainPx) : 0);
+            hint.setLayoutParams(params);
+        }
+        if (secondarySubtitles != null) {
+            secondarySubtitles.style(mPrefs.subtitleSecondaryTextColor,
+                    mPrefs.subtitleSecondaryBackgroundColor, secondaryPx,
+                    Typeface.create(Typeface.DEFAULT,
+                            mPrefs.subtitleStyleBold ? Typeface.BOLD : Typeface.NORMAL),
+                    Utils.dpToPx(6), Utils.dpToPx(8), Utils.dpToPx(4));
+        }
+    }
+
+    private float subtitleTextFraction(int orientation, float scale) {
+        if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            return SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * scale;
+        }
+        DisplayMetrics metrics = getResources().getDisplayMetrics();
+        float ratio = (float) metrics.heightPixels / (float) metrics.widthPixels;
+        if (ratio < 1f) ratio = 1f / ratio;
+        return SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * scale / ratio;
+    }
+
+    private float subtitleBaseBottomFraction() {
+        return SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION * 2f / 3f;
+    }
+
+    private int secondaryBandPx(float textPx) {
+        return Math.round(SECONDARY_MAX_LINES * textPx * SECONDARY_LINE_HEIGHT)
+                + 2 * Utils.dpToPx(4) + Utils.dpToPx(12);
+    }
+
+    private int subtitleSideMargin(int orientation, Format format) {
+        if (format == null || orientation != Configuration.ORIENTATION_LANDSCAPE) return 0;
+        Rational aspectVideo = Utils.getRational(format);
+        DisplayMetrics metrics = getResources().getDisplayMetrics();
+        Rational aspectDisplay = new Rational(metrics.widthPixels, metrics.heightPixels);
+        if (aspectDisplay.floatValue() <= aspectVideo.floatValue()) return 0;
+        int videoWidth = metrics.heightPixels / aspectVideo.getDenominator()
+                * aspectVideo.getNumerator();
+        return (metrics.widthPixels - videoWidth) / 2;
     }
 
     @TargetApi(26)
@@ -6995,6 +7805,8 @@ public class PlayerActivity extends Activity {
         final boolean isTablet = Utils.isTablet(context);
         subtitlesScale = SubtitleUtils.normalizeFontScale(
                 mPrefs.subtitleScale, isTvBox || isTablet);
+        secondarySubtitlesScale = SubtitleUtils.normalizeFontScale(
+                mPrefs.subtitleSecondaryScale, isTvBox || isTablet);
         if (subtitleView != null) {
             final CaptionStyleCompat captionStyle = new CaptionStyleCompat(
                     mPrefs.subtitleTextColor,
@@ -7006,9 +7818,8 @@ public class PlayerActivity extends Activity {
                             mPrefs.subtitleStyleBold ? Typeface.BOLD : Typeface.NORMAL));
             subtitleView.setStyle(captionStyle);
             subtitleView.setApplyEmbeddedStyles(mPrefs.subtitleStyleEmbedded);
-            subtitleView.setBottomPaddingFraction(SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION * 2f / 3f);
         }
-        setSubtitleTextSize();
+        updateSubtitleLayout();
     }
 
     void searchSubtitles() {
@@ -7323,6 +8134,7 @@ public class PlayerActivity extends Activity {
             shortControllerTimeout = true;
             androidx.media3.common.util.Util.handlePlayButtonAction(player);
         } else {
+            peekSecondarySubtitle();
             androidx.media3.common.util.Util.handlePauseButtonAction(player);
         }
     }

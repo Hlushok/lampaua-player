@@ -19,32 +19,81 @@ final class OffsetPanel {
         void onOffsetChanged(double sec);
     }
 
+    static final class Line {
+        final String title;
+        final double initialSec;
+        final Listener listener;
+
+        Line(String title, double initialSec, Listener listener) {
+            this.title = title;
+            this.initialSec = initialSec;
+            this.listener = listener;
+        }
+    }
+
     private OffsetPanel() { }
 
     static AlertDialog create(Context context, String title, double maxSec, double stepSec,
                               double initialSec, Listener listener) {
+        return create(context, title, maxSec, stepSec,
+                new Line(null, initialSec, listener));
+    }
+
+    static AlertDialog create(Context context, String title, double maxSec, double stepSec,
+                              Line... lines) {
         int progressMax = (int) Math.round(2 * maxSec / stepSec);
         int middle = progressMax / 2;
-        double[] current = {initialSec};
 
         LinearLayout root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
         int pad = Utils.dpToPx(20);
         root.setPadding(pad, Utils.dpToPx(8), pad, 0);
 
+        SeekBar firstSeek = null;
+        for (Line line : lines) {
+            SeekBar seek = addLine(context, root, line, progressMax, middle, stepSec);
+            if (firstSeek == null) firstSeek = seek;
+        }
+
+        AlertDialog dialog = new AlertDialog.Builder(context)
+                .setTitle(title)
+                .setView(root)
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        SeekBar focus = firstSeek;
+        dialog.setOnShowListener(ignored -> {
+            if (focus != null) focus.requestFocus();
+        });
+        return dialog;
+    }
+
+    private static SeekBar addLine(Context context, LinearLayout root, Line line,
+                                   int progressMax, int middle, double stepSec) {
+        double[] current = {line.initialSec};
+
+        if (line.title != null) {
+            TextView caption = new TextView(context);
+            caption.setText(line.title);
+            caption.setTextColor(Color.WHITE);
+            caption.setTextSize(16);
+            caption.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            caption.setPadding(0, Utils.dpToPx(8), 0, 0);
+            root.addView(caption);
+        }
+
         TextView value = new TextView(context);
         value.setTextColor(Color.rgb(240, 183, 38));
         value.setTextSize(28);
         value.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
         value.setGravity(Gravity.CENTER);
-        value.setText(format(initialSec));
+        value.setText(format(line.initialSec));
         root.addView(value, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, Utils.dpToPx(64)));
 
         SeekBar seek = new SeekBar(context);
         seek.setMax(progressMax);
         seek.setKeyProgressIncrement(1);
-        seek.setProgress((int) Math.round(initialSec / stepSec) + middle);
+        seek.setProgress((int) Math.round(line.initialSec / stepSec) + middle);
 
         Button minus = actionButton(context, "-");
         Button plus = actionButton(context, "+");
@@ -79,7 +128,7 @@ final class OffsetPanel {
             value.setText(format(current[0]));
             value.setTextColor(Math.abs(current[0]) < 0.001
                     ? Color.WHITE : Color.rgb(240, 183, 38));
-            if (listener != null) listener.onOffsetChanged(current[0]);
+            if (line.listener != null) line.listener.onOffsetChanged(current[0]);
         };
         seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
@@ -106,13 +155,7 @@ final class OffsetPanel {
             apply.run();
         });
 
-        AlertDialog dialog = new AlertDialog.Builder(context)
-                .setTitle(title)
-                .setView(root)
-                .setNegativeButton(android.R.string.cancel, null)
-                .create();
-        dialog.setOnShowListener(ignored -> seek.requestFocus());
-        return dialog;
+        return seek;
     }
 
     private static Button actionButton(Context context, String text) {

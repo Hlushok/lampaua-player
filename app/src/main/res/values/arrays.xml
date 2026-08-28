@@ -66,6 +66,30 @@
     <item>100</item>
   </string-array>
 
+  <string-array name="subtitle_search_entries">
+    <item>@string/pref_subtitle_search_never</item>
+    <item>@string/pref_subtitle_search_first</item>
+    <item>@string/pref_subtitle_search_none</item>
+  </string-array>
+
+  <string-array name="subtitle_search_values">
+    <item>off</item>
+    <item>first</item>
+    <item>none</item>
+  </string-array>
+
+  <string-array name="subtitle_secondary_mode_entries">
+    <item>@string/pref_subtitle_secondary_mode_off</item>
+    <item>@string/pref_subtitle_secondary_mode_always</item>
+    <item>@string/pref_subtitle_secondary_mode_demand</item>
+  </string-array>
+
+  <string-array name="subtitle_secondary_mode_values">
+    <item>off</item>
+    <item>always</item>
+    <item>demand</item>
+  </string-array>
+
   <string-array name="subtitle_scale_entries">
     <item>@string/pref_subtitle_scale_smallest</item>
     <item>@string/pref_subtitle_scale_small</item>

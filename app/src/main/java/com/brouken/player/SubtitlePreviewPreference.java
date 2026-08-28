@@ -4,11 +4,13 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.style.StyleSpan;
 import android.util.AttributeSet;
 import android.util.TypedValue;
+import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -82,6 +84,24 @@ public final class SubtitlePreviewPreference extends Preference {
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         preview.setCues(Collections.singletonList(new Cue.Builder().setText(sample).build()));
         preview.setContentDescription(sample.toString());
+
+        TextView secondary = (TextView) holder.findViewById(R.id.subtitle_preview_secondary);
+        if (secondary != null) {
+            float secondaryScale = readFloat(preferences, "subtitleSecondaryScale", 1f);
+            int secondaryText = readColor(preferences, "subtitleSecondaryTextColor", 0xFFCCCCCC);
+            int secondaryBackground = readColor(preferences,
+                    "subtitleSecondaryBackground", 0x80000000);
+            secondary.setTextColor(secondaryText);
+            secondary.setTextSize(TypedValue.COMPLEX_UNIT_SP,
+                    18f * SubtitleUtils.normalizeFontScale(secondaryScale,
+                            Utils.isTvBox(getContext()) || Utils.isTablet(getContext())));
+            secondary.setTypeface(Typeface.create(Typeface.DEFAULT,
+                    bold ? Typeface.BOLD : Typeface.NORMAL));
+            GradientDrawable plate = new GradientDrawable();
+            plate.setColor(secondaryBackground);
+            plate.setCornerRadius(Utils.dpToPx(6));
+            secondary.setBackground(plate);
+        }
     }
 
     public void refresh() {

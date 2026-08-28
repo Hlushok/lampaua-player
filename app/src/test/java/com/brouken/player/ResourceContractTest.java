@@ -221,7 +221,7 @@ public class ResourceContractTest {
     }
 
     @Test
-    public void onlineSubtitleSearchKeepsSourceAndPrivacyContracts() throws Exception {
+    public void onlineSubtitleSearchKeepsHiddenSourceAndPrivacyContracts() throws Exception {
         String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
         String prefs = readProjectFile("src/main/java/com/brouken/player/Prefs.java");
         String search = readProjectFile("src/main/java/com/brouken/player/SubtitleSearch.java");
@@ -238,15 +238,15 @@ public class ResourceContractTest {
         assertFalse(preferences.contains("app:key=\"subtitleSourceShegu\""));
         assertFalse(preferences.contains("app:key=\"subtitleSourceOpenSubtitles\""));
         assertTrue(prefs.contains("public boolean subtitleSearch = false"));
-        assertFalse(prefs.contains("subtitleSourceOpenSubtitles"));
-        assertFalse(prefs.contains("subtitleSourceShegu"));
-        assertFalse(prefs.contains("subtitleSourceStremio"));
-        assertFalse(prefs.contains("subtitleSourceRest"));
+        assertTrue(prefs.contains("subtitleSourceOpenSubtitles = true"));
+        assertTrue(prefs.contains("subtitleSourceShegu = true"));
+        assertTrue(prefs.contains("subtitleSourceStremio = true"));
+        assertTrue(prefs.contains("subtitleSourceRest = true"));
         assertTrue(search.contains("rest.opensubtitles.org"));
         assertTrue(search.contains("opensubtitles-v3.strem.io"));
         assertTrue(search.contains("subtitles.shegu.st"));
-        assertFalse(search.contains("prefs.subtitleSource"));
-        assertFalse(search.contains("SegmentFinder"));
+        assertTrue(search.contains("prefs.subtitleSource"));
+        assertTrue(search.contains("SegmentFinder.tmdbExternalImdb"));
         assertTrue(openSubtitles.contains("header(\"Api-Key\", KEY)"));
         assertTrue(openSubtitles.contains("UA-Player/"));
         assertFalse(openSubtitles.contains("JustPlayer"));
@@ -451,7 +451,9 @@ public class ResourceContractTest {
                 "src/main/java/com/brouken/player/PlayerActivity.java");
 
         assertTrue(activity.contains("buildTextRenderers(Context context, TextOutput output"));
-        assertTrue(activity.contains("new SubtitleOffset(output, outputLooper"));
+        assertTrue(activity.contains("new SubtitleOffset("));
+        assertTrue(activity.contains("secondaryTextTrack.forSecondary"));
+        assertTrue(activity.contains("secondarySubtitleOffset"));
         assertTrue(activity.contains("paintSubtitle(subtitleUri)"));
         assertTrue(activity.contains("SubtitleTimeline.load"));
         assertTrue(activity.contains("subtitleOffset.setTimeline"));
@@ -463,36 +465,34 @@ public class ResourceContractTest {
     }
 
     @Test
-    public void onlineSubtitleTranslationStaysUkrainianAndPrivate() throws Exception {
+    public void onlineSubtitleTranslationKeepsUkrainianDefaultAndPrivateContent() throws Exception {
         String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
         String prefs = readProjectFile("src/main/java/com/brouken/player/Prefs.java");
         String activity = readProjectFile(
                 "src/main/java/com/brouken/player/PlayerActivity.java");
-        String transport = readProjectFile(
-                "src/main/java/com/brouken/player/GoogleSubtitleTranslationTransport.java");
         String translator = readProjectFile(
-                "src/main/java/com/brouken/player/UkrainianSubtitleTranslator.java");
+                "src/main/java/com/brouken/player/SubtitleTranslate.java");
         String ukrainian = readProjectFile("src/main/res/values-uk/strings.xml");
 
-        assertTrue(preferences.contains("app:key=\"subtitleAutoTranslateUkrainian\""));
+        assertTrue(preferences.contains("app:key=\"subtitleTranslateOn\""));
+        assertTrue(preferences.contains("app:key=\"languageSubtitleTranslate\""));
         assertTrue(preferences.contains("app:defaultValue=\"true\""));
         assertTrue(prefs.contains("public boolean subtitleSearch = false"));
-        assertTrue(prefs.contains("public boolean subtitleAutoTranslateUkrainian = true"));
-        assertTrue(activity.contains("UkrainianSubtitlePolicy.directLanguages"));
-        assertTrue(activity.contains("UkrainianSubtitlePolicy.fallbackLanguages"));
-        assertTrue(activity.contains("auto-ukr"));
-        assertTrue(activity.contains("if (!directAnswered.get())"));
-        assertTrue(transport.contains(
+        assertTrue(prefs.contains("languageSubtitleTranslate = \"ukr\""));
+        assertTrue(prefs.contains("public boolean subtitleTranslate = true"));
+        assertTrue(activity.contains("LanguagePriorityModel.targetOrUkrainian"));
+        assertTrue(activity.contains("SubtitleTranslate.sourcesFor"));
+        assertTrue(activity.contains("translatedCacheName"));
+        assertTrue(translator.contains(
                 "https://translate.googleapis.com/translate_a/single"));
-        assertTrue(transport.contains("new FormBody.Builder()"));
-        assertTrue(transport.contains(".add(\"tl\", UkrainianSubtitlePolicy.targetIso2())"));
-        assertFalse(transport.contains("MediaId"));
-        assertFalse(transport.contains("apiTitle"));
-        assertFalse(transport.contains("imdb"));
-        assertFalse(transport.contains("tmdb"));
-        assertFalse(transport.contains("HttpLoggingInterceptor"));
-        assertTrue(translator.contains("target.getName() + \".tmp\""));
-        assertTrue(translator.contains("temporary.renameTo(target)"));
+        assertTrue(translator.contains("new FormBody.Builder()"));
+        assertTrue(translator.contains(".add(\"q\", joined)"));
+        assertFalse(translator.contains("MediaId"));
+        assertFalse(translator.contains("apiTitle"));
+        assertFalse(translator.contains("imdb"));
+        assertFalse(translator.contains("tmdb"));
+        assertFalse(translator.contains("HttpLoggingInterceptor"));
+        assertTrue(translator.contains("target.delete()"));
         assertTrue(ukrainian.contains("name=\"subtitle_translate_progress\""));
         assertTrue(ukrainian.contains("name=\"subtitle_translate_success\""));
         assertTrue(ukrainian.contains("name=\"subtitle_translate_failed\""));
@@ -501,9 +501,7 @@ public class ResourceContractTest {
                 "src/main/java/com/brouken/player/SubtitleSearch.java");
         String openSubtitles = readProjectFile(
                 "src/main/java/com/brouken/player/OpenSubtitles.java");
-        assertTrue(search.contains(
-                "if (response.isSuccessful() && body != null) answered.set(true)"));
-        assertTrue(openSubtitles.contains(
-                "if (response.isSuccessful() && body != null && answered != null)"));
+        assertTrue(search.contains("answered.set(true);"));
+        assertTrue(openSubtitles.contains("if (answered != null) answered.set(true)"));
     }
 }

@@ -247,7 +247,12 @@ final class SubtitleTranslate {
                 out.add(folded);
             }
         }
-        return TextUtils.join(",", out);
+        final StringBuilder joined = new StringBuilder();
+        for (final String id : out) {
+            if (joined.length() > 0) joined.append(',');
+            joined.append(id);
+        }
+        return joined.toString();
     }
 
     /**

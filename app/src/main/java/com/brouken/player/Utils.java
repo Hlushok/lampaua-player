@@ -785,7 +785,13 @@ class Utils {
     }
 
     public static List<String> splitLanguages(final String languages) {
-        return AudioLanguagePriority.parse(languages);
+        final List<String> values = new ArrayList<>();
+        if (languages == null) return values;
+        for (String value : languages.split(",")) {
+            value = value.trim();
+            if (!value.isEmpty() && !values.contains(value)) values.add(value);
+        }
+        return values;
     }
 
     public static ComponentName getSystemComponent(Context context, Intent intent) {

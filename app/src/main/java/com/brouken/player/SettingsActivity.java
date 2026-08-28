@@ -300,7 +300,13 @@ public class SettingsActivity extends AppCompatActivity
 
             Preference preferenceLanguageAudio = findPreference("languageAudio");
             Preference preferenceLanguageSubtitle = findPreference("languageSubtitle");
-            if (preferenceLanguageAudio != null || preferenceLanguageSubtitle != null) {
+            Preference preferenceLanguageSubtitleSecondary =
+                    findPreference("languageSubtitleSecondary");
+            Preference preferenceLanguageSubtitleTranslate =
+                    findPreference("languageSubtitleTranslate");
+            if (preferenceLanguageAudio != null || preferenceLanguageSubtitle != null
+                    || preferenceLanguageSubtitleSecondary != null
+                    || preferenceLanguageSubtitleTranslate != null) {
                 LinkedHashMap<String, String> languages = getLanguages();
                 if (preferenceLanguageAudio != null) {
                     updateLanguageSummary(preferenceLanguageAudio, languages,
@@ -331,10 +337,45 @@ public class SettingsActivity extends AppCompatActivity
                                 R.string.pref_language_subtitle_none,
                                 AudioLanguagePriority.parse(
                                         Prefs.getLanguageSubtitle(requireContext())),
-                                languages, pinnedLanguages(), true, picked -> {
+                                languages, pinnedLanguages(), false, picked -> {
                                     String stored = AudioLanguagePriority.serialize(picked);
                                     Prefs.setLanguageSubtitle(requireContext(), stored);
                                     updateLanguageSummary(preference, languages, stored,
+                                            R.string.pref_language_subtitle_none);
+                                });
+                        return true;
+                    });
+                }
+                if (preferenceLanguageSubtitleSecondary != null) {
+                    updateLanguageSummary(preferenceLanguageSubtitleSecondary, languages,
+                            Prefs.getLanguageSubtitleSecondary(requireContext()),
+                            R.string.pref_language_subtitle_secondary_none);
+                    preferenceLanguageSubtitleSecondary.setOnPreferenceClickListener(preference -> {
+                        AudioLanguagePriorityDialog.show(requireContext(),
+                                R.string.pref_language_subtitle_secondary,
+                                R.string.pref_language_subtitle_secondary_none,
+                                AudioLanguagePriority.parse(
+                                        Prefs.getLanguageSubtitleSecondary(requireContext())),
+                                languages, pinnedLanguages(), false, picked -> {
+                                    String stored = AudioLanguagePriority.serialize(picked);
+                                    Prefs.setLanguageSubtitleSecondary(requireContext(), stored);
+                                    updateLanguageSummary(preference, languages, stored,
+                                            R.string.pref_language_subtitle_secondary_none);
+                                });
+                        return true;
+                    });
+                }
+                if (preferenceLanguageSubtitleTranslate != null) {
+                    updateLanguageSummary(preferenceLanguageSubtitleTranslate, languages,
+                            Prefs.getLanguageSubtitleTranslate(requireContext()),
+                            R.string.pref_language_subtitle_none);
+                    preferenceLanguageSubtitleTranslate.setOnPreferenceClickListener(preference -> {
+                        TranslationLanguageDialog.show(requireContext(),
+                                R.string.pref_language_subtitle_translate,
+                                Prefs.getLanguageSubtitleTranslate(requireContext()),
+                                languages, pinnedLanguages(), picked -> {
+                                    Prefs.setLanguageSubtitleTranslate(requireContext(), picked);
+                                    updateLanguageSummary(preference, languages, picked,
                                             R.string.pref_language_subtitle_none);
                                 });
                         return true;
@@ -351,6 +392,16 @@ public class SettingsActivity extends AppCompatActivity
                         allowColor(String.valueOf(value), background.getValue()));
                 background.setOnPreferenceChangeListener((preference, value) ->
                         allowColor(textColor.getValue(), String.valueOf(value)));
+            }
+            ListPreference secondaryTextColor = findPreference("subtitleSecondaryTextColor");
+            ListPreference secondaryBackground = findPreference("subtitleSecondaryBackground");
+            if (secondaryTextColor != null && secondaryBackground != null) {
+                showColorChips(secondaryTextColor);
+                showColorChips(secondaryBackground);
+                secondaryTextColor.setOnPreferenceChangeListener((preference, value) ->
+                        allowColor(String.valueOf(value), secondaryBackground.getValue()));
+                secondaryBackground.setOnPreferenceChangeListener((preference, value) ->
+                        allowColor(secondaryTextColor.getValue(), String.valueOf(value)));
             }
 
             Preference currentVersion = findPreference("currentVersion");
@@ -426,6 +477,11 @@ public class SettingsActivity extends AppCompatActivity
                     || "subtitleBackground".equals(key)
                     || "subtitleEdge".equals(key)
                     || "subtitleStyleBold".equals(key)) {
+                refreshSubtitlePreview();
+            }
+            if ("subtitleSecondaryScale".equals(key)
+                    || "subtitleSecondaryTextColor".equals(key)
+                    || "subtitleSecondaryBackground".equals(key)) {
                 refreshSubtitlePreview();
             }
         }

@@ -34,6 +34,7 @@ class Prefs {
     private static final String PREF_KEY_BRIGHTNESS = "brightness";
     private static final String PREF_KEY_FIRST_RUN = "firstRun";
     private static final String PREF_KEY_SUBTITLE_URI = "subtitleUri";
+    private static final String PREF_KEY_SUBTITLE_SECONDARY_URI = "subtitleSecondaryUri";
 
     private static final String PREF_KEY_AUDIO_TRACK_ID = "audioTrackId";
     private static final String PREF_KEY_SUBTITLE_TRACK_ID = "subtitleTrackId";
@@ -58,15 +59,29 @@ class Prefs {
     private static final String PREF_KEY_MAP_DV7 = "mapDV7ToHevc";
     private static final String PREF_KEY_LANGUAGE_AUDIO = "languageAudio";
     private static final String PREF_KEY_LANGUAGE_SUBTITLE = "languageSubtitle";
+    private static final String PREF_KEY_LANGUAGE_SUBTITLE_SECONDARY =
+            "languageSubtitleSecondary";
+    private static final String PREF_KEY_LANGUAGE_SUBTITLE_TRANSLATE =
+            "languageSubtitleTranslate";
+    private static final String PREF_KEY_SUBTITLE_SEARCH_MODE = "subtitleSearchMode";
     private static final String PREF_KEY_SUBTITLE_SEARCH = "subtitleSearch";
     private static final String PREF_KEY_SUBTITLE_SEARCH_STRICT = "subtitleSearchStrict";
+    private static final String PREF_KEY_SUBTITLE_TRANSLATE_ON = "subtitleTranslateOn";
+    private static final String PREF_KEY_SUBTITLE_TRANSLATE_BACKENDS =
+            "subtitleTranslateBackends";
     private static final String PREF_KEY_SUBTITLE_AUTO_TRANSLATE_UKRAINIAN =
             "subtitleAutoTranslateUkrainian";
     private static final String PREF_KEY_SUBTITLE_STYLE_EMBEDDED = "subtitleStyleEmbedded";
     private static final String PREF_KEY_SUBTITLE_STYLE_BOLD = "subtitleStyleBold";
     private static final String PREF_KEY_SUBTITLE_SCALE = "subtitleScale";
+    private static final String PREF_KEY_SUBTITLE_SECONDARY_MODE = "subtitleSecondaryMode";
+    private static final String PREF_KEY_SUBTITLE_SECONDARY_SCALE = "subtitleSecondaryScale";
     private static final String PREF_KEY_SUBTITLE_TEXT_COLOR = "subtitleTextColor";
     private static final String PREF_KEY_SUBTITLE_BACKGROUND = "subtitleBackground";
+    private static final String PREF_KEY_SUBTITLE_SECONDARY_TEXT_COLOR =
+            "subtitleSecondaryTextColor";
+    private static final String PREF_KEY_SUBTITLE_SECONDARY_BACKGROUND =
+            "subtitleSecondaryBackground";
     private static final String PREF_KEY_SUBTITLE_EDGE = "subtitleEdge";
     private static final String PREF_KEY_SKIP_ENABLED = "skipEnabled";
     private static final String PREF_KEY_SKIP_MODE = "skipMode";
@@ -108,6 +123,13 @@ class Prefs {
 
     public static final String TRACK_DEFAULT = "default";
     public static final String TRACK_DEVICE = "device";
+    public static final String SEARCH_OFF = "off";
+    public static final String SEARCH_FIRST = "first";
+    public static final String SEARCH_NONE = "none";
+    public static final String SECONDARY_OFF = "off";
+    public static final String SECONDARY_ALWAYS = "always";
+    public static final String SECONDARY_DEMAND = "demand";
+    public static final String SECONDARY_PAUSE = SECONDARY_DEMAND;
 
     final Context mContext;
     final SharedPreferences mSharedPreferences;
@@ -117,6 +139,7 @@ class Prefs {
     // This is session-only and is cleared by every real media selection.
     public boolean suppressResume;
     public Uri subtitleUri;
+    public Uri subtitleSecondaryUri;
     public Uri scopeUri;
     public String mediaType;
     public int resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT;
@@ -146,15 +169,27 @@ class Prefs {
     public boolean mapDV7ToHevc = false;
     public String languageAudio = "";
     public String languageSubtitle = "";
+    public String languageSubtitleSecondary = "";
+    public String languageSubtitleTranslate = "ukr";
     // Opt-in because searches disclose the title identifiers to third-party services.
     public boolean subtitleSearch = false;
     public boolean subtitleSearchStrict = false;
     public boolean subtitleAutoTranslateUkrainian = true;
+    public boolean subtitleTranslate = true;
+    public String subtitleTranslateBackends = SubtitleTranslate.DEFAULT_BACKENDS;
+    public boolean subtitleSourceOpenSubtitles = true;
+    public boolean subtitleSourceStremio = true;
+    public boolean subtitleSourceShegu = true;
+    public boolean subtitleSourceRest = true;
     public boolean subtitleStyleEmbedded = true;
     public boolean subtitleStyleBold = false;
     public float subtitleScale = 1.0f;
+    public String subtitleSecondaryMode = SECONDARY_ALWAYS;
+    public float subtitleSecondaryScale = 1.0f;
     public int subtitleTextColor = Color.WHITE;
     public int subtitleBackgroundColor = Color.TRANSPARENT;
+    public int subtitleSecondaryTextColor = 0xFFCCCCCC;
+    public int subtitleSecondaryBackgroundColor = 0x80000000;
     public int subtitleEdgeType = CaptionStyleCompat.EDGE_TYPE_OUTLINE;
     public boolean skipEnabled = true;
     public String skipMode = SKIP_MODE_FULL;
@@ -205,6 +240,9 @@ class Prefs {
         firstRun = mSharedPreferences.getBoolean(PREF_KEY_FIRST_RUN, firstRun);
         if (mSharedPreferences.contains(PREF_KEY_SUBTITLE_URI))
             subtitleUri = Uri.parse(mSharedPreferences.getString(PREF_KEY_SUBTITLE_URI, null));
+        if (mSharedPreferences.contains(PREF_KEY_SUBTITLE_SECONDARY_URI))
+            subtitleSecondaryUri = Uri.parse(
+                    mSharedPreferences.getString(PREF_KEY_SUBTITLE_SECONDARY_URI, null));
         if (mSharedPreferences.contains(PREF_KEY_AUDIO_TRACK_ID))
             audioTrackId = mSharedPreferences.getString(PREF_KEY_AUDIO_TRACK_ID, audioTrackId);
         if (mSharedPreferences.contains(PREF_KEY_SUBTITLE_TRACK_ID))
@@ -237,18 +275,30 @@ class Prefs {
         mapDV7ToHevc = mSharedPreferences.getBoolean(PREF_KEY_MAP_DV7, mapDV7ToHevc);
         languageAudio = getLanguageAudio(mContext);
         languageSubtitle = getLanguageSubtitle(mContext);
-        subtitleSearch = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_SEARCH, subtitleSearch);
-        subtitleSearchStrict = mSharedPreferences.getBoolean(
-                PREF_KEY_SUBTITLE_SEARCH_STRICT, subtitleSearchStrict);
+        languageSubtitleSecondary = getLanguageSubtitleSecondary(mContext);
+        languageSubtitleTranslate = getLanguageSubtitleTranslate(mContext);
+        String subtitleSearchMode = getSubtitleSearchMode(mContext);
+        subtitleSearch = !SEARCH_OFF.equals(subtitleSearchMode);
+        subtitleSearchStrict = SEARCH_NONE.equals(subtitleSearchMode);
         subtitleAutoTranslateUkrainian = mSharedPreferences.getBoolean(
                 PREF_KEY_SUBTITLE_AUTO_TRANSLATE_UKRAINIAN,
                 subtitleAutoTranslateUkrainian);
+        subtitleTranslate = getSubtitleTranslate(mContext);
+        subtitleTranslateBackends = getSubtitleTranslateBackends(mContext);
         subtitleStyleEmbedded = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_STYLE_EMBEDDED, subtitleStyleEmbedded);
         subtitleStyleBold = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_STYLE_BOLD, subtitleStyleBold);
         subtitleScale = readFloat(PREF_KEY_SUBTITLE_SCALE, subtitleScale, 0.25f, 2.0f);
+        subtitleSecondaryMode = mSharedPreferences.getString(
+                PREF_KEY_SUBTITLE_SECONDARY_MODE, subtitleSecondaryMode);
+        subtitleSecondaryScale = readFloat(PREF_KEY_SUBTITLE_SECONDARY_SCALE,
+                subtitleSecondaryScale, 0.25f, 2.0f);
         subtitleTextColor = readColor(PREF_KEY_SUBTITLE_TEXT_COLOR, subtitleTextColor);
         subtitleBackgroundColor = readColor(PREF_KEY_SUBTITLE_BACKGROUND,
                 subtitleBackgroundColor);
+        subtitleSecondaryTextColor = readColor(PREF_KEY_SUBTITLE_SECONDARY_TEXT_COLOR,
+                subtitleSecondaryTextColor);
+        subtitleSecondaryBackgroundColor = readColor(PREF_KEY_SUBTITLE_SECONDARY_BACKGROUND,
+                subtitleSecondaryBackgroundColor);
         subtitleEdgeType = readInt(PREF_KEY_SUBTITLE_EDGE, subtitleEdgeType, 0, 2);
         skipEnabled = mSharedPreferences.getBoolean(PREF_KEY_SKIP_ENABLED, skipEnabled);
         skipMode = mSharedPreferences.getString(PREF_KEY_SKIP_MODE, skipMode);
@@ -367,6 +417,75 @@ class Prefs {
                 .putString(PREF_KEY_LANGUAGE_SUBTITLE, normalized).apply();
     }
 
+    public static String getLanguageSubtitleSecondary(Context context) {
+        return AudioLanguagePriority.serialize(AudioLanguagePriority.parse(
+                PreferenceManager.getDefaultSharedPreferences(context)
+                        .getString(PREF_KEY_LANGUAGE_SUBTITLE_SECONDARY, "")));
+    }
+
+    public static void setLanguageSubtitleSecondary(Context context, String languages) {
+        String normalized = AudioLanguagePriority.serialize(AudioLanguagePriority.parse(languages));
+        PreferenceManager.getDefaultSharedPreferences(context).edit()
+                .putString(PREF_KEY_LANGUAGE_SUBTITLE_SECONDARY, normalized).apply();
+    }
+
+    public static String getLanguageSubtitleTranslate(Context context) {
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        String stored = preferences.getString(PREF_KEY_LANGUAGE_SUBTITLE_TRANSLATE, null);
+        String target = LanguagePriorityModel.targetOrUkrainian(stored);
+        if (!target.equals(stored)) {
+            preferences.edit().putString(PREF_KEY_LANGUAGE_SUBTITLE_TRANSLATE, target).apply();
+        }
+        return target;
+    }
+
+    public static void setLanguageSubtitleTranslate(Context context, String language) {
+        PreferenceManager.getDefaultSharedPreferences(context).edit()
+                .putString(PREF_KEY_LANGUAGE_SUBTITLE_TRANSLATE,
+                        LanguagePriorityModel.targetOrUkrainian(language)).apply();
+    }
+
+    public static String getSubtitleSearchMode(Context context) {
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        String stored = preferences.getString(PREF_KEY_SUBTITLE_SEARCH_MODE, null);
+        if (SEARCH_OFF.equals(stored) || SEARCH_FIRST.equals(stored)
+                || SEARCH_NONE.equals(stored)) return stored;
+        String migrated = !preferences.getBoolean(PREF_KEY_SUBTITLE_SEARCH, false)
+                ? SEARCH_OFF
+                : preferences.getBoolean(PREF_KEY_SUBTITLE_SEARCH_STRICT, false)
+                ? SEARCH_NONE : SEARCH_FIRST;
+        preferences.edit().putString(PREF_KEY_SUBTITLE_SEARCH_MODE, migrated).apply();
+        return migrated;
+    }
+
+    public static void setSubtitleSearchMode(Context context, String mode) {
+        String value = SEARCH_NONE.equals(mode) || SEARCH_FIRST.equals(mode)
+                ? mode : SEARCH_OFF;
+        PreferenceManager.getDefaultSharedPreferences(context).edit()
+                .putString(PREF_KEY_SUBTITLE_SEARCH_MODE, value)
+                .putBoolean(PREF_KEY_SUBTITLE_SEARCH, !SEARCH_OFF.equals(value))
+                .putBoolean(PREF_KEY_SUBTITLE_SEARCH_STRICT, SEARCH_NONE.equals(value))
+                .apply();
+    }
+
+    public static boolean getSubtitleTranslate(Context context) {
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        if (preferences.contains(PREF_KEY_SUBTITLE_TRANSLATE_ON)) {
+            return preferences.getBoolean(PREF_KEY_SUBTITLE_TRANSLATE_ON, true);
+        }
+        boolean migrated = preferences.getBoolean(PREF_KEY_SUBTITLE_AUTO_TRANSLATE_UKRAINIAN, true);
+        preferences.edit().putBoolean(PREF_KEY_SUBTITLE_TRANSLATE_ON, migrated).apply();
+        return migrated;
+    }
+
+    public static String getSubtitleTranslateBackends(Context context) {
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        String normalized = SubtitleTranslate.normalize(preferences.getString(
+                PREF_KEY_SUBTITLE_TRANSLATE_BACKENDS, SubtitleTranslate.DEFAULT_BACKENDS));
+        preferences.edit().putString(PREF_KEY_SUBTITLE_TRANSLATE_BACKENDS, normalized).apply();
+        return normalized;
+    }
+
     public static boolean getSubtitleSearch(Context context) {
         return PreferenceManager.getDefaultSharedPreferences(context)
                 .getBoolean(PREF_KEY_SUBTITLE_SEARCH, false);
@@ -378,6 +497,7 @@ class Prefs {
     }
 
     public static void setSubtitleSearch(Context context, boolean enabled, boolean strict) {
+        setSubtitleSearchMode(context, enabled ? (strict ? SEARCH_NONE : SEARCH_FIRST) : SEARCH_OFF);
         PreferenceManager.getDefaultSharedPreferences(context).edit()
                 .putBoolean(PREF_KEY_SUBTITLE_SEARCH, enabled)
                 .putBoolean(PREF_KEY_SUBTITLE_SEARCH_STRICT, strict)
@@ -422,6 +542,7 @@ class Prefs {
         positionKey = uri == null ? null : uri.toString();
         mediaType = type;
         updateSubtitle(null);
+        updateSecondarySubtitle(null);
         updateMeta(null, null, AspectRatioFrameLayout.RESIZE_MODE_FIT, 1.f, 1.f);
         updateAspectRatio(0f);
 
@@ -461,6 +582,15 @@ class Prefs {
             sharedPreferencesEditor.remove(PREF_KEY_SUBTITLE_TRACK_ID);
             sharedPreferencesEditor.apply();
         }
+    }
+
+    public void updateSecondarySubtitle(final Uri uri) {
+        subtitleSecondaryUri = uri;
+        if (!persistentMode) return;
+        SharedPreferences.Editor editor = mSharedPreferences.edit();
+        if (uri == null) editor.remove(PREF_KEY_SUBTITLE_SECONDARY_URI);
+        else editor.putString(PREF_KEY_SUBTITLE_SECONDARY_URI, uri.toString());
+        editor.apply();
     }
 
     public void updatePosition(final long position) {
