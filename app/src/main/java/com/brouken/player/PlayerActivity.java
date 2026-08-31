@@ -2854,7 +2854,9 @@ public class PlayerActivity extends Activity {
         playerView.hideController();
         fadeAuxiliaryChrome(statsView, false, true);
         fadeAuxiliaryChrome(roomPill, false, true);
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+        // The launcher page has no video orientation to honour. Follow the physical
+        // device even when playback itself is locked to a saved orientation.
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
         if (mBrightnessControl != null) {
             mBrightnessControl.setScreenBrightness(
                     android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE);
@@ -2969,6 +2971,10 @@ public class PlayerActivity extends Activity {
     }
 
     private void showPickerDialog(final Dialog dialog) {
+        // Every picker is a temporary overlay.  Keep pointer behaviour consistent with
+        // Back/gesture navigation even when a caller uses a plain translucent Dialog.
+        dialog.setCancelable(true);
+        dialog.setCanceledOnTouchOutside(true);
         pickerDialogOpen = true;
         if (playerView != null) playerView.hideController();
         applyPickerBars();
@@ -3035,41 +3041,31 @@ public class PlayerActivity extends Activity {
     }
 
     private static final class MenuItem {
-        final CharSequence badge;
         final CharSequence title;
         final CharSequence subtitle;
-        final CharSequence trailing;
         final boolean checked;
         final boolean chrome;
         final Runnable action;
 
         MenuItem(CharSequence title, CharSequence subtitle, boolean checked, Runnable action) {
-            this(null, title, subtitle, null, checked, false, action);
+            this(title, subtitle, checked, false, action);
         }
 
-        private MenuItem(CharSequence badge, CharSequence title, CharSequence subtitle,
-                         CharSequence trailing, boolean checked, boolean chrome,
-                         Runnable action) {
-            this.badge = badge;
+        private MenuItem(CharSequence title, CharSequence subtitle, boolean checked,
+                         boolean chrome, Runnable action) {
             this.title = title;
             this.subtitle = subtitle;
-            this.trailing = trailing;
             this.checked = checked;
             this.chrome = chrome;
             this.action = action;
         }
 
-        static MenuItem rich(CharSequence badge, CharSequence title, CharSequence subtitle,
-                             CharSequence trailing, boolean checked, Runnable action) {
-            return new MenuItem(badge, title, subtitle, trailing, checked, false, action);
-        }
-
         static MenuItem caption(CharSequence title) {
-            return new MenuItem(null, title, null, null, false, true, null);
+            return new MenuItem(title, null, false, true, null);
         }
 
         static MenuItem rule() {
-            return new MenuItem(null, null, null, null, false, true, null);
+            return new MenuItem(null, null, false, true, null);
         }
     }
 
@@ -3126,28 +3122,12 @@ public class PlayerActivity extends Activity {
             if (firstRow[0] == null) firstRow[0] = row;
             if (item.checked) selectedRow[0] = row;
 
-            TextView badge = null;
-            if (!TextUtils.isEmpty(item.badge)) {
-                badge = new TextView(this);
-                badge.setText(item.badge);
-                badge.setTextColor(Color.rgb(145, 178, 219));
-                badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textCaption());
-                badge.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-                badge.setGravity(Gravity.CENTER);
-                badge.setBackground(lampaBackground(Color.argb(70, 4, 18, 40),
-                        Color.rgb(62, 91, 126), 6));
-                int pickerWidthDp = Math.round(ui.pickerWidthPx(
-                        getResources().getConfiguration())
-                        / getResources().getDisplayMetrics().density);
-                int badgeWidth = ui.dp(PickerRowPolicy.compactPosterWidthDp(pickerWidthDp));
-                LinearLayout.LayoutParams badgeParams = new LinearLayout.LayoutParams(
-                        badgeWidth, ui.dp(38));
-                badgeParams.setMarginEnd(ui.dp(10));
-                row.addView(badge, badgeParams);
-            }
-
             LinearLayout textBlock = new LinearLayout(this);
             textBlock.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            textParams.gravity = Gravity.CENTER_VERTICAL;
+            textBlock.setLayoutParams(textParams);
             TextView rowTitle = new TextView(this);
             rowTitle.setText(item.title);
             rowTitle.setTextColor(Color.WHITE);
@@ -3162,59 +3142,16 @@ public class PlayerActivity extends Activity {
                 summary.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textCaption());
                 textBlock.addView(summary);
             }
-            row.addView(textBlock, new LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            TextView trailing = null;
-            if (!TextUtils.isEmpty(item.trailing)) {
-                int pickerWidthDp = Math.round(ui.pickerWidthPx(
-                        getResources().getConfiguration())
-                        / getResources().getDisplayMetrics().density);
-                int textBudget = PickerRowPolicy.textColumnWidthDp(pickerWidthDp,
-                        44, TextUtils.isEmpty(item.badge) ? 0
-                                : PickerRowPolicy.compactPosterWidthDp(pickerWidthDp),
-                        72, 20);
-                if (PickerRowPolicy.showOptionalTrailingText(textBudget, 112)) {
-                    trailing = new TextView(this);
-                    trailing.setText(item.trailing);
-                    trailing.setTextColor(Color.rgb(145, 178, 219));
-                    trailing.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textCaption());
-                    trailing.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-                    trailing.setSingleLine(true);
-                    LinearLayout.LayoutParams trailingParams = new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT);
-                    trailingParams.setMarginStart(ui.dp(8));
-                    row.addView(trailing, trailingParams);
-                }
-            }
-            if (item.checked) {
-                TextView check = new TextView(this);
-                check.setText("✓");
-                check.setTextColor(Color.rgb(240, 183, 38));
-                check.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textBody());
-                check.setGravity(Gravity.CENTER);
-                row.addView(check, new LinearLayout.LayoutParams(
-                        ui.dp(32), ViewGroup.LayoutParams.MATCH_PARENT));
-            }
-            fitLongText(row, rowTitle, summary, trailing);
+            row.addView(textBlock);
+            fitLongText(row, rowTitle, summary);
             final TextView rowSummary = summary;
-            final TextView rowTrailing = trailing;
-            final TextView rowBadge = badge;
             row.setOnFocusChangeListener((view, focused) -> {
                 rowTitle.setSelected(focused);
                 if (rowSummary != null) rowSummary.setSelected(focused);
-                if (rowTrailing != null) rowTrailing.setSelected(focused);
                 row.setBackground(lampaBackground(focused || item.checked
                                 ? Color.argb(190, 10, 39, 76) : Color.argb(70, 4, 18, 40),
                         focused || item.checked ? Color.rgb(240, 183, 38)
                                 : Color.rgb(35, 58, 84), 8));
-                if (rowBadge != null) {
-                    rowBadge.setTextColor(focused ? Color.rgb(255, 204, 74)
-                            : Color.rgb(145, 178, 219));
-                    rowBadge.setBackground(lampaBackground(Color.argb(70, 4, 18, 40),
-                            focused ? Color.rgb(240, 183, 38)
-                                    : Color.rgb(62, 91, 126), 6));
-                }
             });
             row.setBackground(lampaBackground(item.checked
                             ? Color.argb(190, 10, 39, 76) : Color.argb(70, 4, 18, 40),
@@ -3230,7 +3167,9 @@ public class PlayerActivity extends Activity {
         }
 
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
-        scroll.addView(list);
+        scroll.setFillViewport(true);
+        scroll.addView(list, new android.widget.ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         Utils.padForPickerInsets(this, ui, coordinatorLayout, scroll,
                 ui.overscanH(), 0, 0);
         if (menuDialog != null) menuDialog.dismiss();
@@ -5262,25 +5201,24 @@ public class PlayerActivity extends Activity {
         final List<MenuItem> items = new ArrayList<>();
         for (int index = 0; index < choices.size(); index++) {
             final VideoQualityChoice choice = choices.get(index);
-            CharSequence badge;
-            CharSequence title;
+            CharSequence title = choice.label;
             CharSequence summary;
             if (choice.mode == VideoQualityChoice.MODE_AUTO) {
-                badge = "A";
-                title = choice.label;
                 summary = getString(R.string.quality_auto_description);
             } else if (choice.mode == VideoQualityChoice.MODE_MAXIMUM) {
-                badge = "★";
-                title = choice.label;
                 summary = getString(R.string.quality_maximum_badge);
             } else {
-                badge = choice.label;
-                title = TextUtils.isEmpty(choice.details) ? choice.label : choice.details;
-                summary = choice.mode == VideoQualityChoice.MODE_SOURCE
-                        ? getString(R.string.quality_source) : null;
+                summary = TextUtils.isEmpty(choice.details)
+                        ? (choice.mode == VideoQualityChoice.MODE_SOURCE
+                        ? getString(R.string.quality_source) : null)
+                        : choice.details;
             }
-            items.add(MenuItem.rich(badge, title, summary, choice.bitrateText,
-                    index == selected, () -> applyVideoQuality(choice)));
+            if (!TextUtils.isEmpty(choice.bitrateText)) {
+                summary = TextUtils.isEmpty(summary) ? choice.bitrateText
+                        : summary + "  \u00B7  " + choice.bitrateText;
+            }
+            items.add(new MenuItem(title, summary, index == selected,
+                    () -> applyVideoQuality(choice)));
         }
         showSideMenu(getString(R.string.quality_title), items);
     }

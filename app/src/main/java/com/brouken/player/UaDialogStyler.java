@@ -46,6 +46,11 @@ public final class UaDialogStyler {
     }
 
     private static void styleWindow(Context context, Dialog dialog) {
+        // UA-styled prompts and lists are overlays, not blocking screens.  Android's
+        // defaults vary between Dialog implementations, so make outside-touch dismissal
+        // explicit for both platform and AppCompat dialogs.
+        dialog.setCancelable(true);
+        dialog.setCanceledOnTouchOutside(true);
         Window window = dialog.getWindow();
         if (window == null) return;
         window.setBackgroundDrawableResource(R.drawable.ua_dialog_background);

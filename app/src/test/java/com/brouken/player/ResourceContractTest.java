@@ -448,6 +448,32 @@ public class ResourceContractTest {
     }
 
     @Test
+    public void allPlayerOverlaysDismissOnOutsideTouch() throws Exception {
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+        String styler = readProjectFile(
+                "src/main/java/com/brouken/player/UaDialogStyler.java");
+        String picker = section(activity, "private void showPickerDialog(final Dialog dialog)",
+                "private void fitLongText");
+        String playlist = section(activity, "private void showLampaPlaylist()",
+                "private ArrayList<AudioChoice> buildAudioChoices()");
+        String sideMenu = section(activity, "private void showSideMenu(CharSequence title",
+                "private static final float[] SPEED_PRESETS");
+        String quality = section(activity, "private void showQualityDialog()",
+                "private void installTvListNavigation");
+
+        assertTrue(picker.contains("dialog.setCancelable(true);"));
+        assertTrue(picker.contains("dialog.setCanceledOnTouchOutside(true);"));
+        assertTrue(playlist.contains("showPickerDialog(dialog);"));
+        assertTrue(styler.contains("dialog.setCancelable(true);"));
+        assertTrue(styler.contains("dialog.setCanceledOnTouchOutside(true);"));
+        assertTrue(sideMenu.contains("scroll.setFillViewport(true);"));
+        assertFalse(sideMenu.contains("TextView check"));
+        assertFalse(quality.contains("MenuItem.rich"));
+        assertTrue(quality.contains("CharSequence title = choice.label;"));
+    }
+
+    @Test
     public void manualLaunchUsesBrandedEmptyStateWithoutPreparingAnEmptyPlayer()
             throws Exception {
         String activity = readProjectFile(
@@ -457,12 +483,15 @@ public class ResourceContractTest {
         String textureLayout = readProjectFile(
                 "src/main/res/layout/activity_player_textureview.xml");
         String emptyLayout = readProjectFile("src/main/res/layout/view_ua_empty_state.xml");
+        String emptyLandscape = readProjectFile(
+                "src/main/res/layout-land/view_ua_empty_state.xml");
         String ukrainian = readProjectFile("src/main/res/values-uk/strings.xml");
 
         assertTrue(activity.contains("LaunchIntentPolicy.shouldSuppressResume"));
         assertTrue(activity.contains(
                 "haveMedia = mPrefs.mediaUri != null && !mPrefs.suppressResume"));
         assertTrue(activity.contains("showEmptyState();"));
+        assertTrue(activity.contains("ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR"));
         assertTrue(activity.contains("if (!haveMedia)"));
         assertTrue(prefs.contains("public boolean suppressResume"));
         assertTrue(prefs.contains("suppressResume = false"));
@@ -472,6 +501,12 @@ public class ResourceContractTest {
         assertTrue(emptyLayout.contains("@+id/ua_empty_state_open"));
         assertTrue(emptyLayout.contains("@+id/ua_empty_state_together"));
         assertTrue(emptyLayout.contains("@+id/ua_empty_state_settings"));
+        assertTrue(emptyLayout.contains("android:layout_gravity=\"top|start\""));
+        assertTrue(emptyLayout.contains("android:layout_gravity=\"center\""));
+        assertTrue(emptyLandscape.contains("@+id/ua_empty_state_open"));
+        assertTrue(emptyLandscape.contains("@+id/ua_empty_state_link"));
+        assertTrue(emptyLandscape.contains("@+id/ua_empty_state_together"));
+        assertTrue(emptyLandscape.contains("@+id/ua_empty_state_settings"));
         assertTrue(ukrainian.contains("name=\"empty_state_subtitle\""));
         assertTrue(ukrainian.contains("name=\"empty_state_open\""));
     }
