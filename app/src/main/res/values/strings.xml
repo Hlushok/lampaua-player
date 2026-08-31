@@ -119,8 +119,9 @@
     <string name="pref_brightness_gestures">Brightness gestures</string>
     <string name="pref_brightness_gestures_summary">Adjust brightness on the left side of the screen</string>
     <string name="pref_hold_speed">Hold to change playback speed</string>
-    <string name="pref_hold_speed_on">Hold the video for 2x, then drag sideways to change speed or rewind</string>
-    <string name="pref_hold_speed_off">Holding the video does nothing</string>
+    <string name="pref_hold_speed_adjust">2×, drag to change</string>
+    <string name="pref_hold_speed_fixed">Always 2×</string>
+    <string name="pref_hold_speed_none">Off</string>
     <string name="pref_time_remaining">Show remaining time</string>
     <string name="pref_time_remaining_on">The bottom bar counts down to the end</string>
     <string name="pref_time_remaining_off">The bottom bar shows the total duration</string>
@@ -129,6 +130,7 @@
     <string name="resolver_not_ready">The source did not prepare a playable stream. Please open it again.</string>
     <string name="live_stream_fallback">Trying alternate live-stream mode</string>
     <string name="playback_finishes_at">Finishes at %1$s</string>
+    <string name="time_live">● LIVE</string>
     <string name="skip_intro">Skip intro</string>
     <string name="skip_action">Пропустити</string>
     <string name="skip_ad">Skip ad</string>
@@ -363,4 +365,15 @@
     <string name="pref_subtitle_translate_backends_none">Not set — subtitles cannot be translated</string>
     <string name="pref_subtitle_translate_backends_add">Add a service</string>
     <string name="subtitle_search_language_title">Choose source language</string>
+    <string name="pref_disable_volume_brightness_gestures">Turn off volume and brightness swipes</string>
+    <string name="pref_disable_volume_brightness_gestures_on">Swiping up and down does nothing; seeking, zoom and the volume buttons still work</string>
+    <string name="pref_disable_volume_brightness_gestures_off">Swipe up and down to change brightness on the left of the screen and volume on the right</string>
+    <string name="pref_audio_header">Audio</string>
+    <string name="pref_reset_audio_workarounds">Reset learned audio workarounds</string>
+    <string name="pref_reset_audio_workarounds_summary">Forget audio formats this device learned to decode instead of passing through</string>
+    <string name="pref_reset_audio_workarounds_done">Cleared</string>
+    <string name="pref_controls_header">Controls</string>
+    <string name="pref_onscreen_header">On screen</string>
+    <string name="pref_features_header">Features</string>
+    <string name="pref_skip_header_summary">Intro, end credits, how they are skipped</string>
 </resources>

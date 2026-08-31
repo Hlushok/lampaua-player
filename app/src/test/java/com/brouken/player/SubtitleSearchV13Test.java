@@ -14,4 +14,12 @@ public class SubtitleSearchV13Test {
         assertFalse(SubtitleSearch.forcedName("signs_and_songs.srt"));
         assertFalse(SubtitleSearch.forcedName("Movie.2026.WEB-DL.uk.srt"));
     }
+
+    @Test
+    public void cutMarginScalesButKeepsAThirtySecondFloor() {
+        assertTrue(SubtitleSearch.TAIL_GRACE_MS < SubtitleSearch.cutMargin(60_000L));
+        org.junit.Assert.assertEquals(30_000L, SubtitleSearch.cutMargin(60_000L));
+        org.junit.Assert.assertEquals(240_000L,
+                SubtitleSearch.cutMargin(100L * 60L * 1000L));
+    }
 }

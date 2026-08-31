@@ -278,6 +278,32 @@ public class ResourceContractTest {
     }
 
     @Test
+    public void donorSettingsGroupingAndAudioRecoveryRemainVisible() throws Exception {
+        String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
+        String prefs = readProjectFile("src/main/java/com/brouken/player/Prefs.java");
+        String settings = readProjectFile(
+                "src/main/java/com/brouken/player/SettingsActivity.java");
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+
+        int general = preferences.indexOf("@string/pref_general_header");
+        int audio = preferences.indexOf("@string/pref_audio_header");
+        int subtitles = preferences.indexOf("@string/pref_subtitle_header");
+        int controls = preferences.indexOf("@string/pref_controls_header");
+        int onScreen = preferences.indexOf("@string/pref_onscreen_header");
+        int features = preferences.indexOf("@string/pref_features_header");
+        assertTrue(general >= 0 && general < audio && audio < subtitles);
+        assertTrue(subtitles < controls && controls < onScreen && onScreen < features);
+        assertTrue(preferences.contains("app:key=\"resetRevokedAudioMimes\""));
+        assertTrue(preferences.contains("app:key=\"disableVolumeBrightnessGestures\""));
+        assertTrue(settings.contains("Prefs.resetRevokedAudioMimes"));
+        assertTrue(prefs.contains("revokedAudioMimesRelearned3"));
+        assertTrue(prefs.contains("public void revokeAudioMime"));
+        assertTrue(activity.contains("mPrefs.revokeAudioMime(mime)"));
+        assertTrue(activity.contains("blocked.addAll(audioRecoveryState"));
+    }
+
+    @Test
     public void containerMetadataIsBoundedAndScopedToTheCurrentUri() throws Exception {
         String source = readProjectFile(
                 "src/main/java/com/brouken/player/TrackNameParsingDataSource.java");
@@ -325,9 +351,9 @@ public class ResourceContractTest {
         String ukrainian = readProjectFile("src/main/res/values-uk/strings.xml");
 
         assertTrue(preferences.contains("app:key=\"timeRemaining\""));
-        assertTrue(preferences.contains("app:key=\"holdSpeed\""));
+        assertTrue(preferences.contains("app:key=\"holdSpeedMode\""));
         assertTrue(prefs.contains("public boolean timeRemaining = false"));
-        assertTrue(prefs.contains("public boolean holdSpeed = true"));
+        assertTrue(prefs.contains("public String holdSpeedMode = HOLD_SPEED_ADJUST"));
         assertTrue(activity.contains("setProgressUpdateListener"));
         assertTrue(activity.contains("mPrefs.timeRemaining"));
         assertTrue(activity.contains("isSpeedBoosting()"));
@@ -335,7 +361,7 @@ public class ResourceContractTest {
         assertTrue(customView.contains("REWIND_TICK_MS = 100"));
         assertTrue(customView.contains("HoldSpeedPolicy.evaluate"));
         assertTrue(customView.contains("SeekParameters.DEFAULT"));
-        assertTrue(settings.contains("findPreference(\"holdSpeed\")"));
+        assertTrue(settings.contains("findPreference(\"holdSpeedMode\")"));
         assertTrue(ukrainian.contains("name=\"pref_time_remaining\""));
         assertTrue(ukrainian.contains("name=\"pref_hold_speed\""));
     }

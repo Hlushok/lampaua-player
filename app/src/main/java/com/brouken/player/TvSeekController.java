@@ -56,9 +56,10 @@ final class TvSeekController {
     }
 
     private static long stepFor(int steps) {
-        if (steps < 1) return 10_000L;
-        if (steps < 5) return 30_000L;
-        if (steps < 12) return 60_000L;
+        if (steps < 2) return 3_000L;
+        if (steps < 4) return 10_000L;
+        if (steps < 8) return 30_000L;
+        if (steps < 15) return 60_000L;
         return 120_000L;
     }
 

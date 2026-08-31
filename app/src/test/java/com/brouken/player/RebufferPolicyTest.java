@@ -10,15 +10,14 @@ import org.junit.Test;
 
 public class RebufferPolicyTest {
     @Test
-    public void streamingWaitsForFifteenSecondsAfterAStall() {
+    public void streamingUsesTheUpstreamTimeBoundedWindow() {
         RebufferPolicy.Config config = RebufferPolicy.forStreaming(false);
 
-        assertEquals(DefaultLoadControl.DEFAULT_MIN_BUFFER_MS, config.minBufferMs);
-        assertEquals(DefaultLoadControl.DEFAULT_MAX_BUFFER_MS, config.maxBufferMs);
-        assertEquals(DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
-                config.bufferForPlaybackMs);
-        assertEquals(15_000, config.bufferForPlaybackAfterRebufferMs);
-        assertFalse(config.prioritizeTimeOverSizeThresholds);
+        assertEquals(15_000, config.minBufferMs);
+        assertEquals(50_000, config.maxBufferMs);
+        assertEquals(500, config.bufferForPlaybackMs);
+        assertEquals(5_000, config.bufferForPlaybackAfterRebufferMs);
+        assertTrue(config.prioritizeTimeOverSizeThresholds);
     }
 
     @Test
@@ -31,13 +30,13 @@ public class RebufferPolicyTest {
     }
 
     @Test
-    public void optimized4kKeepsItsLargeBufferAndUsesTheSaferRebufferTarget() {
+    public void optimized4kUsesTheSameStableStreamingPolicy() {
         RebufferPolicy.Config config = RebufferPolicy.forStreaming(true);
 
-        assertEquals(20_000, config.minBufferMs);
-        assertTrue(config.maxBufferMs >= 90_000);
-        assertEquals(5_000, config.bufferForPlaybackMs);
-        assertEquals(15_000, config.bufferForPlaybackAfterRebufferMs);
+        assertEquals(15_000, config.minBufferMs);
+        assertEquals(50_000, config.maxBufferMs);
+        assertEquals(500, config.bufferForPlaybackMs);
+        assertEquals(5_000, config.bufferForPlaybackAfterRebufferMs);
         assertTrue(config.prioritizeTimeOverSizeThresholds);
     }
 }

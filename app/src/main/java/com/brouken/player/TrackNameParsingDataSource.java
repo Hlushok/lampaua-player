@@ -39,6 +39,13 @@ final class TrackNameParsingDataSource implements DataSource {
      */
     static final AtomicLong bytesRead = new AtomicLong();
 
+    /** URI whose own leading bytes announced a Matroska container. */
+    private static volatile String matroskaUri;
+
+    static boolean isMatroska(Uri uri) {
+        return uri != null && uri.toString().equals(matroskaUri);
+    }
+
     /** Receives parsed track metadata on the load thread and reports whether it already has it. */
     interface Listener {
         void onMetadataParsed(Uri originalUri, List<TrackMetadata> tracks);
@@ -283,6 +290,9 @@ final class TrackNameParsingDataSource implements DataSource {
             byte[] bytes = buffer.finish();
             buffer = null;
             if (bytes == null) return;
+            if (originalUri != null && ContainerMetadataReader.isMatroska(bytes)) {
+                matroskaUri = originalUri.toString();
+            }
             List<TrackMetadata> tracks = ContainerMetadataReader.parse(
                     new ByteArrayInputStream(bytes));
             if (!tracks.isEmpty()) listener.onMetadataParsed(originalUri, tracks);

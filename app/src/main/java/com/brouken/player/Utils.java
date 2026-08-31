@@ -67,6 +67,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.ArrayDeque;
 import java.util.Locale;
 import java.util.Map;
 import java.util.MissingResourceException;
@@ -414,9 +415,59 @@ class Utils {
             return (time < 0 ? "−" : "+") + formatMilis(time);
     }
 
+    /** Bounded in-memory trace included with playback reports. */
+    private static final int LOG_LINES = 200;
+    private static final ArrayDeque<String> LOG = new ArrayDeque<>();
+    private static final long LOG_BASE_MS = monotonicTimeMs();
+    private static String lastLogged;
+    private static int lastLoggedRepeats;
+
     public static void log(final String text) {
         if (BuildConfig.DEBUG) {
             Log.d("JustPlayer", text);
+        }
+        synchronized (LOG) {
+            if (text.equals(lastLogged)) {
+                lastLoggedRepeats++;
+                // Rewrite the tail rather than grow: the count is the information, the repetition is not.
+                LOG.removeLast();
+                LOG.addLast(logLine(text) + " (x" + (lastLoggedRepeats + 1) + ")");
+                return;
+            }
+            lastLogged = text;
+            lastLoggedRepeats = 0;
+            while (LOG.size() >= LOG_LINES) {
+                LOG.removeFirst();
+            }
+            LOG.addLast(logLine(text));
+        }
+    }
+
+    // Seconds since the process started rather than a wall clock: what a reader needs from this is how
+    // long a source took and where a fifteen-second budget ran out, not what time it was.
+    private static String logLine(final String text) {
+        final long ms = monotonicTimeMs() - LOG_BASE_MS;
+        return String.format(Locale.US, "%6.2f %s", ms / 1000f, text);
+    }
+
+    private static long monotonicTimeMs() {
+        return System.nanoTime() / 1_000_000L;
+    }
+
+    /** The trace so far, oldest first; empty string when nothing has been traced. */
+    public static String recentLog() {
+        synchronized (LOG) {
+            if (LOG.isEmpty()) {
+                return "";
+            }
+            final StringBuilder sb = new StringBuilder();
+            for (String line : LOG) {
+                if (sb.length() > 0) {
+                    sb.append('\n');
+                }
+                sb.append(line);
+            }
+            return sb.toString();
         }
     }
 

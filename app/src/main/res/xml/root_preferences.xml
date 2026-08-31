@@ -11,65 +11,6 @@
             app:title="@string/pref_file_access"
             app:useSimpleSummaryProvider="true" />
 
-        <Preference
-            app:key="languageAudio"
-            app:title="@string/pref_language_audio" />
-
-        <ListPreference
-            app:key="menuOpacity"
-            app:defaultValue="88"
-            app:entries="@array/menu_opacity_entries"
-            app:entryValues="@array/menu_opacity_values"
-            app:title="@string/pref_menu_opacity"
-            app:useSimpleSummaryProvider="true" />
-
-        <SwitchPreferenceCompat
-            app:key="timeRemaining"
-            app:defaultValue="false"
-            app:summaryOn="@string/pref_time_remaining_on"
-            app:summaryOff="@string/pref_time_remaining_off"
-            app:title="@string/pref_time_remaining" />
-
-        <SwitchPreferenceCompat
-            app:key="showStats"
-            app:defaultValue="false"
-            app:summary="@string/pref_show_stats_summary"
-            app:title="@string/pref_show_stats" />
-
-        <SwitchPreferenceCompat
-            app:key="systemVolume"
-            app:defaultValue="true"
-            app:summaryOn="@string/pref_system_volume_on"
-            app:summaryOff="@string/pref_system_volume_off"
-            app:title="@string/pref_system_volume" />
-
-        <ListPreference
-            app:key="volumeBoost"
-            app:defaultValue="0"
-            app:entries="@array/volume_boost_entries"
-            app:entryValues="@array/volume_boost_values"
-            app:title="@string/pref_volume_boost"
-            app:useSimpleSummaryProvider="true" />
-
-        <SwitchPreferenceCompat
-            app:key="volumeGesturesEnabled"
-            app:defaultValue="true"
-            app:summary="@string/pref_volume_gestures_summary"
-            app:title="@string/pref_volume_gestures" />
-
-        <SwitchPreferenceCompat
-            app:key="brightnessGesturesEnabled"
-            app:defaultValue="true"
-            app:summary="@string/pref_brightness_gestures_summary"
-            app:title="@string/pref_brightness_gestures" />
-
-        <SwitchPreferenceCompat
-            app:key="holdSpeed"
-            app:defaultValue="true"
-            app:summaryOn="@string/pref_hold_speed_on"
-            app:summaryOff="@string/pref_hold_speed_off"
-            app:title="@string/pref_hold_speed" />
-
         <SwitchPreferenceCompat
             app:key="frameRateMatching"
             app:defaultValue="false"
@@ -79,7 +20,7 @@
 
         <SwitchPreferenceCompat
             app:key="allowSystemFrameRate"
-            app:defaultValue="false"
+            app:defaultValue="true"
             app:summaryOn="@string/pref_allow_system_framerate_on"
             app:summaryOff="@string/pref_allow_system_framerate_off"
             app:title="@string/pref_allow_system_framerate" />
@@ -91,62 +32,26 @@
             app:summaryOff="@string/pref_auto_pip_off"
             app:title="@string/pref_auto_pip" />
 
-        <SwitchPreferenceCompat
-            app:key="repeatToggle"
-            app:defaultValue="false"
-            app:summary="@string/pref_repeat_toggle_summary"
-            app:title="@string/pref_repeat_toggle" />
-
-        <SwitchPreferenceCompat
-            app:key="tvSingleBack"
-            app:defaultValue="false"
-            app:summaryOn="@string/pref_tv_single_back_on"
-            app:summaryOff="@string/pref_tv_single_back_off"
-            app:title="@string/pref_tv_single_back" />
-
-        <SwitchPreferenceCompat
-            app:key="keepAwakeOnPause"
-            app:defaultValue="true"
-            app:summaryOn="@string/pref_keep_awake_on_pause_on"
-            app:summaryOff="@string/pref_keep_awake_on_pause_off"
-            app:title="@string/pref_keep_awake_on_pause" />
-
     </PreferenceCategory>
 
-    <PreferenceCategory app:title="@string/pref_skip_header">
+    <PreferenceCategory app:title="@string/pref_audio_header">
 
-        <SwitchPreferenceCompat
-            app:key="skipEnabled"
-            app:defaultValue="true"
-            app:summaryOn="@string/pref_skip_enabled_on"
-            app:summaryOff="@string/pref_skip_enabled_off"
-            app:title="@string/pref_skip_enabled" />
+        <Preference
+            app:key="languageAudio"
+            app:title="@string/pref_language_audio" />
 
-        <ListPreference
-            app:key="skipMode"
-            app:defaultValue="full"
-            app:dependency="skipEnabled"
-            app:entries="@array/skip_mode_entries"
-            app:entryValues="@array/skip_mode_values"
-            app:title="@string/pref_skip_mode"
-            app:useSimpleSummaryProvider="true" />
+        <Preference
+            app:key="resetRevokedAudioMimes"
+            app:summary="@string/pref_reset_audio_workarounds_summary"
+            app:title="@string/pref_reset_audio_workarounds" />
 
         <ListPreference
-            app:key="skipModeCredits"
-            app:defaultValue="full"
-            app:dependency="skipEnabled"
-            app:entries="@array/skip_mode_entries"
-            app:entryValues="@array/skip_mode_values"
-            app:title="@string/pref_skip_mode_credits"
+            app:key="volumeBoost"
+            app:defaultValue="0"
+            app:entries="@array/volume_boost_entries"
+            app:entryValues="@array/volume_boost_values"
+            app:title="@string/pref_volume_boost"
             app:useSimpleSummaryProvider="true" />
-
-        <SwitchPreferenceCompat
-            app:key="skipFetchOnline"
-            app:defaultValue="true"
-            app:dependency="skipEnabled"
-            app:summaryOn="@string/pref_skip_fetch_on"
-            app:summaryOff="@string/pref_skip_fetch_off"
-            app:title="@string/pref_skip_fetch" />
 
     </PreferenceCategory>
 
@@ -319,8 +224,121 @@
 
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="@string/pref_controls_header">
+
+        <SwitchPreferenceCompat
+            app:key="systemVolume"
+            app:defaultValue="true"
+            app:summaryOn="@string/pref_system_volume_on"
+            app:summaryOff="@string/pref_system_volume_off"
+            app:title="@string/pref_system_volume" />
+
+        <SwitchPreferenceCompat
+            app:key="disableVolumeBrightnessGestures"
+            app:defaultValue="false"
+            app:summaryOn="@string/pref_disable_volume_brightness_gestures_on"
+            app:summaryOff="@string/pref_disable_volume_brightness_gestures_off"
+            app:title="@string/pref_disable_volume_brightness_gestures" />
+
+        <ListPreference
+            app:key="holdSpeedMode"
+            app:defaultValue="adjust"
+            app:entries="@array/hold_speed_entries"
+            app:entryValues="@array/hold_speed_values"
+            app:title="@string/pref_hold_speed"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            app:key="repeatToggle"
+            app:defaultValue="false"
+            app:summary="@string/pref_repeat_toggle_summary"
+            app:title="@string/pref_repeat_toggle" />
+
+        <SwitchPreferenceCompat
+            app:key="tvSingleBack"
+            app:defaultValue="false"
+            app:summaryOn="@string/pref_tv_single_back_on"
+            app:summaryOff="@string/pref_tv_single_back_off"
+            app:title="@string/pref_tv_single_back" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/pref_onscreen_header">
+
+        <ListPreference
+            app:key="menuOpacity"
+            app:defaultValue="88"
+            app:entries="@array/menu_opacity_entries"
+            app:entryValues="@array/menu_opacity_values"
+            app:title="@string/pref_menu_opacity"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            app:key="timeRemaining"
+            app:defaultValue="false"
+            app:summaryOn="@string/pref_time_remaining_on"
+            app:summaryOff="@string/pref_time_remaining_off"
+            app:title="@string/pref_time_remaining" />
+
+        <SwitchPreferenceCompat
+            app:key="showStats"
+            app:defaultValue="false"
+            app:summary="@string/pref_show_stats_summary"
+            app:title="@string/pref_show_stats" />
+
+        <SwitchPreferenceCompat
+            app:key="keepAwakeOnPause"
+            app:defaultValue="true"
+            app:summaryOn="@string/pref_keep_awake_on_pause_on"
+            app:summaryOff="@string/pref_keep_awake_on_pause_off"
+            app:title="@string/pref_keep_awake_on_pause" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/pref_features_header">
+
+        <PreferenceScreen
+            app:key="skipScreen"
+            app:summary="@string/pref_skip_header_summary"
+            app:title="@string/pref_skip_header">
+
+            <SwitchPreferenceCompat
+                app:key="skipEnabled"
+                app:defaultValue="true"
+                app:summaryOn="@string/pref_skip_enabled_on"
+                app:summaryOff="@string/pref_skip_enabled_off"
+                app:title="@string/pref_skip_enabled" />
+
+            <ListPreference
+                app:key="skipMode"
+                app:defaultValue="full"
+                app:dependency="skipEnabled"
+                app:entries="@array/skip_mode_entries"
+                app:entryValues="@array/skip_mode_values"
+                app:title="@string/pref_skip_mode"
+                app:useSimpleSummaryProvider="true" />
+
+            <ListPreference
+                app:key="skipModeCredits"
+                app:defaultValue="full"
+                app:dependency="skipEnabled"
+                app:entries="@array/skip_mode_entries"
+                app:entryValues="@array/skip_mode_values"
+                app:title="@string/pref_skip_mode_credits"
+                app:useSimpleSummaryProvider="true" />
+
+            <SwitchPreferenceCompat
+                app:key="skipFetchOnline"
+                app:defaultValue="true"
+                app:dependency="skipEnabled"
+                app:summaryOn="@string/pref_skip_fetch_on"
+                app:summaryOff="@string/pref_skip_fetch_off"
+                app:title="@string/pref_skip_fetch" />
+
+        </PreferenceScreen>
+
     <PreferenceScreen
-        app:key="togetherSettings"
+        app:key="togetherScreen"
         app:summary="@string/pref_together_summary"
         app:title="@string/together_title">
 
@@ -359,7 +377,9 @@
             app:key="togetherInvitePage"
             app:title="@string/pref_together_invite_page" />
 
-    </PreferenceScreen>
+        </PreferenceScreen>
+
+    </PreferenceCategory>
 
     <PreferenceCategory app:title="@string/pref_dangerous_header">
 

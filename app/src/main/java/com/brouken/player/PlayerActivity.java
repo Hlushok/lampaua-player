@@ -60,6 +60,7 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.WindowManager;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
@@ -101,8 +102,9 @@ import androidx.media3.common.Timeline;
 import androidx.media3.common.audio.AudioProcessor;
 import androidx.media3.common.util.Util;
 import androidx.media3.datasource.DataSource;
-import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.datasource.DefaultDataSource;
 import androidx.media3.datasource.HttpDataSource;
+import androidx.media3.datasource.okhttp.OkHttpDataSource;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.DecoderCounters;
 import androidx.media3.exoplayer.ExoPlaybackException;
@@ -110,6 +112,7 @@ import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.Renderer;
 import androidx.media3.exoplayer.SeekParameters;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
+import androidx.media3.exoplayer.audio.AudioRendererEventListener;
 import androidx.media3.exoplayer.audio.AudioSink;
 import androidx.media3.exoplayer.audio.DefaultAudioSink;
 import androidx.media3.exoplayer.audio.ForwardingAudioSink;
@@ -225,8 +228,6 @@ public class PlayerActivity extends Activity {
     public static boolean systemVolume = true;
     public static float playerVolume = 100f;
     public static int maxVolumeBoost = 0;
-    public static boolean volumeGesturesEnabled = true;
-    public static boolean brightnessGesturesEnabled = true;
     private boolean isScaling = false;
     private boolean isScaleStarting = false;
     private float scaleFactor = 1.0f;
@@ -255,6 +256,8 @@ public class PlayerActivity extends Activity {
     private static final long SWIPE_UNLOCK_TIMEOUT_MS = 3_000L;
     private static final long FRAME_RATE_SWITCH_TIMEOUT_MS = 1_500L;
     private static final long CHROME_FADE_MS = 250L;
+    /** Longest rolling window that still represents a live broadcast rather than a recording. */
+    private static final long LIVE_WINDOW_MAX_MS = 10 * 60_000L;
     private static final long SUBTITLE_MISS_TTL_MS = 30 * 60 * 1000L;
     private static final double SUBTITLE_OFFSET_MAX_SEC = 180.0;
     private static final double SUBTITLE_OFFSET_STEP_SEC = 0.25;
@@ -269,6 +272,20 @@ public class PlayerActivity extends Activity {
             R.string.skip_mode_auto_short, R.string.skip_mode_off_short
     };
     private static final Map<String, Long> subtitleSearchMisses = new ConcurrentHashMap<>();
+    /** Platform audio decoders that are bypassed for Matroska on TV in favour of passthrough/FFmpeg. */
+    private static final List<String> HEAVY_MKV_AUDIO_MIMES = Arrays.asList(
+            MimeTypes.AUDIO_AC3, MimeTypes.AUDIO_E_AC3, MimeTypes.AUDIO_E_AC3_JOC,
+            MimeTypes.AUDIO_DTS, MimeTypes.AUDIO_DTS_HD, MimeTypes.AUDIO_DTS_EXPRESS,
+            MimeTypes.AUDIO_TRUEHD);
+
+    /** Shared patient connection pool for torrent bridges and other bursty HTTP sources. */
+    private static final okhttp3.OkHttpClient MEDIA_HTTP_CLIENT = new okhttp3.OkHttpClient.Builder()
+            .connectTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .build();
 
     private CoordinatorLayout coordinatorLayout;
     private TextView titleView;
@@ -403,7 +420,10 @@ public class PlayerActivity extends Activity {
     private Dv7Converter dv7Converter;
     private final Map<String, List<TrackMetadata>> containerTracks = new ConcurrentHashMap<>();
     private final Map<String, Long> contentLengths = new ConcurrentHashMap<>();
+    private final Map<String, String> resolvedMediaTypes = new ConcurrentHashMap<>();
     private final Map<String, String> resolvedTrackNames = new HashMap<>();
+    private DefaultMediaSourceFactory mediaSourceFactory;
+    private DataSource.Factory uncachedUpstream;
     private int av1DroppedFrames;
     private int totalDroppedFrames;
     private long bandwidthBitrate;
@@ -506,15 +526,21 @@ public class PlayerActivity extends Activity {
     private final TvSeekController tvSeekController = new TvSeekController();
     private final BackExitGuard backExitGuard = new BackExitGuard(2_000L);
     private static final long DIM_DELAY_MS = 60_000L;
+    private static final long PAUSE_RELEASE_MS = 5 * 60 * 1000L;
     private static final long KEEP_AWAKE_MAX_MS = 2 * 60 * 60 * 1000L;
     private static final float DIM_ALPHA = 0.85f;
     private static final int DIM_IN_MS = 800;
     private static final int DIM_OUT_MS = 300;
     private View dimOverlay;
     private final Runnable dimRunnable = this::dimPausedScreen;
-    private final Runnable keepAwakeGiveUpRunnable = () -> {
-        if (playerView != null) playerView.setKeepScreenOn(false);
+    private boolean stoppedForPause;
+    private final Runnable pauseReleaseRunnable = () -> {
+        if (player == null || player.getPlayWhenReady() || player.isPlaying()) return;
+        Utils.log("pause: releasing the source after " + PAUSE_RELEASE_MS / 1000 + "s");
+        stoppedForPause = true;
+        player.stop();
     };
+    private final Runnable keepAwakeGiveUpRunnable = () -> holdScreen(false);
     private final Runnable hidePausedControllerRunnable = () -> {
         if (player != null && !player.getPlayWhenReady() && controllerVisibleFully
                 && !locked && !isScrubbing) {
@@ -572,6 +598,9 @@ public class PlayerActivity extends Activity {
                 @Override public void onMediaTypeResolved(Uri requestedUri, String mimeType) {
                     detectedManifestUri = requestedUri == null ? null : requestedUri.toString();
                     detectedManifestType = mimeType;
+                    if (requestedUri != null && mimeType != null) {
+                        resolvedMediaTypes.put(requestedUri.toString(), mimeType);
+                    }
                 }
 
                 @Override public void onResolverNotReady(Uri requestedUri) {
@@ -648,6 +677,9 @@ public class PlayerActivity extends Activity {
     DisplayManager displayManager;
     DisplayManager.DisplayListener displayListener;
     SubtitleFinder subtitleFinder;
+    // The media whose neighbouring subtitle names are still to be guessed, or null when there is nothing
+    // waiting. Set while the intent is read, spent on the first track change — see startSubtitleGuess().
+    private Uri pendingSubtitleGuessUri;
 
     Runnable barsHider = () -> {
         if (playerView != null && !controllerVisible) {
@@ -689,8 +721,6 @@ public class PlayerActivity extends Activity {
         systemVolume = mPrefs.systemVolume;
         playerVolume = mPrefs.playerVolume;
         maxVolumeBoost = mPrefs.volumeBoost;
-        volumeGesturesEnabled = mPrefs.volumeGesturesEnabled;
-        brightnessGesturesEnabled = mPrefs.brightnessGesturesEnabled;
         boostLevel = 0;
         if (mPrefs.suppressResume) {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
@@ -1046,6 +1076,11 @@ public class PlayerActivity extends Activity {
         }
 
         controlView = playerView.findViewById(R.id.exo_controller);
+        if (isTvBox && controlView != null) {
+            // D-pad seeking is handled by the explicit key ladder below; Media3's scrub mode would
+            // compete for the same Left/Right events and leave focus trapped on the time bar.
+            controlView.setTimeBarScrubbingEnabled(false);
+        }
         final TextView durationView = playerView.findViewById(R.id.exo_duration);
         final StringBuilder timeBuilder = new StringBuilder();
         final Formatter timeFormatter = new Formatter(timeBuilder, Locale.getDefault());
@@ -1849,6 +1884,7 @@ public class PlayerActivity extends Activity {
     private boolean previewTvSeek(int direction, KeyEvent event) {
         if (player == null || !player.isCurrentMediaItemSeekable()) return false;
         playerView.removeCallbacks(playerView.textClearRunnable);
+        playerView.showSeekProgress();
         long eventTime = event == null ? SystemClock.uptimeMillis() : event.getEventTime();
         if (event != null && event.getRepeatCount() > 0) {
             tvSeekController.hold(direction, eventTime);
@@ -1856,9 +1892,14 @@ public class PlayerActivity extends Activity {
             tvSeekController.press(direction, eventTime);
         }
         long current = player.getCurrentPosition();
-        long target = tvSeekController.previewTarget(current, player.getDuration());
+        long duration = player.getDuration();
+        long target = tvSeekController.previewTarget(current, duration);
+        StringBuilder position = new StringBuilder(Utils.formatMilis(target));
+        if (duration > 0 && duration != C.TIME_UNSET) {
+            position.append(" · ").append(Math.round(target * 100f / duration)).append('%');
+        }
         playerView.setCustomErrorMessage(Utils.formatMilisSign(target - current)
-                + "\n" + Utils.formatMilis(target));
+                + "\n" + position);
         return true;
     }
 
@@ -2802,6 +2843,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void showEmptyState() {
+        playerView.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         restorePlayState = false;
         focusPlay = false;
         cancelPlaybackWatchdogs();
@@ -2826,6 +2868,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void hideEmptyState() {
+        playerView.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         if (emptyStateView != null) emptyStateView.setVisibility(View.GONE);
         playerView.setControllerAutoShow(true);
         Utils.setOrientation(this, mPrefs.orientation);
@@ -4227,11 +4270,16 @@ public class PlayerActivity extends Activity {
     private PlaybackStatistics.Snapshot playbackStatisticsSnapshot() {
         Format video = player.getVideoFormat();
         Format audio = player.getAudioFormat();
+        String videoCodec = video == null ? null : shortCodec(video.sampleMimeType);
+        String dvStatus = dolbyVisionStatus();
+        if (dvStatus != null) {
+            videoCodec = videoCodec == null ? dvStatus : videoCodec + " · " + dvStatus;
+        }
         return new PlaybackStatistics.Snapshot(
                 mediaContainerLabel(),
                 video == null ? 0 : video.width,
                 video == null ? 0 : video.height,
-                video == null ? null : shortCodec(video.sampleMimeType),
+                videoCodec,
                 videoFrameRate(),
                 videoBitrate(),
                 player.getTotalBufferedDuration(),
@@ -4308,6 +4356,14 @@ public class PlayerActivity extends Activity {
                 .append('\n');
         report.append("Video freeze: attempts=").append(videoFreezePolicy.recoveries())
                 .append(", last=").append(lastVideoFreezeRecovery).append('\n');
+        if (mPrefs != null && !mPrefs.revokedAudioMimes.isEmpty()) {
+            report.append("Audio passthrough revoked: ")
+                    .append(mPrefs.revokedAudioMimes).append('\n');
+        }
+        if (!audioRecoveryState.blockedPassthroughMimeTypes().isEmpty()) {
+            report.append("Audio passthrough blocked this run: ")
+                    .append(audioRecoveryState.blockedPassthroughMimeTypes()).append('\n');
+        }
         report.append("Dolby Vision: mapProfile7=").append(mPrefs != null && mPrefs.mapDV7ToHevc)
                 .append(", forceHevc=").append(forceHevcForDolbyVision)
                 .append(", status=").append(dv7Converter == null
@@ -4316,12 +4372,22 @@ public class PlayerActivity extends Activity {
             report.append("Watch Together: active, connected=").append(together.connected())
                     .append(", peers=").append(together.peers()).append('\n');
         }
+        String trace = Utils.recentLog();
+        if (!trace.isEmpty()) report.append("\nTrace:\n").append(trace).append('\n');
         if (error != null) {
             report.append("\nError: ").append(error.getClass().getName()).append('\n');
             report.append("Root message: ").append(DiagnosticReport.rootMessage(error)).append('\n');
             report.append("\nStack trace:\n").append(DiagnosticReport.stackTrace(error));
         }
         return DiagnosticReport.sanitizeText(report.toString());
+    }
+
+    private String dolbyVisionStatus() {
+        if (forceHevcForDolbyVision) return "DV → HDR10 · decoder failed";
+        if (dv7Converter != null) return dv7Converter.shortStatus();
+        Format video = player == null ? null : player.getVideoFormat();
+        return video != null && Dv7Converter.isDolbyVisionProfile7(video)
+                ? "DV 7 → HDR10 · by setting" : null;
     }
 
     private String playbackStateName(int state) {
@@ -4538,7 +4604,10 @@ public class PlayerActivity extends Activity {
         if (lampaClock != null) {
             lampaClock.setText(lampaClockFormatter.format(new Date()));
             String finish = "";
-            if (player != null && player.getDuration() != C.TIME_UNSET && player.getDuration() > 0) {
+            if (isLiveStream()) {
+                finish = getString(R.string.time_live);
+            } else if (player != null && player.getDuration() != C.TIME_UNSET
+                    && player.getDuration() > 0) {
                 long remaining = Math.max(0, player.getDuration() - player.getCurrentPosition());
                 float speed = player.getPlaybackParameters().speed;
                 if (speed > 0) remaining = (long) (remaining / speed);
@@ -5673,8 +5742,6 @@ public class PlayerActivity extends Activity {
             systemVolume = mPrefs.systemVolume;
             playerVolume = mPrefs.playerVolume;
             maxVolumeBoost = mPrefs.volumeBoost;
-            volumeGesturesEnabled = mPrefs.volumeGesturesEnabled;
-            brightnessGesturesEnabled = mPrefs.brightnessGesturesEnabled;
             if (boostLevel * 10 > maxVolumeBoost) {
                 boostLevel = (int) Math.ceil(maxVolumeBoost / 10f);
             }
@@ -5972,6 +6039,8 @@ public class PlayerActivity extends Activity {
         suppressAutomaticSubtitleSearch();
         chooseSecondarySubtitle(null);
         clearPaintedSubtitle();
+        if (subtitleOffset != null) subtitleOffset.hide();
+        if (secondarySubtitleOffset != null) secondarySubtitleOffset.hide();
         mainLineOff = true;
         player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
                 .clearOverridesOfType(C.TRACK_TYPE_TEXT)
@@ -6262,8 +6331,8 @@ public class PlayerActivity extends Activity {
                     generation, id, key, cachePrefix, requested, secondary);
             if (!found && generation == subtitleSearchGeneration
                     && !Thread.currentThread().isInterrupted()) {
-                runOnUiThread(() -> Toast.makeText(
-                        this, R.string.subtitle_search_none, Toast.LENGTH_SHORT).show());
+                runOnUiThread(() -> showSnack(getString(R.string.subtitle_search_none),
+                        playbackReport(null)));
             }
         }, "ManualSubtitleSearch");
         worker.setDaemon(true);
@@ -6612,15 +6681,24 @@ public class PlayerActivity extends Activity {
     }
 
     private void maybeSearchSubtitlesOnline(Tracks tracks) {
+        if (isLiveStream()) {
+            Utils.log("subtitles: live stream, not searching online");
+            return;
+        }
         if (player == null || !mPrefs.subtitleSearch || tracks.getGroups().isEmpty()
                 || player.getPlaybackState() == Player.STATE_IDLE) {
+            Utils.log("subtitles: not searching, enabled=" + mPrefs.subtitleSearch
+                    + ", player=" + (player != null) + ", groups=" + tracks.getGroups().size());
             return;
         }
         List<String> preferred = AudioLanguagePriority.parse(mPrefs.languageSubtitle);
         List<String> secondaryPreferred = secondarySubtitleLanguages();
         boolean translateEnabled = UkrainianSubtitlePolicy.enabled(
                 mPrefs.subtitleTranslate, preferred);
-        if (preferred.isEmpty() && secondaryPreferred.isEmpty() && !translateEnabled) return;
+        if (preferred.isEmpty() && secondaryPreferred.isEmpty() && !translateEnabled) {
+            Utils.log("subtitles: no language and translation is off, not searching");
+            return;
+        }
 
         Set<String> present = new HashSet<>();
         for (Tracks.Group group : tracks.getGroups()) {
@@ -6650,11 +6728,25 @@ public class PlayerActivity extends Activity {
             secondaryWanted.remove(wanted.get(0));
         }
         if (translateMissing) secondaryWanted.remove(translateTarget);
-        if (!translateMissing && wanted.isEmpty() && secondaryWanted.isEmpty()) return;
+        if (!translateMissing && wanted.isEmpty() && secondaryWanted.isEmpty()) {
+            Utils.log("subtitles: requested languages already present " + present);
+            return;
+        }
 
         MediaId id = currentMediaId();
         String sources = enabledSubtitleSources();
-        if (id.isEmpty() || sources.isEmpty() || id.key().equals(subtitleSearchSuppressed)) return;
+        if (id.isEmpty()) {
+            Utils.log("subtitles: no title id, not searching");
+            return;
+        }
+        if (sources.isEmpty()) {
+            Utils.log("subtitles: no source enabled, not searching");
+            return;
+        }
+        if (id.key().equals(subtitleSearchSuppressed)) {
+            Utils.log("subtitles: automatic search suppressed for this item");
+            return;
+        }
         List<String> direct = translateMissing
                 ? UkrainianSubtitlePolicy.directLanguages(preferred) : wanted;
         List<String> fallback = translateMissing
@@ -6663,11 +6755,18 @@ public class PlayerActivity extends Activity {
         String mode = translateMissing
                 ? "translate|" + translateTarget + "|" + fallback + "|"
                 + mPrefs.subtitleTranslateBackends : "direct";
+        Utils.log("subtitles: auto search, present=" + present + ", wanted=" + wanted
+                + ", secondary=" + secondaryWanted
+                + ", strict=" + mPrefs.subtitleSearchStrict
+                + ", translate=" + translateMissing + "→" + translateTarget
+                + ", backends=" + mPrefs.subtitleTranslateBackends
+                + ", sources=" + sources);
         String key = id.key() + "|main=" + direct + "|secondary=" + secondaryWanted
                 + "|" + sources + "|" + mode;
         if (key.equals(subtitleSearchStarted)) return;
         Long missedAt = subtitleSearchMisses.get(key);
         if (missedAt != null && System.currentTimeMillis() - missedAt < SUBTITLE_MISS_TTL_MS) {
+            Utils.log("subtitles: recent miss cached for this request, not repeating");
             return;
         }
 
@@ -7005,6 +7104,15 @@ public class PlayerActivity extends Activity {
                 .setPreferredTextLanguages(languages.toArray(new String[0])));
     }
 
+    private static boolean isMatroskaMedia(Uri uri, String mediaType) {
+        if (MimeTypes.VIDEO_MATROSKA.equals(mediaType)) return true;
+        if (uri == null) return false;
+        if (TrackNameParsingDataSource.isMatroska(uri)) return true;
+        String path = uri.getPath();
+        return path != null && path.length() >= 4
+                && path.regionMatches(true, path.length() - 4, ".mkv", 0, 4);
+    }
+
     public void initializePlayer() {
         cancelFrameRateSwitchWait();
         play = false;
@@ -7085,7 +7193,28 @@ public class PlayerActivity extends Activity {
         if (decoderCompatibilityMode) {
             decoderPriority = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER;
         }
+        final Uri rendererMediaUri = mPrefs.mediaUri;
+        final String rendererMediaType = mPrefs.mediaType;
         DefaultRenderersFactory baseRenderersFactory = new DefaultRenderersFactory(this) {
+            @Override
+            protected void buildAudioRenderers(Context context, int extensionRendererMode,
+                                               MediaCodecSelector mediaCodecSelector,
+                                               boolean enableDecoderFallback, AudioSink audioSink,
+                                               Handler eventHandler,
+                                               AudioRendererEventListener eventListener,
+                                               ArrayList<Renderer> out) {
+                int mode = extensionRendererMode;
+                if ((isTvBox || !mPrefs.revokedAudioMimes.isEmpty()
+                        || !audioRecoveryState.blockedPassthroughMimeTypes().isEmpty())
+                        && mode == EXTENSION_RENDERER_MODE_OFF) {
+                    // Heavy Matroska audio may be hidden from the platform decoder below. Keep FFmpeg
+                    // available behind the platform renderer so unsupported TV audio still has a path.
+                    mode = EXTENSION_RENDERER_MODE_ON;
+                }
+                super.buildAudioRenderers(context, mode, mediaCodecSelector,
+                        enableDecoderFallback, audioSink, eventHandler, eventListener, out);
+            }
+
             @Override
             protected AudioSink buildAudioSink(Context context, boolean enableFloatOutput,
                                                boolean enableAudioTrackPlaybackParams) {
@@ -7095,8 +7224,9 @@ public class PlayerActivity extends Activity {
                         .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
                         .setAudioProcessors(new AudioProcessor[]{boostProcessor})
                         .build();
-                audioSink = new TrackingAudioSink(
-                        sink, audioRecoveryState.blockedPassthroughMimeTypes());
+                Set<String> blocked = new HashSet<>(mPrefs.revokedAudioMimes);
+                blocked.addAll(audioRecoveryState.blockedPassthroughMimeTypes());
+                audioSink = new TrackingAudioSink(sink, blocked);
                 return audioSink;
             }
 
@@ -7133,12 +7263,17 @@ public class PlayerActivity extends Activity {
                 .setExtensionRendererMode(decoderPriority)
                 .setEnableDecoderFallback(true)
                 .setMapDV7ToHevc(mPrefs.mapDV7ToHevc || decoderCompatibilityMode);
-        if (forceHevcForDolbyVision) {
-            renderersFactory.setMediaCodecSelector((mimeType, secure, tunneling) ->
-                    MediaCodecSelector.DEFAULT.getDecoderInfos(
-                            MimeTypes.VIDEO_DOLBY_VISION.equals(mimeType)
-                                    ? MimeTypes.VIDEO_H265 : mimeType,
-                            secure, tunneling));
+        if (forceHevcForDolbyVision || isTvBox) {
+            renderersFactory.setMediaCodecSelector((mimeType, secure, tunneling) -> {
+                if (isTvBox && HEAVY_MKV_AUDIO_MIMES.contains(mimeType)
+                        && isMatroskaMedia(rendererMediaUri, rendererMediaType)) {
+                    return Collections.emptyList();
+                }
+                return MediaCodecSelector.DEFAULT.getDecoderInfos(
+                        forceHevcForDolbyVision && MimeTypes.VIDEO_DOLBY_VISION.equals(mimeType)
+                                ? MimeTypes.VIDEO_H265 : mimeType,
+                        secure, tunneling);
+            });
         }
 
         final boolean convertDv7 = !mPrefs.mapDV7ToHevc && !forceHevcForDolbyVision;
@@ -7149,39 +7284,60 @@ public class PlayerActivity extends Activity {
                 convertDv7 ? dv7Converter : extractorsFactory;
 
         ExoPlayer.Builder playerBuilder = new ExoPlayer.Builder(this, renderersFactory)
-                .setTrackSelector(trackSelector)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(
-                        this, activeExtractorsFactory));
+                .setTrackSelector(trackSelector);
+
+        DataSource.Factory upstreamFactory = new DefaultDataSource.Factory(this);
+        uncachedUpstream = null;
+
+        if (haveMedia && isNetworkUri && mPrefs.mediaUri.getScheme() != null
+                && mPrefs.mediaUri.getScheme().toLowerCase(Locale.ROOT).startsWith("http")) {
+            HashMap<String, String> headers = new HashMap<>();
+            String userAgent = null;
+            for (Map.Entry<String, String> header : apiHeaders.entrySet()) {
+                if (header.getKey() == null || header.getValue() == null) continue;
+                if ("User-Agent".equalsIgnoreCase(header.getKey())) {
+                    userAgent = header.getValue();
+                } else {
+                    headers.put(header.getKey(), header.getValue());
+                }
+            }
+            String userInfo = mPrefs.mediaUri.getUserInfo();
+            if (userInfo != null && userInfo.length() > 0 && userInfo.contains(":")) {
+                headers.put("Authorization", "Basic "
+                        + Base64.encodeToString(userInfo.getBytes(), Base64.NO_WRAP));
+            }
+
+            OkHttpDataSource.Factory httpFactory = new OkHttpDataSource.Factory(MEDIA_HTTP_CLIENT);
+            if (userAgent != null && !userAgent.isEmpty()) httpFactory.setUserAgent(userAgent);
+            if (!headers.isEmpty()) httpFactory.setDefaultRequestProperties(headers);
+
+            DataSource.Factory rangeSeeded = new androidx.media3.datasource.ResolvingDataSource.Factory(
+                    new DefaultDataSource.Factory(this, httpFactory),
+                    dataSpec -> dataSpec.position == 0 && dataSpec.length == C.LENGTH_UNSET
+                            && Util.inferContentType(dataSpec.uri) == C.CONTENT_TYPE_OTHER
+                            ? dataSpec.withAdditionalHeaders(
+                                    Collections.singletonMap("Range", "bytes=0-"))
+                            : dataSpec);
+
+            String mediaMime = getStreamMimeType(mPrefs.mediaUri,
+                    resolvedMediaTypes.containsKey(mPrefs.mediaUri.toString())
+                            ? resolvedMediaTypes.get(mPrefs.mediaUri.toString()) : mPrefs.mediaType);
+            boolean adaptive = Util.inferContentType(mPrefs.mediaUri) != C.CONTENT_TYPE_OTHER
+                    || Util.inferContentTypeForUriAndMimeType(mPrefs.mediaUri, mediaMime)
+                    != C.CONTENT_TYPE_OTHER;
+            MediaCache.keepOnly(this, mPrefs.mediaUri.toString());
+            upstreamFactory = adaptive ? rangeSeeded : MediaCache.wrap(this, rangeSeeded);
+            uncachedUpstream = adaptive ? null : rangeSeeded;
+        }
+
+        DataSource.Factory dataSourceFactory = new TrackNameParsingDataSource.Factory(
+                upstreamFactory, trackNameListener);
+        mediaSourceFactory = new DefaultMediaSourceFactory(this, activeExtractorsFactory)
+                .setDataSourceFactory(dataSourceFactory);
+        playerBuilder.setMediaSourceFactory(mediaSourceFactory);
 
         playerBuilder.setLoadControl(
                 RebufferPolicy.forMedia(isNetworkUri, optimize4k).build());
-
-        if (haveMedia && isNetworkUri) {
-            if (mPrefs.mediaUri.getScheme().toLowerCase().startsWith("http")) {
-                HashMap<String, String> headers = new HashMap<>(apiHeaders);
-                String userInfo = mPrefs.mediaUri.getUserInfo();
-                if (userInfo != null && userInfo.length() > 0 && userInfo.contains(":")) {
-                    headers.put("Authorization", "Basic " + Base64.encodeToString(userInfo.getBytes(), Base64.NO_WRAP));
-                }
-                String streamMimeType = getStreamMimeType(mPrefs.mediaUri, mPrefs.mediaType);
-                if (RangeRequestPolicy.shouldSeed(
-                        mPrefs.mediaUri.toString(), streamMimeType, headers)) {
-                    // Default properties are lower priority than Media3's calculated seek/segment range.
-                    headers.put("Range", RangeRequestPolicy.WHOLE_RESOURCE);
-                }
-                DefaultHttpDataSource.Factory defaultHttpDataSourceFactory = new DefaultHttpDataSource.Factory()
-                        .setAllowCrossProtocolRedirects(true)
-                        .setConnectTimeoutMs(15000)
-                        .setReadTimeoutMs(30000);
-                if (!headers.isEmpty()) defaultHttpDataSourceFactory.setDefaultRequestProperties(headers);
-                DataSource.Factory inspectedDataSource = new ResolverResponseDataSource.Factory(
-                        defaultHttpDataSourceFactory, resolverResponseListener);
-                DataSource.Factory metadataDataSource = new TrackNameParsingDataSource.Factory(
-                        inspectedDataSource, trackNameListener);
-                playerBuilder.setMediaSourceFactory(new DefaultMediaSourceFactory(
-                        metadataDataSource, activeExtractorsFactory));
-            }
-        }
 
         player = playerBuilder.build();
         audioRecoveryState.clearRebuildRequest();
@@ -7383,7 +7539,9 @@ public class PlayerActivity extends Activity {
         if (playerView != null) {
             playerView.removeCallbacks(audioRestartRunnable);
             playerView.removeCallbacks(hidePausedControllerRunnable);
+            playerView.removeCallbacks(pauseReleaseRunnable);
         }
+        stoppedForPause = false;
         audioRestartInFlight = false;
         audioRestartRetries = 0;
         if (save) {
@@ -7411,6 +7569,8 @@ public class PlayerActivity extends Activity {
             audioSink = null;
             boostProcessor = null;
         }
+        mediaSourceFactory = null;
+        uncachedUpstream = null;
         subtitleOffset = null;
         secondarySubtitleOffset = null;
         if (secondarySubtitles != null) secondarySubtitles.clear();
@@ -7462,13 +7622,22 @@ public class PlayerActivity extends Activity {
                 break;
             }
         }
+        if (mime == null && error instanceof ExoPlaybackException) {
+            Format failed = ((ExoPlaybackException) error).rendererFormat;
+            if (failed != null && MimeTypes.isAudio(failed.sampleMimeType)) {
+                mime = failed.sampleMimeType;
+            }
+        }
         if (mime == null && player.getAudioFormat() != null) {
             mime = player.getAudioFormat().sampleMimeType;
         }
         if (mime == null || audioRecoveryState.blockedPassthroughMimeTypes().contains(mime)) {
             return false;
         }
+        boolean persist = error.errorCode
+                == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED;
         audioRecoveryState.onWriteFailure(mime);
+        if (persist) mPrefs.revokeAudioMime(mime);
         audioSink.block(mime);
         restorePlayState = player.getPlayWhenReady();
         savePlayer();
@@ -7515,6 +7684,13 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onPlayWhenReadyChanged(boolean playWhenReady, int reason) {
+            if (playWhenReady && stoppedForPause) {
+                stoppedForPause = false;
+                if (player != null && player.getPlaybackState() == Player.STATE_IDLE) {
+                    Utils.log("pause: re-preparing after the source was let go");
+                    player.prepare();
+                }
+            }
             if (!playWhenReady) {
                 playerView.removeCallbacks(audioRestartRunnable);
                 audioRecoveryState.onPause();
@@ -7527,6 +7703,13 @@ public class PlayerActivity extends Activity {
             if (subtitleOffset != null) subtitleOffset.wake();
             if (secondarySubtitleOffset != null) secondarySubtitleOffset.wake();
             resetPausedScreenGuard();
+
+            // A pause by the viewer, not a stall: playWhenReady is what separates them, and only the
+            // first should start the clock on letting the source go.
+            playerView.removeCallbacks(pauseReleaseRunnable);
+            if (!isPlaying && player != null && !player.getPlayWhenReady()) {
+                playerView.postDelayed(pauseReleaseRunnable, PAUSE_RELEASE_MS);
+            }
 
             if (Utils.isPiPSupported(PlayerActivity.this)) {
                 if (isPlaying) {
@@ -7738,6 +7921,7 @@ public class PlayerActivity extends Activity {
             updateSubtitleTimeline(tracks);
             autoFillSecondarySubtitle();
             if (playerView != null) playerView.post(PlayerActivity.this::updateSubtitleButton);
+            startSubtitleGuess();
             maybeSearchSubtitlesOnline(tracks);
         }
 
@@ -7759,6 +7943,7 @@ public class PlayerActivity extends Activity {
                         alternateStreamTypeTried = true;
                         forcedStreamMimeType = detectedManifest;
                         restorePlayState = true;
+                        dropMediaCache();
                         initializePlayer();
                         return;
                     }
@@ -7892,6 +8077,14 @@ public class PlayerActivity extends Activity {
         detectedManifestUri = null;
         detectedManifestType = null;
         return result;
+    }
+
+    /** Removes the progressive head cache from a player whose response proved to be adaptive. */
+    private void dropMediaCache() {
+        if (uncachedUpstream == null || mediaSourceFactory == null) return;
+        mediaSourceFactory.setDataSourceFactory(
+                new TrackNameParsingDataSource.Factory(uncachedUpstream, trackNameListener));
+        uncachedUpstream = null;
     }
 
     private void resetResolverResponseState() {
@@ -8185,8 +8378,7 @@ public class PlayerActivity extends Activity {
                 updateLoading(true);
                 Utils.showText(playerView, getString(R.string.playback_recovery_retry), 2500);
                 playerView.removeCallbacks(sourceRetryRunnable);
-                playerView.postDelayed(sourceRetryRunnable, Math.min(3_000L,
-                        600L * Math.max(1, sourceRecoveryAttempts)));
+                playerView.postDelayed(sourceRetryRunnable, sourceRetryDelayMs());
                 return true;
             case RETRY_SOURCE:
                 sourceRecoveryAttempts++;
@@ -8199,8 +8391,7 @@ public class PlayerActivity extends Activity {
                                 ? R.string.resolver_preparing_retry
                                 : R.string.playback_recovery_retry), 2500);
                 String retryKey = playbackRecoveryKey;
-                long delay = Math.min(3_000L, 600L * Math.max(1,
-                        sourceRecoveryAttempts));
+                long delay = sourceRetryDelayMs();
                 playerView.postDelayed(() -> {
                     if (isFinishing() || isDestroyed() || switchingPlaylistItem
                             || !Objects.equals(retryKey, playbackRecoveryKey)) return;
@@ -8225,6 +8416,12 @@ public class PlayerActivity extends Activity {
             default:
                 return false;
         }
+    }
+
+    /** 1 s, 2 s, then 4 s: leave an overloaded source room before each container re-read. */
+    private long sourceRetryDelayMs() {
+        int shift = Math.max(0, Math.min(2, sourceRecoveryAttempts - 1));
+        return 1_000L << shift;
     }
 
     private boolean rejoinLiveWindow() {
@@ -8304,6 +8501,12 @@ public class PlayerActivity extends Activity {
             if (value.contains(".ism/manifest") || value.endsWith(".ism")) return "application/vnd.ms-sstr+xml";
         }
         return suppliedType != null && suppliedType.endsWith("/*") ? null : suppliedType;
+    }
+
+    private boolean isLiveStream() {
+        if (player == null || !player.isCurrentMediaItemLive()) return false;
+        long duration = player.getDuration();
+        return duration == C.TIME_UNSET || duration < LIVE_WINDOW_MAX_MS;
     }
 
     private boolean isCurrent4kCandidate() {
@@ -8655,6 +8858,14 @@ public class PlayerActivity extends Activity {
                 && haveMedia && !inPip;
     }
 
+    private void holdScreen(boolean hold) {
+        if (hold) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        } else {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
+    }
+
     private void schedulePausedControllerHide() {
         if (playerView == null) return;
         playerView.removeCallbacks(hidePausedControllerRunnable);
@@ -8667,9 +8878,20 @@ public class PlayerActivity extends Activity {
 
     /** Re-arms the TV pause guard and reports whether this event only woke a dimmed screen. */
     private boolean resetPausedScreenGuard() {
-        if (playerView == null || dimOverlay == null) return false;
+        if (playerView == null) return false;
         playerView.removeCallbacks(dimRunnable);
         playerView.removeCallbacks(keepAwakeGiveUpRunnable);
+
+        boolean playing = player != null && player.isPlaying();
+        boolean holdingPause = keepAwakeOnPause();
+        holdScreen(playing || holdingPause);
+        if (holdingPause && !playing) {
+            playerView.postDelayed(keepAwakeGiveUpRunnable, KEEP_AWAKE_MAX_MS);
+        }
+
+        // Some TV layouts intentionally have no dim sheet. Keeping the screen awake is independent
+        // of that optional view and must still work there.
+        if (dimOverlay == null) return false;
 
         boolean wasDimmed = dimOverlay.getVisibility() == View.VISIBLE;
         if (wasDimmed) {
@@ -8678,12 +8900,8 @@ public class PlayerActivity extends Activity {
                     .withEndAction(() -> dimOverlay.setVisibility(View.GONE));
         }
 
-        boolean playing = player != null && player.isPlaying();
-        boolean holdingPause = keepAwakeOnPause() && !playing;
-        playerView.setKeepScreenOn(playing || holdingPause);
-        if (holdingPause) {
+        if (holdingPause && !playing) {
             playerView.postDelayed(dimRunnable, DIM_DELAY_MS);
-            playerView.postDelayed(keepAwakeGiveUpRunnable, KEEP_AWAKE_MAX_MS);
         }
         return wasDimmed;
     }
@@ -8698,10 +8916,10 @@ public class PlayerActivity extends Activity {
     }
 
     private void releasePausedScreenGuard() {
+        holdScreen(false);
         if (playerView == null) return;
         playerView.removeCallbacks(dimRunnable);
         playerView.removeCallbacks(keepAwakeGiveUpRunnable);
-        playerView.setKeepScreenOn(false);
         if (dimOverlay != null) {
             dimOverlay.animate().cancel();
             dimOverlay.setAlpha(0f);
@@ -8833,11 +9051,9 @@ public class PlayerActivity extends Activity {
             return;
 
         if (Utils.isSupportedNetworkUri(mPrefs.mediaUri) && Utils.isProgressiveContainerUri(mPrefs.mediaUri)) {
-            SubtitleUtils.clearCache(this);
-            if (SubtitleFinder.isUriCompatible(mPrefs.mediaUri)) {
-                subtitleFinder = new SubtitleFinder(PlayerActivity.this, mPrefs.mediaUri);
-                subtitleFinder.start();
-            }
+            // Armed rather than fired: this runs while the intent is being read, when there is no player
+            // to ask what the URL actually leads to. See startSubtitleGuess().
+            pendingSubtitleGuessUri = mPrefs.mediaUri;
             return;
         }
 
@@ -8878,6 +9094,37 @@ public class PlayerActivity extends Activity {
                 }
             }
         }
+    }
+
+    /**
+     * The volley of guessed sidecar names armed by {@link #searchSubtitles()}, now that the player can say
+     * what it is playing. Deferred to here for one reason: a broadcast has no file to sit next to, and an
+     * IPTV endpoint whose path ends in .ts looks exactly like a file to the URL test that arms this — so
+     * the guesses used to go out anyway, twenty misses per opened channel that the provider still pays
+     * for. The same argument SubtitleFinder.isStreamEndpoint already makes for torrent backends, applied
+     * to the one case only the timeline can name.
+     *
+     * <p>Once per opened item, whatever the outcome: the trigger fires on every track change.
+     */
+    private void startSubtitleGuess() {
+        final Uri uri = pendingSubtitleGuessUri;
+        if (uri == null || player == null) {
+            return;
+        }
+        pendingSubtitleGuessUri = null;
+        // The janitor runs for every network media opened, as it did when this was the first thing the
+        // branch did: it clears the temporary files of earlier downloads, which is nobody's business but
+        // its own, and the guesses below may well not happen at all.
+        SubtitleUtils.clearCache(this);
+        if (isLiveStream()) {
+            Utils.log("subtitles: live stream, not guessing sidecar names");
+            return;
+        }
+        if (!SubtitleFinder.isUriCompatible(uri)) {
+            return;
+        }
+        subtitleFinder = new SubtitleFinder(PlayerActivity.this, uri);
+        subtitleFinder.start();
     }
 
     Uri findNext() {
@@ -9007,6 +9254,7 @@ public class PlayerActivity extends Activity {
     private void playIfCan() {
         if (!play) return;
         play = false;
+        if (together != null && together.holding()) return;
         if (player != null) player.play();
         if (playerView != null) playerView.hideController();
     }

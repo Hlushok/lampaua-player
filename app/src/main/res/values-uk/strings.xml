@@ -173,6 +173,7 @@
     <string name="pref_subtitle_style_bold_on">Використовувати жирний шрифт замість звичайного</string>
     <string name="pref_subtitle_style_bold_off">Використовувати звичайний шрифт за замовчуванням</string>
     <string name="playback_finishes_at">Закінчиться о %1$s</string>
+    <string name="time_live">● ЕФІР</string>
     <string name="skip_intro">Пропустити заставку</string>
     <string name="skip_action">Пропустити</string>
     <string name="skip_ad">Пропустити рекламу</string>
@@ -214,8 +215,9 @@
     <string name="pref_brightness_gestures">Жести яскравості</string>
     <string name="pref_brightness_gestures_summary">Змінювати яскравість ліворуч на екрані</string>
     <string name="pref_hold_speed">Утримання для зміни швидкості</string>
-    <string name="pref_hold_speed_on">Утримуйте відео для 2×, потім тягніть убік, щоб змінити швидкість або відмотати назад</string>
-    <string name="pref_hold_speed_off">Утримання пальця на відео нічого не робить</string>
+    <string name="pref_hold_speed_adjust">2×, тягніть, щоб змінити</string>
+    <string name="pref_hold_speed_fixed">Завжди 2×</string>
+    <string name="pref_hold_speed_none">Вимкнено</string>
     <string name="pref_time_remaining">Показувати час, що залишився</string>
     <string name="pref_time_remaining_on">Нижня панель відлічує час до кінця</string>
     <string name="pref_time_remaining_off">Нижня панель показує загальну тривалість</string>
@@ -362,4 +364,15 @@
     <string name="pref_subtitle_translate_backends_none">Не задано — переклад субтитрів недоступний</string>
     <string name="pref_subtitle_translate_backends_add">Додати сервіс</string>
     <string name="subtitle_search_language_title">Вибір мови оригіналу</string>
+    <string name="pref_disable_volume_brightness_gestures">Вимкнути жести гучності та яскравості</string>
+    <string name="pref_disable_volume_brightness_gestures_on">Проведення вгору та вниз нічого не робить; перемотування, масштаб і кнопки гучності працюють</string>
+    <string name="pref_disable_volume_brightness_gestures_off">Проведіть вгору або вниз, щоб змінити яскравість у лівій частині екрана та гучність у правій</string>
+    <string name="pref_audio_header">Звук</string>
+    <string name="pref_reset_audio_workarounds">Скинути вивчені виправлення звуку</string>
+    <string name="pref_reset_audio_workarounds_summary">Забути формати, які цей пристрій навчився декодувати замість наскрізної передачі</string>
+    <string name="pref_reset_audio_workarounds_done">Очищено</string>
+    <string name="pref_controls_header">Керування</string>
+    <string name="pref_onscreen_header">На екрані</string>
+    <string name="pref_features_header">Можливості</string>
+    <string name="pref_skip_header_summary">Вступ, фінальні титри, як їх пропускати</string>
 </resources>

@@ -56,6 +56,9 @@ public class SettingsActivity extends AppCompatActivity
 
     static RecyclerView recyclerView;
 
+    /** Key of the sub-screen row last opened, so Back can put the list back on it. */
+    private String openedScreenKey;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
 
@@ -120,6 +123,7 @@ public class SettingsActivity extends AppCompatActivity
         arguments.putString(PreferenceFragmentCompat.ARG_PREFERENCE_ROOT,
                 preferenceScreen.getKey());
         fragment.setArguments(arguments);
+        openedScreenKey = preferenceScreen.getKey();
         getSupportFragmentManager().beginTransaction()
                 .replace(R.id.settings, fragment)
                 .addToBackStack(preferenceScreen.getKey())
@@ -157,6 +161,10 @@ public class SettingsActivity extends AppCompatActivity
                     androidx.preference.PreferenceManager.getDefaultSharedPreferences(getContext())
                             .contains("allowSystemFrameRate");
 
+            Prefs.getHoldSpeedMode(requireContext());
+            Prefs.getDisableVolumeBrightnessGestures(requireContext());
+            Prefs.getSubtitleSearchMode(requireContext());
+            Prefs.getSubtitleTranslate(requireContext());
             setPreferencesFromResource(R.xml.root_preferences, rootKey);
 
             Preference preferenceAutoPiP = findPreference("autoPiP");
@@ -174,11 +182,16 @@ public class SettingsActivity extends AppCompatActivity
                     preferenceAllowSystemFrameRate.setChecked(!Utils.isTvBox(getContext()));
                 }
             }
-            Preference preferenceHoldSpeed = findPreference("holdSpeed");
+            Preference preferenceHoldSpeed = findPreference("holdSpeedMode");
             if (preferenceHoldSpeed != null && Utils.isTvBox(getContext())) {
                 preferenceHoldSpeed.setVisible(false);
             }
             boolean tvBox = Utils.isTvBox(getContext());
+            Preference preferenceSystemVolume = findPreference("systemVolume");
+            Preference preferenceDisableGestures =
+                    findPreference("disableVolumeBrightnessGestures");
+            if (preferenceSystemVolume != null) preferenceSystemVolume.setVisible(!tvBox);
+            if (preferenceDisableGestures != null) preferenceDisableGestures.setVisible(!tvBox);
             Preference preferenceSingleBack = findPreference("tvSingleBack");
             Preference preferenceKeepAwake = findPreference("keepAwakeOnPause");
             if (preferenceSingleBack != null) preferenceSingleBack.setVisible(tvBox);
@@ -367,6 +380,17 @@ public class SettingsActivity extends AppCompatActivity
                 });
             }
 
+            Preference resetAudioWorkarounds = findPreference("resetRevokedAudioMimes");
+            if (resetAudioWorkarounds != null) {
+                resetAudioWorkarounds.setOnPreferenceClickListener(preference -> {
+                    Prefs.resetRevokedAudioMimes(requireContext());
+                    Toast.makeText(requireContext(),
+                            R.string.pref_reset_audio_workarounds_done,
+                            Toast.LENGTH_SHORT).show();
+                    return true;
+                });
+            }
+
             ListPreference textColor = findPreference("subtitleTextColor");
             ListPreference background = findPreference("subtitleBackground");
             if (textColor != null && background != null) {
@@ -446,8 +470,17 @@ public class SettingsActivity extends AppCompatActivity
                         @Override
                         public void onChildViewDetachedFromWindow(@NonNull View child) { }
                     });
-            if (savedInstanceState == null && getArguments() == null) {
-                String key = requireActivity().getIntent().getStringExtra(EXTRA_SCROLL_TO);
+            if (getArguments() != null) {
+                if (savedInstanceState == null) openAtPosition(0, 3);
+                return;
+            }
+            SettingsActivity activity = (SettingsActivity) requireActivity();
+            String returning = activity.openedScreenKey;
+            activity.openedScreenKey = null;
+            if (returning != null) {
+                openAtPreference(returning, 3);
+            } else if (savedInstanceState == null) {
+                String key = activity.getIntent().getStringExtra(EXTRA_SCROLL_TO);
                 if (key != null) openAtPreference(key, 3);
             }
         }
@@ -494,20 +527,22 @@ public class SettingsActivity extends AppCompatActivity
         private void openAtPreference(String key, int attemptsLeft) {
             RecyclerView list = getListView();
             RecyclerView.Adapter<?> adapter = list == null ? null : list.getAdapter();
-            if (attemptsLeft <= 0
-                    || !(adapter instanceof PreferenceGroup.PreferencePositionCallback)
-                    || !(list.getLayoutManager() instanceof LinearLayoutManager)) {
-                return;
-            }
+            if (!(adapter instanceof PreferenceGroup.PreferencePositionCallback)) return;
             int position = ((PreferenceGroup.PreferencePositionCallback) adapter)
                     .getPreferenceAdapterPosition(key);
-            if (position == RecyclerView.NO_POSITION) return;
+            openAtPosition(position, attemptsLeft);
+        }
+
+        private void openAtPosition(int position, int attemptsLeft) {
+            RecyclerView list = getListView();
+            if (attemptsLeft <= 0 || position == RecyclerView.NO_POSITION || list == null
+                    || !(list.getLayoutManager() instanceof LinearLayoutManager)) return;
             LinearLayoutManager manager = (LinearLayoutManager) list.getLayoutManager();
             manager.scrollToPositionWithOffset(Math.max(0, position - 1), 0);
             OneShotPreDrawListener.add(list, () -> {
                 RecyclerView.ViewHolder holder = list.findViewHolderForAdapterPosition(position);
                 if (holder == null) {
-                    openAtPreference(key, attemptsLeft - 1);
+                    openAtPosition(position, attemptsLeft - 1);
                     return;
                 }
                 holder.itemView.requestFocus();

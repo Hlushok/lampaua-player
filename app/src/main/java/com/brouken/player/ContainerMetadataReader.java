@@ -42,6 +42,11 @@ final class ContainerMetadataReader {
         return null;
     }
 
+    /** Whether the first {@link #SIGNATURE_BYTES} bytes announce a Matroska container. */
+    static boolean isMatroska(byte[] header) {
+        return signature(header) == Container.MATROSKA;
+    }
+
     static int headerBudget(byte[] header) {
         Container container = signature(header);
         return container == null ? 0 : container.headerBytes;

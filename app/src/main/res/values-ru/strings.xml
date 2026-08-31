@@ -199,8 +199,10 @@
     <string name="pref_brightness_gestures">Жесты яркости</string>
     <string name="pref_brightness_gestures_summary">Изменять яркость слева на экране</string>
     <string name="pref_hold_speed">Удержание для изменения скорости</string>
-    <string name="pref_hold_speed_on">Удерживайте видео для 2×, затем тяните в сторону, чтобы изменить скорость или перемотать назад</string>
-    <string name="pref_hold_speed_off">Удержание пальца на видео ничего не делает</string>
+    <string name="pref_hold_speed_adjust">2×, тяните, чтобы изменить</string>
+    <string name="pref_hold_speed_fixed">Всегда 2×</string>
+    <string name="pref_hold_speed_none">Выключено</string>
+    <string name="time_live">● ЭФИР</string>
     <string name="pref_time_remaining">Показывать оставшееся время</string>
     <string name="pref_time_remaining_on">Нижняя панель отсчитывает время до конца</string>
     <string name="pref_time_remaining_off">Нижняя панель показывает общую длительность</string>
@@ -311,4 +313,15 @@
     <string name="pref_subtitle_translate_backends_none">Не задано — перевод субтитров недоступен</string>
     <string name="pref_subtitle_translate_backends_add">Добавить сервис</string>
     <string name="subtitle_search_language_title">Выбор языка оригинала</string>
+    <string name="pref_disable_volume_brightness_gestures">Отключить жесты громкости и яркости</string>
+    <string name="pref_disable_volume_brightness_gestures_on">Свайпы вверх и вниз ничего не делают; перемотка, масштаб и кнопки громкости работают</string>
+    <string name="pref_disable_volume_brightness_gestures_off">Проведите вверх или вниз, чтобы изменить яркость в левой части экрана и громкость в правой</string>
+    <string name="pref_audio_header">Звук</string>
+    <string name="pref_reset_audio_workarounds">Сбросить изученные исправления звука</string>
+    <string name="pref_reset_audio_workarounds_summary">Забыть форматы, которые устройство научилось декодировать вместо сквозной передачи</string>
+    <string name="pref_reset_audio_workarounds_done">Очищено</string>
+    <string name="pref_controls_header">Управление</string>
+    <string name="pref_onscreen_header">На экране</string>
+    <string name="pref_features_header">Возможности</string>
+    <string name="pref_skip_header_summary">Вступление, финальные титры, как их пропускать</string>
 </resources>

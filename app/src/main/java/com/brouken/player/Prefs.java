@@ -21,7 +21,10 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.Set;
 
 class Prefs {
     // Previously used
@@ -53,6 +56,7 @@ class Prefs {
     private static final String PREF_KEY_KEEP_AWAKE_ON_PAUSE = "keepAwakeOnPause";
     private static final String PREF_KEY_SPEED = "speed";
     private static final String PREF_KEY_HOLD_SPEED = "holdSpeed";
+    private static final String PREF_KEY_HOLD_SPEED_MODE = "holdSpeedMode";
     private static final String PREF_KEY_TIME_REMAINING = "timeRemaining";
     private static final String PREF_KEY_SHOW_STATS = "showStats";
     private static final String PREF_KEY_FILE_ACCESS = "fileAccess";
@@ -97,6 +101,9 @@ class Prefs {
     private static final String PREF_KEY_SYSTEM_VOLUME = "systemVolume";
     private static final String PREF_KEY_PLAYER_VOLUME = "playerVolume";
     private static final String PREF_KEY_VOLUME_BOOST = "volumeBoost";
+    private static final String PREF_KEY_DISABLE_VOLUME_BRIGHTNESS_GESTURES =
+            "disableVolumeBrightnessGestures";
+    // Legacy UA Player keys, consumed once by getDisableVolumeBrightnessGestures().
     private static final String PREF_KEY_VOLUME_GESTURES = "volumeGesturesEnabled";
     private static final String PREF_KEY_BRIGHTNESS_GESTURES = "brightnessGesturesEnabled";
     private static final String PREF_KEY_TOGETHER_NICK = "togetherNick";
@@ -104,6 +111,9 @@ class Prefs {
     private static final String PREF_KEY_TOGETHER_PUBLIC = "togetherPublic";
     private static final String PREF_KEY_TOGETHER_RELAY = "togetherRelay";
     private static final String PREF_KEY_TOGETHER_INVITE_PAGE = "togetherInvitePage";
+    private static final String PREF_KEY_REVOKED_AUDIO_MIMES = "revokedAudioMimes";
+    private static final String PREF_KEY_REVOKED_AUDIO_MIMES_RELEARNED =
+            "revokedAudioMimesRelearned3";
 
     public static final String SKIP_MODE_BRIEF = "brief";
     public static final String SKIP_MODE_FULL = "full";
@@ -118,6 +128,9 @@ class Prefs {
 
     public static final String TRACK_DEFAULT = "default";
     public static final String TRACK_DEVICE = "device";
+    public static final String HOLD_SPEED_OFF = "off";
+    public static final String HOLD_SPEED_ADJUST = "adjust";
+    public static final String HOLD_SPEED_FIXED = "fixed";
     public static final String SEARCH_OFF = "off";
     public static final String SEARCH_FIRST = "first";
     public static final String SEARCH_NONE = "none";
@@ -142,7 +155,7 @@ class Prefs {
     public Utils.Orientation orientation = Utils.Orientation.UNSPECIFIED;
     public float scale = 1.f;
     public float speed = 1.f;
-    public boolean holdSpeed = true;
+    public String holdSpeedMode = HOLD_SPEED_ADJUST;
     public boolean timeRemaining = false;
     public boolean showStats = false;
 
@@ -193,13 +206,14 @@ class Prefs {
     public boolean systemVolume = true;
     public int playerVolume = 100;
     public int volumeBoost = 0;
-    public boolean volumeGesturesEnabled = true;
-    public boolean brightnessGesturesEnabled = true;
+    public boolean disableVolumeBrightnessGestures = false;
     public String togetherNick = "";
     public String togetherPassword = "";
     public boolean togetherPublic = false;
     public String togetherRelay = "";
     public String togetherInvitePage = "";
+    /** Formats this device has proved it cannot open as a passthrough AudioTrack. */
+    public Set<String> revokedAudioMimes = Collections.emptySet();
 
     private LinkedHashMap positions;
     private final LinkedHashMap<String, Long> sessionPositions = new LinkedHashMap<>();
@@ -212,7 +226,24 @@ class Prefs {
         mContext = context;
         mSharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
         loadSavedPreferences();
+        relearnRevokedAudioMimes();
         loadPositions();
+    }
+
+    /**
+     * Clears verdicts written by older recovery code once. A genuine device limitation is learned
+     * again on its next recoverable AudioTrack initialisation failure; transient write failures stay
+     * session-only and therefore never enter this set.
+     */
+    private void relearnRevokedAudioMimes() {
+        if (mSharedPreferences.getBoolean(PREF_KEY_REVOKED_AUDIO_MIMES_RELEARNED, false)) {
+            return;
+        }
+        revokedAudioMimes = Collections.emptySet();
+        mSharedPreferences.edit()
+                .remove(PREF_KEY_REVOKED_AUDIO_MIMES)
+                .putBoolean(PREF_KEY_REVOKED_AUDIO_MIMES_RELEARNED, true)
+                .apply();
     }
 
     private void loadSavedPreferences() {
@@ -245,7 +276,7 @@ class Prefs {
 
     public void loadUserPreferences() {
         autoPiP = mSharedPreferences.getBoolean(PREF_KEY_AUTO_PIP, autoPiP);
-        holdSpeed = mSharedPreferences.getBoolean(PREF_KEY_HOLD_SPEED, holdSpeed);
+        holdSpeedMode = getHoldSpeedMode(mContext);
         timeRemaining = mSharedPreferences.getBoolean(
                 PREF_KEY_TIME_REMAINING, timeRemaining);
         showStats = mSharedPreferences.getBoolean(PREF_KEY_SHOW_STATS, showStats);
@@ -301,7 +332,8 @@ class Prefs {
         if (SKIP_MODE_BUTTON.equals(skipMode)) skipMode = SKIP_MODE_FULL;
         if (SKIP_MODE_BUTTON.equals(skipModeCredits)) skipModeCredits = SKIP_MODE_FULL;
         skipFetchOnline = mSharedPreferences.getBoolean(PREF_KEY_SKIP_FETCH, skipFetchOnline);
-        systemVolume = mSharedPreferences.getBoolean(PREF_KEY_SYSTEM_VOLUME, systemVolume);
+        systemVolume = Utils.isTvBox(mContext)
+                || mSharedPreferences.getBoolean(PREF_KEY_SYSTEM_VOLUME, systemVolume);
         playerVolume = Math.max(0, Math.min(100,
                 mSharedPreferences.getInt(PREF_KEY_PLAYER_VOLUME, playerVolume)));
         try {
@@ -310,10 +342,7 @@ class Prefs {
         } catch (NumberFormatException ignored) {
             volumeBoost = 0;
         }
-        volumeGesturesEnabled = mSharedPreferences.getBoolean(
-                PREF_KEY_VOLUME_GESTURES, volumeGesturesEnabled);
-        brightnessGesturesEnabled = mSharedPreferences.getBoolean(
-                PREF_KEY_BRIGHTNESS_GESTURES, brightnessGesturesEnabled);
+        disableVolumeBrightnessGestures = getDisableVolumeBrightnessGestures(mContext);
         togetherPassword = mSharedPreferences.getString(
                 PREF_KEY_TOGETHER_PASSWORD, togetherPassword);
         togetherPublic = mSharedPreferences.getBoolean(
@@ -322,6 +351,8 @@ class Prefs {
                 PREF_KEY_TOGETHER_RELAY, togetherRelay);
         togetherInvitePage = mSharedPreferences.getString(
                 PREF_KEY_TOGETHER_INVITE_PAGE, togetherInvitePage);
+        revokedAudioMimes = mSharedPreferences.getStringSet(
+                PREF_KEY_REVOKED_AUDIO_MIMES, Collections.emptySet());
         togetherNick = mSharedPreferences.getString(PREF_KEY_TOGETHER_NICK, "");
         if (togetherNick == null || togetherNick.trim().isEmpty()) {
             togetherNick = AliasGenerator.random();
@@ -332,6 +363,23 @@ class Prefs {
         }
         Relay.setBase(togetherRelay);
         Room.setInvitePage(togetherInvitePage);
+    }
+
+    /** Remembers a passthrough format whose AudioTrack could not be opened on this device. */
+    public void revokeAudioMime(String mime) {
+        if (mime == null || mime.trim().isEmpty()) return;
+        Set<String> updated = new HashSet<>(revokedAudioMimes);
+        updated.add(mime.trim());
+        revokedAudioMimes = updated;
+        mSharedPreferences.edit()
+                .putStringSet(PREF_KEY_REVOKED_AUDIO_MIMES, updated)
+                .apply();
+    }
+
+    public static void resetRevokedAudioMimes(Context context) {
+        PreferenceManager.getDefaultSharedPreferences(context).edit()
+                .remove(PREF_KEY_REVOKED_AUDIO_MIMES)
+                .apply();
     }
 
     public void setLanguageAudio(String languages) {
@@ -431,6 +479,42 @@ class Prefs {
                 .putBoolean(PREF_KEY_SUBTITLE_SEARCH, !SEARCH_OFF.equals(value))
                 .putBoolean(PREF_KEY_SUBTITLE_SEARCH_STRICT, SEARCH_NONE.equals(value))
                 .apply();
+    }
+
+    /**
+     * Migrates the former on/off switch to the three-state hold gesture.
+     */
+    public static String getHoldSpeedMode(Context context) {
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        String stored = preferences.getString(PREF_KEY_HOLD_SPEED_MODE, null);
+        if (stored != null) return stored;
+        String migrated = preferences.getBoolean(PREF_KEY_HOLD_SPEED, true)
+                ? HOLD_SPEED_ADJUST : HOLD_SPEED_OFF;
+        preferences.edit().putString(PREF_KEY_HOLD_SPEED_MODE, migrated)
+                .remove(PREF_KEY_HOLD_SPEED)
+                .apply();
+        return migrated;
+    }
+
+    /**
+     * Migrates UA Player's former two gesture switches to the donor's single, unambiguous setting.
+     * A mixed legacy state keeps gestures available rather than unexpectedly removing the remaining
+     * enabled side; the new switch can then turn both off together.
+     */
+    public static boolean getDisableVolumeBrightnessGestures(Context context) {
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        if (preferences.contains(PREF_KEY_DISABLE_VOLUME_BRIGHTNESS_GESTURES)) {
+            return preferences.getBoolean(PREF_KEY_DISABLE_VOLUME_BRIGHTNESS_GESTURES, false);
+        }
+        boolean volumeEnabled = preferences.getBoolean(PREF_KEY_VOLUME_GESTURES, true);
+        boolean brightnessEnabled = preferences.getBoolean(PREF_KEY_BRIGHTNESS_GESTURES, true);
+        boolean disabled = !volumeEnabled && !brightnessEnabled;
+        preferences.edit()
+                .putBoolean(PREF_KEY_DISABLE_VOLUME_BRIGHTNESS_GESTURES, disabled)
+                .remove(PREF_KEY_VOLUME_GESTURES)
+                .remove(PREF_KEY_BRIGHTNESS_GESTURES)
+                .apply();
+        return disabled;
     }
 
     public static boolean getSubtitleTranslate(Context context) {
