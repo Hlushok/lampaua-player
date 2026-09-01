@@ -125,6 +125,9 @@
     <string name="pref_time_remaining">Show remaining time</string>
     <string name="pref_time_remaining_on">The bottom bar counts down to the end</string>
     <string name="pref_time_remaining_off">The bottom bar shows the total duration</string>
+    <string name="pref_show_clock">Show clock</string>
+    <string name="pref_show_clock_on">Clock stays in the top-right corner over the video</string>
+    <string name="pref_show_clock_off">Clock shows only with the player controls</string>
     <string name="pref_show_stats">Live playback statistics</string>
     <string name="pref_show_stats_summary">Show buffer, network, decoder and dropped frames while controls are visible</string>
     <string name="resolver_not_ready">The source did not prepare a playable stream. Please open it again.</string>
@@ -250,6 +253,14 @@
     <string name="pref_skip_fetch">Find segments online</string>
     <string name="pref_skip_fetch_on">Ask the configured skip service when LAMPA provides no segments</string>
     <string name="pref_skip_fetch_off">Use only segments supplied by LAMPA</string>
+    <string name="pref_skip_undo">Offer “Go back”</string>
+    <string name="pref_skip_undo_all">After every skip</string>
+    <string name="pref_skip_undo_manual">Only after a skip I made</string>
+    <string name="pref_skip_undo_auto">Only after an automatic skip</string>
+    <string name="pref_skip_undo_off">Never</string>
+    <string name="pref_skip_hide_locked">Hide skip controls when locked</string>
+    <string name="pref_skip_hide_locked_on">The Skip button and auto-skip notification stay hidden while the screen is locked</string>
+    <string name="pref_skip_hide_locked_off">The Skip button and auto-skip notification remain visible while the screen is locked</string>
     <string name="pref_update_header">Updates</string>
     <string name="pref_current_version">Installed version</string>
     <string name="pref_auto_update">Check for updates automatically</string>

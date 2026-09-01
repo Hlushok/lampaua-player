@@ -265,6 +265,13 @@
 
     <PreferenceCategory app:title="@string/pref_onscreen_header">
 
+        <SwitchPreferenceCompat
+            app:key="showClock"
+            app:defaultValue="false"
+            app:summaryOn="@string/pref_show_clock_on"
+            app:summaryOff="@string/pref_show_clock_off"
+            app:title="@string/pref_show_clock" />
+
         <ListPreference
             app:key="menuOpacity"
             app:defaultValue="88"
@@ -327,6 +334,15 @@
                 app:title="@string/pref_skip_mode_credits"
                 app:useSimpleSummaryProvider="true" />
 
+            <ListPreference
+                app:key="skipUndo"
+                app:defaultValue="all"
+                app:dependency="skipEnabled"
+                app:entries="@array/skip_undo_entries"
+                app:entryValues="@array/skip_undo_values"
+                app:title="@string/pref_skip_undo"
+                app:useSimpleSummaryProvider="true" />
+
             <SwitchPreferenceCompat
                 app:key="skipFetchOnline"
                 app:defaultValue="true"
@@ -334,6 +350,14 @@
                 app:summaryOn="@string/pref_skip_fetch_on"
                 app:summaryOff="@string/pref_skip_fetch_off"
                 app:title="@string/pref_skip_fetch" />
+
+            <SwitchPreferenceCompat
+                app:key="skipHideWhenLocked"
+                app:defaultValue="false"
+                app:dependency="skipEnabled"
+                app:summaryOn="@string/pref_skip_hide_locked_on"
+                app:summaryOff="@string/pref_skip_hide_locked_off"
+                app:title="@string/pref_skip_hide_locked" />
 
         </PreferenceScreen>
 

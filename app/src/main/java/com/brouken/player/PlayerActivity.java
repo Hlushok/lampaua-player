@@ -620,6 +620,7 @@ public class PlayerActivity extends Activity {
     private TextView lampaTopDetails;
     private TextView lampaClock;
     private TextView lampaFinishTime;
+    private OutlineTextClock overlayClock;
     private int lampaSafeHorizontalInset;
     private LinearLayout lampaSkipPanel;
     private TextView lampaSkipButton;
@@ -1327,6 +1328,7 @@ public class PlayerActivity extends Activity {
                 if (lampaTopPanel != null) {
                     lampaTopPanel.setVisibility(controllerVisible ? View.VISIBLE : View.GONE);
                 }
+                updateOverlayClock();
                 updateRoomBadge();
                 updateStatsPanel();
                 schedulePausedControllerHide();
@@ -2062,6 +2064,7 @@ public class PlayerActivity extends Activity {
         }
         updateRoomBadge();
         updateStatsPanel();
+        updateOverlayClock();
     }
 
     private void applyViewIntent(final Intent intent, final boolean initialize) {
@@ -2644,6 +2647,23 @@ public class PlayerActivity extends Activity {
         controllerBackground.addView(lampaTopPanel, topParams);
         applyLampaTopLayout();
 
+        overlayClock = new OutlineTextClock(this);
+        overlayClock.setFormat12Hour("h:mm a");
+        overlayClock.setFormat24Hour("HH:mm");
+        overlayClock.setTextColor(Color.WHITE);
+        overlayClock.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textClock());
+        overlayClock.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        overlayClock.setClickable(false);
+        overlayClock.setFocusable(false);
+        CoordinatorLayout.LayoutParams overlayClockParams = new CoordinatorLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        overlayClockParams.gravity = Gravity.TOP | Gravity.START;
+        overlayClock.setVisibility(View.GONE);
+        coordinatorLayout.addView(overlayClock, overlayClockParams);
+        lampaClock.addOnLayoutChangeListener((view, left, top, right, bottom,
+                                              oldLeft, oldTop, oldRight, oldBottom) ->
+                syncOverlayClockPosition());
+
         lampaSkipPanel = new LinearLayout(this);
         lampaSkipPanel.setOrientation(LinearLayout.VERTICAL);
         lampaSkipPanel.setPadding(Utils.dpToPx(4), Utils.dpToPx(4), Utils.dpToPx(4), Utils.dpToPx(4));
@@ -2707,11 +2727,16 @@ public class PlayerActivity extends Activity {
                 narrowPortrait ? 19 : ui.textClock());
         lampaFinishTime.setTextSize(TypedValue.COMPLEX_UNIT_SP,
                 narrowPortrait ? 11 : ui.textCaption());
-        int clockMaxWidth = ui.dp(narrowPortrait ? 106 : 156);
+        int clockMaxWidth = ui.dp(narrowPortrait ? 112 : 220);
         lampaClock.setMaxWidth(clockMaxWidth);
         lampaFinishTime.setMaxWidth(clockMaxWidth);
-        lampaFinishTime.setMaxLines(narrowPortrait ? 2 : 1);
-        lampaFinishTime.setEllipsize(TextUtils.TruncateAt.END);
+        lampaFinishTime.setMaxLines(2);
+        lampaFinishTime.setEllipsize(null);
+        if (overlayClock != null) {
+            overlayClock.setTextSize(TypedValue.COMPLEX_UNIT_SP,
+                    narrowPortrait ? 19 : ui.textClock());
+            overlayClock.post(this::syncOverlayClockPosition);
+        }
         int timePadH = ui.dp(narrowPortrait ? 5 : 10);
         lampaTopTimeBlock.setPadding(timePadH, ui.dp(4), timePadH, ui.dp(4));
 
@@ -2865,6 +2890,7 @@ public class PlayerActivity extends Activity {
             emptyStateView.setVisibility(View.VISIBLE);
             emptyStateView.bringToFront();
         }
+        updateOverlayClock();
         Utils.toggleSystemUi(this, playerView, true);
         if (emptyStateOpen != null) emptyStateOpen.post(emptyStateOpen::requestFocus);
     }
@@ -2874,6 +2900,7 @@ public class PlayerActivity extends Activity {
         if (emptyStateView != null) emptyStateView.setVisibility(View.GONE);
         playerView.setControllerAutoShow(true);
         Utils.setOrientation(this, mPrefs.orientation);
+        updateOverlayClock();
         if (mBrightnessControl != null) {
             float brightness = mPrefs.brightness < 0
                     ? android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
@@ -4003,6 +4030,33 @@ public class PlayerActivity extends Activity {
         fadeAuxiliaryChrome(statsView, visible, inPip || locked);
     }
 
+    /** Keep one clock in the header slot, even while the controller itself is hidden. */
+    private void updateOverlayClock() {
+        if (overlayClock == null || mPrefs == null) return;
+        boolean show = mPrefs.showClock && !inPip && haveMedia && !isEmptyStateVisible();
+        if (lampaClock != null) lampaClock.setAlpha(show ? 0f : 1f);
+        if (show) syncOverlayClockPosition();
+        overlayClock.setVisibility(show ? View.VISIBLE : View.GONE);
+    }
+
+    private void syncOverlayClockPosition() {
+        if (overlayClock == null || lampaClock == null || coordinatorLayout == null
+                || lampaClock.getWidth() == 0) return;
+        int[] clockLocation = new int[2];
+        int[] rootLocation = new int[2];
+        lampaClock.getLocationInWindow(clockLocation);
+        coordinatorLayout.getLocationInWindow(rootLocation);
+        ViewGroup.MarginLayoutParams params =
+                (ViewGroup.MarginLayoutParams) overlayClock.getLayoutParams();
+        int left = clockLocation[0] - rootLocation[0];
+        int top = clockLocation[1] - rootLocation[1];
+        if (params.leftMargin != left || params.topMargin != top) {
+            params.leftMargin = left;
+            params.topMargin = top;
+            overlayClock.setLayoutParams(params);
+        }
+    }
+
     private void announceRoomAction(final String nick, final RoomAction action) {
         if (playerView == null || inPip || locked) {
             return;
@@ -4555,6 +4609,7 @@ public class PlayerActivity extends Activity {
             }
             lampaFinishTime.setText(finish);
         }
+        updateOverlayClock();
         updateLampaSkipUi();
         updateTransferRateUi();
         updateStatsPanel();
@@ -4610,6 +4665,8 @@ public class PlayerActivity extends Activity {
 
     private void updateLampaSkipUi() {
         if (lampaSkipPanel == null || player == null || lampaPlaylist == null) return;
+        long nowMs = SystemClock.elapsedRealtime();
+        clearExpiredSkipPlaylistUndo(nowMs);
         if (!mPrefs.skipEnabled) {
             skipModel = null;
             focusedSkipKey = null;
@@ -4628,9 +4685,15 @@ public class PlayerActivity extends Activity {
         List<SkipSegment> segments = validatedSkipSegments(item, duration);
         SkipPolicy.Mode mode = skipModeForPosition(segments, position, duration);
         skipModel = skipController.update(segments, position, duration,
-                lampaPlaylist.hasNext(), mode, SystemClock.elapsedRealtime());
+                lampaPlaylist.hasNext(), mode, nowMs,
+                skipUndoOffered(true));
         if (skipModel.action != SkipController.Action.NONE) {
             applySkipAction(skipModel);
+            lampaSkipPanel.setVisibility(View.GONE);
+            return;
+        }
+        if (locked && mPrefs.skipHideWhenLocked) {
+            focusedSkipKey = null;
             lampaSkipPanel.setVisibility(View.GONE);
             return;
         }
@@ -4810,6 +4873,7 @@ public class PlayerActivity extends Activity {
         skipController.reset();
         skipModel = null;
         focusedSkipKey = null;
+        skipUndoPlaylistIndex = -1;
         updateLampaSegmentMarkers();
         updateLampaSkipUi();
     }
@@ -4915,7 +4979,7 @@ public class PlayerActivity extends Activity {
         SkipController.Model action = skipController.activate(skipModel,
                 Math.max(0, player.getCurrentPosition()), player.getDuration(),
                 lampaPlaylist != null && lampaPlaylist.hasNext(),
-                SystemClock.elapsedRealtime());
+                SystemClock.elapsedRealtime(), skipUndoOffered(false));
         skipModel = action;
         if (action.action != SkipController.Action.NONE) {
             applySkipAction(action);
@@ -4925,16 +4989,32 @@ public class PlayerActivity extends Activity {
         }
     }
 
+    private boolean skipUndoOffered(boolean automatic) {
+        if (Prefs.SKIP_UNDO_ALL.equals(mPrefs.skipUndo)) return true;
+        return automatic
+                ? Prefs.SKIP_UNDO_AUTO.equals(mPrefs.skipUndo)
+                : Prefs.SKIP_UNDO_MANUAL.equals(mPrefs.skipUndo);
+    }
+
+    private void clearExpiredSkipPlaylistUndo(long nowMs) {
+        if (skipUndoPlaylistIndex >= 0 && !skipController.hasUndo(nowMs)) {
+            skipUndoPlaylistIndex = -1;
+        }
+    }
+
     private void applySkipAction(SkipController.Model action) {
         if (action == null || player == null) return;
         switch (action.action) {
             case SEEK_TO_END:
+                // A seek undo belongs to this episode, never to an earlier playlist item.
+                skipUndoPlaylistIndex = -1;
                 player.setSeekParameters(SeekParameters.EXACT);
                 player.seekTo(action.targetMs);
                 break;
             case PLAY_NEXT:
                 if (lampaPlaylist != null && lampaPlaylist.hasNext()) {
-                    skipUndoPlaylistIndex = lampaPlaylist.getCurrentIndex();
+                    skipUndoPlaylistIndex = action.undoAvailable
+                            ? lampaPlaylist.getCurrentIndex() : -1;
                     skipPlaylistAdvance = true;
                     playRelativeEpisode(1, true);
                 }
@@ -5694,6 +5774,7 @@ public class PlayerActivity extends Activity {
             updateLampaSegmentMarkers();
             updateLampaSkipUi();
             updateStatsPanel();
+            updateOverlayClock();
             updateMediaControlVisibility();
             resetPausedScreenGuard();
             if (player != null) maybeSearchSubtitlesOnline(player.getCurrentTracks());
@@ -7741,11 +7822,6 @@ public class PlayerActivity extends Activity {
                 if (videoLoading) {
                     videoLoading = false;
 
-                    if (mPrefs.orientation == Utils.Orientation.UNSPECIFIED) {
-                        mPrefs.orientation = Utils.getNextOrientation(mPrefs.orientation);
-                        Utils.setOrientation(PlayerActivity.this, mPrefs.orientation);
-                    }
-
                     final Format format = player.getVideoFormat();
 
                     if (format != null) {
@@ -8889,6 +8965,7 @@ public class PlayerActivity extends Activity {
             if (controlView != null) controlView.requestApplyInsets();
         }
         updateSubtitleViewMargin();
+        updateOverlayClock();
 
         updateButtonRotation();
     }
@@ -9485,6 +9562,7 @@ public class PlayerActivity extends Activity {
         }
         updateRoomBadge();
         updateStatsPanel();
+        updateLampaSkipUi();
     }
 
     private void updatebuttonAspectRatioIcon() {

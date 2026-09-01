@@ -362,6 +362,7 @@ class Utils {
 
                 break;
             case SYSTEM:
+            case UNSPECIFIED:
                 activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
                 break;
             /*case SENSOR:

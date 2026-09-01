@@ -15,15 +15,24 @@ public final class SkipController {
         public final long targetMs;
         public final int progress;
         public final long seconds;
+        /** Whether this model owns the controller's live five-second undo token. */
+        public final boolean undoAvailable;
 
         private Model(State state, Action action, SkipSegment segment, long targetMs,
                       int progress, long seconds) {
+            this(state, action, segment, targetMs, progress, seconds,
+                    state == State.UNDO_AVAILABLE);
+        }
+
+        private Model(State state, Action action, SkipSegment segment, long targetMs,
+                      int progress, long seconds, boolean undoAvailable) {
             this.state = state;
             this.action = action;
             this.segment = segment;
             this.targetMs = targetMs;
             this.progress = progress;
             this.seconds = seconds;
+            this.undoAvailable = undoAvailable;
         }
 
         public boolean enabled() {
@@ -49,8 +58,18 @@ public final class SkipController {
         undoUntilMs = 0; currentSegment = null;
     }
 
+    public boolean hasUndo(long nowMs) {
+        return undoUntilMs > nowMs;
+    }
+
     public Model update(List<SkipSegment> segments, long positionMs, long durationMs,
                         boolean hasNext, SkipPolicy.Mode mode, long nowMs) {
+        return update(segments, positionMs, durationMs, hasNext, mode, nowMs, true);
+    }
+
+    public Model update(List<SkipSegment> segments, long positionMs, long durationMs,
+                        boolean hasNext, SkipPolicy.Mode mode, long nowMs,
+                        boolean offerAutomaticUndo) {
         if (mode == SkipPolicy.Mode.OFF) {
             autoSegment = null;
             return hidden();
@@ -65,7 +84,8 @@ public final class SkipController {
             } else if (nowMs >= autoDeadlineMs) {
                 SkipSegment fired = autoSegment;
                 autoSegment = null;
-                return beginSkip(fired, positionMs, durationMs, hasNext, nowMs);
+                return beginSkip(fired, positionMs, durationMs, hasNext, nowMs,
+                        offerAutomaticUndo);
             } else {
                 return model(State.AUTO_PENDING, Action.NONE, autoSegment, autoSegment.endMs,
                         autoDeadlineMs - nowMs, AUTO_COUNTDOWN_MS);
@@ -100,6 +120,11 @@ public final class SkipController {
 
     public Model activate(Model visible, long positionMs, long durationMs,
                           boolean hasNext, long nowMs) {
+        return activate(visible, positionMs, durationMs, hasNext, nowMs, true);
+    }
+
+    public Model activate(Model visible, long positionMs, long durationMs,
+                          boolean hasNext, long nowMs, boolean offerManualUndo) {
         if (visible == null) return hidden();
         if (visible.state == State.AUTO_PENDING && visible.segment != null) {
             dismissed.add(visible.segment.key());
@@ -112,20 +137,21 @@ public final class SkipController {
                     undoPositionMs, 0, 0);
         }
         if (visible.state == State.AVAILABLE && visible.segment != null) {
-            return beginSkip(visible.segment, positionMs, durationMs, hasNext, nowMs);
+            return beginSkip(visible.segment, positionMs, durationMs, hasNext, nowMs,
+                    offerManualUndo);
         }
         return visible;
     }
 
     private Model beginSkip(SkipSegment segment, long positionMs, long durationMs,
-                            boolean hasNext, long nowMs) {
+                            boolean hasNext, long nowMs, boolean offerUndo) {
         completed.add(segment.key());
         currentSegment = segment;
         undoPositionMs = positionMs;
-        undoUntilMs = nowMs + UNDO_MS;
+        undoUntilMs = offerUndo ? nowMs + UNDO_MS : 0;
         boolean reachesEnd = durationMs > 0 && segment.endMs >= durationMs - 1500;
         Action action = reachesEnd && hasNext ? Action.PLAY_NEXT : Action.SEEK_TO_END;
-        return new Model(State.HIDDEN, action, segment, segment.endMs, 0, 0);
+        return new Model(State.HIDDEN, action, segment, segment.endMs, 0, 0, offerUndo);
     }
 
     private static Model model(State state, Action action, SkipSegment segment, long target,

@@ -221,6 +221,9 @@
     <string name="pref_time_remaining">Показувати час, що залишився</string>
     <string name="pref_time_remaining_on">Нижня панель відлічує час до кінця</string>
     <string name="pref_time_remaining_off">Нижня панель показує загальну тривалість</string>
+    <string name="pref_show_clock">Показувати годинник</string>
+    <string name="pref_show_clock_on">Годинник завжди у верхньому правому куті поверх відео</string>
+    <string name="pref_show_clock_off">Годинник показується лише з елементами керування</string>
     <string name="pref_show_stats">Жива статистика відтворення</string>
     <string name="pref_show_stats_summary">Показувати буфер, мережу, декодер і пропущені кадри разом з елементами керування</string>
     <string name="resolver_not_ready">Джерело не підготувало потік. Відкрийте його повторно.</string>
@@ -249,6 +252,14 @@
     <string name="pref_skip_fetch">Шукати сегменти онлайн</string>
     <string name="pref_skip_fetch_on">Запитувати налаштований сервіс, якщо LAMPA не передала сегменти</string>
     <string name="pref_skip_fetch_off">Використовувати лише сегменти, передані LAMPA</string>
+    <string name="pref_skip_undo">Пропонувати «Повернутися»</string>
+    <string name="pref_skip_undo_all">Після будь-якого пропуску</string>
+    <string name="pref_skip_undo_manual">Лише після пропуску вручну</string>
+    <string name="pref_skip_undo_auto">Лише після автопропуску</string>
+    <string name="pref_skip_undo_off">Ніколи</string>
+    <string name="pref_skip_hide_locked">Ховати кнопки пропуску під час блокування</string>
+    <string name="pref_skip_hide_locked_on">Кнопка «Пропустити» та сповіщення про автопропуск приховані, поки екран заблоковано</string>
+    <string name="pref_skip_hide_locked_off">Кнопка «Пропустити» та сповіщення про автопропуск лишаються видимими, поки екран заблоковано</string>
     <string name="pref_update_header">Оновлення</string>
     <string name="pref_current_version">Встановлена версія</string>
     <string name="pref_auto_update">Автоматично перевіряти оновлення</string>

@@ -173,6 +173,14 @@
     <string name="pref_skip_fetch">Искать сегменты онлайн</string>
     <string name="pref_skip_fetch_on">Запрашивать настроенный сервис, если LAMPA не передала сегменты</string>
     <string name="pref_skip_fetch_off">Использовать только сегменты, переданные LAMPA</string>
+    <string name="pref_skip_undo">Предлагать «Вернуться»</string>
+    <string name="pref_skip_undo_all">После любого пропуска</string>
+    <string name="pref_skip_undo_manual">Только после пропуска вручную</string>
+    <string name="pref_skip_undo_auto">Только после автопропуска</string>
+    <string name="pref_skip_undo_off">Никогда</string>
+    <string name="pref_skip_hide_locked">Скрывать кнопки пропуска при блокировке</string>
+    <string name="pref_skip_hide_locked_on">Кнопка «Пропустить» и уведомление об автопропуске скрыты, пока экран заблокирован</string>
+    <string name="pref_skip_hide_locked_off">Кнопка «Пропустить» и уведомление об автопропуске остаются видимыми, пока экран заблокирован</string>
     <string name="pref_update_header">Обновления</string>
     <string name="pref_current_version">Установленная версия</string>
     <string name="pref_auto_update">Автоматически проверять обновления</string>
@@ -206,6 +214,9 @@
     <string name="pref_time_remaining">Показывать оставшееся время</string>
     <string name="pref_time_remaining_on">Нижняя панель отсчитывает время до конца</string>
     <string name="pref_time_remaining_off">Нижняя панель показывает общую длительность</string>
+    <string name="pref_show_clock">Показывать часы</string>
+    <string name="pref_show_clock_on">Часы всегда в правом верхнем углу поверх видео</string>
+    <string name="pref_show_clock_off">Часы показываются только с элементами управления</string>
     <string name="pref_show_stats">Статистика воспроизведения</string>
     <string name="pref_show_stats_summary">Показывать буфер, сеть, декодер и пропущенные кадры вместе с элементами управления</string>
     <string name="resolver_not_ready">Источник не подготовил поток. Откройте его повторно.</string>

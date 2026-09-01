@@ -44,6 +44,8 @@ class Prefs {
     private static final String PREF_KEY_RESIZE_MODE = "resizeMode";
     private static final String PREF_KEY_ASPECT_RATIO = "aspectRatio";
     private static final String PREF_KEY_ORIENTATION = "orientation";
+    private static final String PREF_KEY_ORIENTATION_SENSOR_MIGRATED =
+            "orientationSensorMigrated";
     private static final String PREF_KEY_SCALE = "scale";
     private static final String PREF_KEY_SCOPE_URI = "scopeUri";
     private static final String PREF_KEY_ASK_SCOPE = "askScope";
@@ -59,6 +61,7 @@ class Prefs {
     private static final String PREF_KEY_HOLD_SPEED_MODE = "holdSpeedMode";
     private static final String PREF_KEY_TIME_REMAINING = "timeRemaining";
     private static final String PREF_KEY_SHOW_STATS = "showStats";
+    private static final String PREF_KEY_SHOW_CLOCK = "showClock";
     private static final String PREF_KEY_FILE_ACCESS = "fileAccess";
     private static final String PREF_KEY_DECODER_PRIORITY = "decoderPriority";
     private static final String PREF_KEY_MAP_DV7 = "mapDV7ToHevc";
@@ -98,6 +101,8 @@ class Prefs {
     private static final String PREF_KEY_SKIP_MODE = "skipMode";
     private static final String PREF_KEY_SKIP_MODE_CREDITS = "skipModeCredits";
     private static final String PREF_KEY_SKIP_FETCH = "skipFetchOnline";
+    private static final String PREF_KEY_SKIP_UNDO = "skipUndo";
+    private static final String PREF_KEY_SKIP_HIDE_LOCKED = "skipHideWhenLocked";
     private static final String PREF_KEY_SYSTEM_VOLUME = "systemVolume";
     private static final String PREF_KEY_PLAYER_VOLUME = "playerVolume";
     private static final String PREF_KEY_VOLUME_BOOST = "volumeBoost";
@@ -125,6 +130,11 @@ class Prefs {
      * whole feature rather than one film's worth of it.
      */
     public static final String SKIP_MODE_OFF = "off";
+
+    public static final String SKIP_UNDO_ALL = "all";
+    public static final String SKIP_UNDO_MANUAL = "manual";
+    public static final String SKIP_UNDO_AUTO = "auto";
+    public static final String SKIP_UNDO_OFF = "off";
 
     public static final String TRACK_DEFAULT = "default";
     public static final String TRACK_DEVICE = "device";
@@ -158,6 +168,7 @@ class Prefs {
     public String holdSpeedMode = HOLD_SPEED_ADJUST;
     public boolean timeRemaining = false;
     public boolean showStats = false;
+    public boolean showClock = false;
 
     public String subtitleTrackId;
     public String audioTrackId;
@@ -203,6 +214,8 @@ class Prefs {
     public String skipMode = SKIP_MODE_FULL;
     public String skipModeCredits = SKIP_MODE_FULL;
     public boolean skipFetchOnline = true;
+    public String skipUndo = SKIP_UNDO_ALL;
+    public boolean skipHideWhenLocked = false;
     public boolean systemVolume = true;
     public int playerVolume = 100;
     public int volumeBoost = 0;
@@ -266,6 +279,17 @@ class Prefs {
             resizeMode = mSharedPreferences.getInt(PREF_KEY_RESIZE_MODE, resizeMode);
         aspectRatio = mSharedPreferences.getFloat(PREF_KEY_ASPECT_RATIO, aspectRatio);
         orientation = Utils.Orientation.values()[mSharedPreferences.getInt(PREF_KEY_ORIENTATION, orientation.value)];
+        // Older UA Player builds silently changed the first video into a video-locked
+        // orientation. Migrate phones once to the donor's user-controlled system mode so
+        // rotating the device actually rotates both the player and its settings.
+        if (!Utils.isTvBox(mContext)
+                && !mSharedPreferences.getBoolean(PREF_KEY_ORIENTATION_SENSOR_MIGRATED, false)) {
+            orientation = Utils.Orientation.SYSTEM;
+            mSharedPreferences.edit()
+                    .putInt(PREF_KEY_ORIENTATION, orientation.value)
+                    .putBoolean(PREF_KEY_ORIENTATION_SENSOR_MIGRATED, true)
+                    .apply();
+        }
         scale = mSharedPreferences.getFloat(PREF_KEY_SCALE, scale);
         if (mSharedPreferences.contains(PREF_KEY_SCOPE_URI))
             scopeUri = Uri.parse(mSharedPreferences.getString(PREF_KEY_SCOPE_URI, null));
@@ -280,6 +304,7 @@ class Prefs {
         timeRemaining = mSharedPreferences.getBoolean(
                 PREF_KEY_TIME_REMAINING, timeRemaining);
         showStats = mSharedPreferences.getBoolean(PREF_KEY_SHOW_STATS, showStats);
+        showClock = mSharedPreferences.getBoolean(PREF_KEY_SHOW_CLOCK, showClock);
         tunneling = mSharedPreferences.getBoolean(PREF_KEY_TUNNELING, tunneling);
         frameRateMatching = mSharedPreferences.getBoolean(PREF_KEY_FRAMERATE_MATCHING, frameRateMatching);
         allowSystemFrameRate = mSharedPreferences.getBoolean(PREF_KEY_ALLOW_SYSTEM_FRAMERATE, !Utils.isTvBox(mContext));
@@ -332,6 +357,9 @@ class Prefs {
         if (SKIP_MODE_BUTTON.equals(skipMode)) skipMode = SKIP_MODE_FULL;
         if (SKIP_MODE_BUTTON.equals(skipModeCredits)) skipModeCredits = SKIP_MODE_FULL;
         skipFetchOnline = mSharedPreferences.getBoolean(PREF_KEY_SKIP_FETCH, skipFetchOnline);
+        skipUndo = mSharedPreferences.getString(PREF_KEY_SKIP_UNDO, skipUndo);
+        skipHideWhenLocked = mSharedPreferences.getBoolean(
+                PREF_KEY_SKIP_HIDE_LOCKED, skipHideWhenLocked);
         systemVolume = Utils.isTvBox(mContext)
                 || mSharedPreferences.getBoolean(PREF_KEY_SYSTEM_VOLUME, systemVolume);
         playerVolume = Math.max(0, Math.min(100,

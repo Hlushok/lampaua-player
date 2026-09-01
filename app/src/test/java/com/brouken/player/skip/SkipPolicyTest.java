@@ -70,10 +70,42 @@ public class SkipPolicyTest {
                 SkipPolicy.Mode.FULL_BUTTON, 1000);
         SkipController.Model action = controller.activate(available, 50_000, 60_000, true, 1000);
         assertEquals(SkipController.Action.PLAY_NEXT, action.action);
+        assertEquals(true, action.undoAvailable);
+        assertEquals(true, controller.hasUndo(5999));
+        assertEquals(false, controller.hasUndo(6000));
         SkipController.Model undo = controller.update(segments, 0, 60_000, true,
                 SkipPolicy.Mode.FULL_BUTTON, 2000);
         assertEquals(SkipController.State.UNDO_AVAILABLE, undo.state);
         assertEquals(SkipController.Action.RESTORE_POSITION,
                 controller.activate(undo, 0, 60_000, true, 2000).action);
+    }
+
+    @Test public void manualSkipDoesNotOfferUndoWhenDisabled() {
+        SkipController controller = new SkipController();
+        List<SkipSegment> segments = Collections.singletonList(
+                new SkipSegment(10_000, 20_000, SkipSegment.Kind.INTRO, "server"));
+        SkipController.Model available = controller.update(segments, 10_000, 60_000, false,
+                SkipPolicy.Mode.FULL_BUTTON, 1000);
+        SkipController.Model action =
+                controller.activate(available, 10_000, 60_000, false, 1000, false);
+        assertEquals(SkipController.Action.SEEK_TO_END, action.action);
+        assertEquals(false, action.undoAvailable);
+        assertEquals(SkipController.State.HIDDEN,
+                controller.update(segments, 20_000, 60_000, false,
+                        SkipPolicy.Mode.FULL_BUTTON, 2000).state);
+    }
+
+    @Test public void automaticSkipDoesNotOfferUndoWhenDisabled() {
+        SkipController controller = new SkipController();
+        List<SkipSegment> segments = Collections.singletonList(
+                new SkipSegment(10_000, 20_000, SkipSegment.Kind.INTRO, "server"));
+        controller.update(segments, 10_000, 60_000, false,
+                SkipPolicy.Mode.AUTO, 1000, false);
+        assertEquals(SkipController.Action.SEEK_TO_END,
+                controller.update(segments, 11_000, 60_000, false,
+                        SkipPolicy.Mode.AUTO, 4000, false).action);
+        assertEquals(SkipController.State.HIDDEN,
+                controller.update(segments, 20_000, 60_000, false,
+                        SkipPolicy.Mode.AUTO, 4001, false).state);
     }
 }

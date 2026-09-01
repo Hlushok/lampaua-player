@@ -304,6 +304,65 @@ public class ResourceContractTest {
     }
 
     @Test
+    public void donorV142SettingsRotationAndLanguageRowsRemainComplete() throws Exception {
+        String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
+        String prefs = readProjectFile("src/main/java/com/brouken/player/Prefs.java");
+        String activity = readProjectFile(
+                "src/main/java/com/brouken/player/PlayerActivity.java");
+        String languageDialog = readProjectFile(
+                "src/main/java/com/brouken/player/LanguagePriorityDialog.java");
+        String manifest = readProjectFile("src/main/AndroidManifest.xml");
+        String utils = readProjectFile("src/main/java/com/brouken/player/Utils.java");
+        String clock = readProjectFile(
+                "src/main/java/com/brouken/player/OutlineTextClock.java");
+        String ukrainian = readProjectFile("src/main/res/values-uk/strings.xml");
+
+        // Public donor settings stay present even when UA Player adds its own rows.
+        assertTrue(preferences.contains("app:key=\"showClock\""));
+        assertTrue(preferences.contains("app:key=\"skipUndo\""));
+        assertTrue(preferences.contains("app:key=\"skipHideWhenLocked\""));
+        assertTrue(prefs.contains("public boolean showClock = false"));
+        assertTrue(prefs.contains("public String skipUndo = SKIP_UNDO_ALL"));
+        assertTrue(prefs.contains("public boolean skipHideWhenLocked = false"));
+        assertTrue(activity.contains("skipUndoOffered(boolean automatic)"));
+        assertTrue(activity.contains("locked && mPrefs.skipHideWhenLocked"));
+        assertTrue(activity.contains("updateOverlayClock()"));
+        assertTrue(clock.contains("class OutlineTextClock extends TextClock"));
+        assertTrue(ukrainian.contains("name=\"pref_show_clock\""));
+        assertTrue(ukrainian.contains("name=\"pref_skip_undo\""));
+
+        // The donor's weighted label and fixed 48dp icon buttons prevent portrait clipping.
+        assertTrue(languageDialog.contains("final ImageButton up = iconButton"));
+        assertTrue(languageDialog.contains(
+                "0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f"));
+        assertTrue(languageDialog.contains("Utils.dpToPx(48), Utils.dpToPx(48)"));
+        assertFalse(languageDialog.contains("final Button up = action"));
+
+        // Settings and the player follow the physical phone instead of retaining a stale lock.
+        String settingsActivity = section(manifest,
+                "android:name=\".SettingsActivity\"",
+                "android:name=\".PlaybackReportActivity\"");
+        assertFalse(settingsActivity.contains("android:screenOrientation=\"locked\""));
+        String orientationMethod = section(utils,
+                "public static void setOrientation",
+                "public static Orientation getNextOrientation");
+        assertTrue(orientationMethod.contains(
+                "ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED"));
+        assertFalse(orientationMethod.contains(
+                "ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR"));
+        assertTrue(prefs.contains("PREF_KEY_ORIENTATION_SENSOR_MIGRATED"));
+
+        // A playlist undo target exists only while SkipController owns a live undo token.
+        assertTrue(activity.contains("action.undoAvailable"));
+        assertTrue(activity.contains("clearExpiredSkipPlaylistUndo"));
+
+        // The end-time label may wrap, but its final digits must never be ellipsized away.
+        assertTrue(activity.contains("narrowPortrait ? 112 : 220"));
+        assertTrue(activity.contains("lampaFinishTime.setMaxLines(2);"));
+        assertTrue(activity.contains("lampaFinishTime.setEllipsize(null);"));
+    }
+
+    @Test
     public void containerMetadataIsBoundedAndScopedToTheCurrentUri() throws Exception {
         String source = readProjectFile(
                 "src/main/java/com/brouken/player/TrackNameParsingDataSource.java");
