@@ -39,6 +39,30 @@ public class LampaIntentContractTest {
         assertTrue(source.contains("bundle.getStringArrayList(API_HEADERS)"));
     }
 
+    @Test public void playlistIntentOwnsOnlyItsSessionBeforeMediaIsWritten() throws Exception {
+        String source = readProjectFile("src/main/java/com/brouken/player/PlayerActivity.java");
+        String createFlow = source.substring(source.indexOf("final String action = launchIntent.getAction()"),
+                source.indexOf("restoreApiSession("));
+        int createIsolation = createFlow.indexOf("isLampaSessionIntent(launchIntent)");
+        int createMediaWrite = createFlow.indexOf("mPrefs.updateMedia");
+        assertTrue(createIsolation >= 0 && createIsolation < createMediaWrite);
+
+        String applyFlow = source.substring(source.indexOf("private void applyViewIntent"),
+                source.indexOf("void resetApiAccess()"));
+        int applyIsolation = applyFlow.indexOf("isLampaSessionIntent(intent)");
+        int applyMediaWrite = applyFlow.indexOf("mPrefs.updateMedia");
+        assertTrue(applyIsolation >= 0 && applyIsolation < applyMediaWrite);
+
+        String detector = source.substring(source.indexOf("private boolean isLampaSessionIntent"),
+                source.indexOf("private void readLampaPlaylist"));
+        assertTrue(detector.contains("LampaPlaylist.EXTRA_PLAYLIST_JSON"));
+        assertTrue(detector.contains("\"playlist_json\""));
+        assertTrue(detector.contains("\"video_list\""));
+        assertTrue(detector.contains("\"lampaua.imdb_id\""));
+        assertTrue(detector.contains("\"quality_levels\""));
+        assertTrue(detector.contains("\"segments\""));
+    }
+
     @Test public void returnsMxCompatiblePlaybackResultToLampa() throws Exception {
         String source = readProjectFile("src/main/java/com/brouken/player/PlayerActivity.java");
 

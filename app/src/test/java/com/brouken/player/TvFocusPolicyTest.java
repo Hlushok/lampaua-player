@@ -3,6 +3,8 @@ package com.brouken.player;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class TvFocusPolicyTest {
     @Test public void wakeWithVisibleControllerReturnsFocusToPlayPause() {
@@ -22,5 +24,12 @@ public class TvFocusPolicyTest {
                 TvFocusPolicy.choose(true, false, false, true));
         assertEquals(TvFocusPolicy.Target.NONE,
                 TvFocusPolicy.choose(false, true, false, true));
+    }
+
+    @Test public void onlyTheEdgeOfAVisibleControlRowDismissesControls() {
+        assertTrue(TvFocusPolicy.shouldDismissControls(true, true, false));
+        assertFalse(TvFocusPolicy.shouldDismissControls(true, true, true));
+        assertFalse(TvFocusPolicy.shouldDismissControls(false, true, false));
+        assertFalse(TvFocusPolicy.shouldDismissControls(true, false, false));
     }
 }

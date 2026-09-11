@@ -11,4 +11,9 @@ final class TvFocusPolicy {
         if (skipAvailable) return Target.SKIP;
         return playPauseVisible ? Target.PLAY_PAUSE : Target.NONE;
     }
+
+    static boolean shouldDismissControls(boolean controllerVisible, boolean haveMedia,
+                                         boolean focusCanMoveFurther) {
+        return controllerVisible && haveMedia && !focusCanMoveFurther;
+    }
 }

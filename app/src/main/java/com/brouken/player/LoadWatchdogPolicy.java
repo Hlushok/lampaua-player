@@ -13,7 +13,7 @@ final class LoadWatchdogPolicy {
                            long startBytes, long endBytes, SourceKind sourceKind) {
         if (!buffering || sourceKind == null) return Action.IGNORE;
         long progress = Math.max(0L, endBytes - startBytes);
-        if (sourceKind != SourceKind.LOCAL && progress >= MIN_PROGRESS_BYTES) {
+        if (progress >= MIN_PROGRESS_BYTES) {
             return Action.REARM;
         }
         return everReady ? Action.REPORT_MIDSTREAM_STALL : Action.REPORT_INITIAL_TIMEOUT;

@@ -28,8 +28,8 @@ public class LoadWatchdogPolicyTest {
                 true, true, 5_000_000L, 5_000_000L, NETWORK));
     }
 
-    @Test public void localFileCannotClaimNetworkProgress() {
-        assertEquals(REPORT_INITIAL_TIMEOUT, LoadWatchdogPolicy.evaluate(
+    @Test public void slowLocalSourceProgressRearmsTheWindow() {
+        assertEquals(REARM, LoadWatchdogPolicy.evaluate(
                 true, false, 0L, 500_000L, LOCAL));
     }
 

@@ -58,6 +58,7 @@ import android.view.InputDevice;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.Surface;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowManager;
@@ -547,6 +548,8 @@ public class PlayerActivity extends Activity {
     private boolean audioRestartSettling;
     private int audioRestartRetries;
     private final Runnable audioRestartRunnable = this::restartPassthroughAudio;
+    private static final long REBUFFER_ARM_MS = 1_500L;
+    private final Runnable rebufferArmRunnable = audioRecoveryState::onLongRebuffer;
     private static final long RESELECT_WEDGE_MS = 500L;
     private static final long RESELECT_WEDGE_MIN_AHEAD_MS = 5_000L;
     private static final int MAX_RESELECT_NUDGES = 2;
@@ -925,6 +928,11 @@ public class PlayerActivity extends Activity {
         final String action = launchIntent.getAction();
         final String type = launchIntent.getType();
         awaitingRoomMedia = launchRoomInvite != null;
+        if (launchRoomInvite == null && isLampaSessionIntent(launchIntent)) {
+            // LAMPA owns this playback session. Isolate it before updateMedia() can replace the
+            // standalone resume item, even when the intent has none of the generic API markers.
+            mPrefs.setPersistent(false);
+        }
 
         if ("com.lampaua.player.action.SHORTCUT_VIDEOS".equals(action)) {
             openFile(Utils.getMoviesFolderUri());
@@ -1800,6 +1808,7 @@ public class PlayerActivity extends Activity {
         super.onResume();
         restorePlayStateAllowed = true;
         resetPausedScreenGuard();
+        restoreRotationLock();
         audioRecoveryState.onResume();
         if (player != null && player.isPlaying() && audioRecoveryState.shouldRebuildSink()) {
             requestPassthroughAudioRestart();
@@ -2098,13 +2107,31 @@ public class PlayerActivity extends Activity {
                     if (seekWithKey(true, event.getRepeatCount() > 0)) return true;
                 }
                 break;
-            case KeyEvent.KEYCODE_DPAD_DOWN:
-                if (isTvBox && !controllerVisibleFully) {
+            case KeyEvent.KEYCODE_DPAD_UP:
+                if (controllerVisibleFully) {
+                    final View focusedUp = getCurrentFocus();
+                    final boolean canMoveUp = focusedUp != null
+                            && focusedUp.focusSearch(View.FOCUS_UP) != null;
+                    if (!TvFocusPolicy.shouldDismissControls(
+                            true, haveMedia, canMoveUp)) break;
+                    if (event.getRepeatCount() == 0) playerView.hideController();
+                } else if (event.getRepeatCount() == 0) {
                     playerView.showController();
-                    playerView.post(timeBar::requestFocus);
-                    return true;
                 }
-                break;
+                return true;
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                if (controllerVisibleFully) {
+                    final View focusedDown = getCurrentFocus();
+                    final boolean canMoveDown = focusedDown != null
+                            && focusedDown.focusSearch(View.FOCUS_DOWN) != null;
+                    if (!TvFocusPolicy.shouldDismissControls(
+                            true, haveMedia, canMoveDown)) break;
+                    if (event.getRepeatCount() == 0) playerView.hideController();
+                } else if (event.getRepeatCount() == 0) {
+                    playerView.showController();
+                    if (isTvBox && haveMedia) playerView.post(timeBar::requestFocus);
+                }
+                return true;
             case KeyEvent.KEYCODE_BACK:
                 // Let Activity/OnBackInvokedDispatcher route Back through onBackPressed().
                 break;
@@ -2240,6 +2267,12 @@ public class PlayerActivity extends Activity {
         if (resetPausedScreenGuard()) {
             return true;
         }
+        if (locked && event.getKeyCode() != KeyEvent.KEYCODE_BACK) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                showSwipeToUnlock();
+            }
+            return true;
+        }
         if (event.getAction() == KeyEvent.ACTION_DOWN) schedulePausedControllerHide();
 
         final int lampaKeyCode = event.getKeyCode();
@@ -2286,12 +2319,6 @@ public class PlayerActivity extends Activity {
             return true;
         }
 
-        if (isTvBox && controllerVisibleFully && event.getAction() == KeyEvent.ACTION_DOWN
-                && event.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP) {
-            playerView.hideController();
-            return true;
-        }
-
         if (isTvBox && !controllerVisibleFully
                 && event.getKeyCode() != KeyEvent.KEYCODE_BACK) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
@@ -2307,6 +2334,7 @@ public class PlayerActivity extends Activity {
 
     @Override
     public boolean onGenericMotionEvent(MotionEvent event) {
+        if (locked) return true;
         if (0 != (event.getSource() & InputDevice.SOURCE_CLASS_POINTER)) {
             switch (event.getAction()) {
                 case MotionEvent.ACTION_SCROLL:
@@ -2412,6 +2440,9 @@ public class PlayerActivity extends Activity {
             buttonPlaylist.setVisibility(View.GONE);
         }
         resetApiAccess();
+        if (isLampaSessionIntent(intent)) {
+            mPrefs.setPersistent(false);
+        }
         final Bundle bundle = intent.getExtras();
         if (bundle != null) {
             apiAccess = bundle.containsKey(API_POSITION) || bundle.containsKey(API_RETURN_RESULT)
@@ -2513,6 +2544,23 @@ public class PlayerActivity extends Activity {
             String name = subsName != null && subsName.length > i ? subsName[i] : null;
             apiSubs.add(SubtitleUtils.buildSubtitle(this, sub, name, sub.equals(defaultSub)));
         }
+    }
+
+    private boolean isLampaSessionIntent(Intent intent) {
+        if (intent == null) return false;
+        if (intent.hasExtra(LampaPlaylist.EXTRA_PLAYLIST_JSON)
+                || intent.hasExtra("playlist_json")
+                || intent.hasExtra("video_list")) {
+            return true;
+        }
+        if (intent.getData() == null) return false;
+        return intent.hasExtra("lampaua.imdb_id") || intent.hasExtra("imdb_id")
+                || intent.hasExtra("lampaua.tmdb_id") || intent.hasExtra("tmdb_id")
+                || intent.hasExtra("id") || intent.hasExtra("quality_levels")
+                || intent.hasExtra("segments") || intent.hasExtra("season")
+                || intent.hasExtra("episode") || intent.hasExtra("lampaua.season")
+                || intent.hasExtra("lampaua.episode") || intent.hasExtra("lampaua.is_iptv")
+                || intent.hasExtra("lampaua.media_type") || intent.hasExtra("media_type");
     }
 
     private void readLampaPlaylist(Intent intent) {
@@ -6110,14 +6158,7 @@ public class PlayerActivity extends Activity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        try {
-            if (restoreOrientationLock) {
-                Settings.System.putInt(getContentResolver(), Settings.System.ACCELEROMETER_ROTATION, 0);
-                restoreOrientationLock = false;
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        restoreRotationLock();
 
         if (resultCode == RESULT_OK && alive) {
             releasePlayer();
@@ -7879,8 +7920,10 @@ public class PlayerActivity extends Activity {
 
         playerView.setControllerShowTimeoutMs(-1);
 
-        locked = false;
-        hideSwipeToUnlock();
+        if (locked) {
+            locked = false;
+            clearLockUi();
+        }
 
         if (haveMedia) {
             if (isNetworkUri) {
@@ -8002,7 +8045,7 @@ public class PlayerActivity extends Activity {
                 // Prevent overwriting temporarily inaccessible media position
                 if (player.isCurrentMediaItemSeekable()) {
                     long position = player.getPlaybackState() == Player.STATE_ENDED
-                            && playlistPlaybackEverReady ? 0 : player.getCurrentPosition();
+                            ? 0 : player.getCurrentPosition();
                     mPrefs.updatePosition(position);
                     if (lampaPlaylist != null && lampaPlaylist.getCurrent() != null) {
                         lampaPlaylist.getCurrent().positionMs = Math.max(0, position);
@@ -8045,6 +8088,7 @@ public class PlayerActivity extends Activity {
         hideSwipeToUnlock();
         if (playerView != null) {
             playerView.removeCallbacks(audioRestartRunnable);
+            playerView.removeCallbacks(rebufferArmRunnable);
             playerView.removeCallbacks(reselectWedgeRunnable);
             playerView.removeCallbacks(resumeWatchdogRunnable);
             playerView.removeCallbacks(backgroundReleaseRunnable);
@@ -8191,12 +8235,23 @@ public class PlayerActivity extends Activity {
         sessionRevokedAudioMimes.add(mime);
         if (persist) mPrefs.revokeAudioMime(mime);
         audioSink.block(mime);
-        restorePlayState = player.getPlayWhenReady();
-        savePlayer();
-        playerView.post(() -> {
-            releasePlayer(false);
-            initializePlayer();
-        });
+        if (mPrefs.decoderPriority
+                == DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF) {
+            // The software audio renderer is absent in device-only mode. Rebuild once so the newly
+            // blocked bitstream mime can fall through to FFmpeg, preserving the current position.
+            restorePlayState = player.getPlayWhenReady();
+            savePlayer();
+            pendingStuckRecovery = true;
+            playerView.post(() -> {
+                releasePlayer(false);
+                initializePlayer();
+            });
+        } else {
+            // The fallback renderer is already installed. Re-prepare this player so its video decoder,
+            // surface, buffered media, position, and track selection stay intact.
+            audioRecoveryState.resetForNewPlayback();
+            player.prepare();
+        }
         return true;
     }
 
@@ -8242,6 +8297,14 @@ public class PlayerActivity extends Activity {
                     && oldPosition.mediaItemIndex == newPosition.mediaItemIndex) {
                 audioRecoveryState.onSeek();
             }
+        }
+
+        @Override
+        public void onMediaItemTransition(MediaItem mediaItem, int reason) {
+            // Each item opens a fresh output. A latch from the previous item must not tear that new
+            // AudioTrack down on its first start.
+            playerView.removeCallbacks(rebufferArmRunnable);
+            audioRecoveryState.resetForNewPlayback();
         }
 
         @Override
@@ -8305,17 +8368,13 @@ public class PlayerActivity extends Activity {
             }
             schedulePausedControllerHide();
 
-            if (!isPlaying) {
-                PlayerActivity.locked = false;
-                hideSwipeToUnlock();
-                playerView.removeCallbacks(stallWatchdogRunnable);
-            } else {
+            if (isPlaying) {
+                playerView.removeCallbacks(rebufferArmRunnable);
                 playerView.removeCallbacks(reselectWedgeRunnable);
                 audioRestartSettling = false;
                 if (!nudgedThisReselect) reselectNudges = 0;
                 nudgedThisReselect = false;
-                audioRecoveryState.onResume();
-                if (audioRecoveryState.shouldRebuildSink()) {
+                if (audioRecoveryState.onPlaybackStarted()) {
                     requestPassthroughAudioRestart();
                 }
                 lastObservedPosition = player.getCurrentPosition();
@@ -8323,6 +8382,19 @@ public class PlayerActivity extends Activity {
                 lastPositionAdvanceAt = SystemClock.elapsedRealtime();
                 playerView.removeCallbacks(stallWatchdogRunnable);
                 playerView.postDelayed(stallWatchdogRunnable, STALL_CHECK_INTERVAL_MS);
+            } else {
+                playerView.removeCallbacks(stallWatchdogRunnable);
+                if (player != null && player.getPlayWhenReady() && !audioRestartSettling
+                        && (player.getPlaybackState() == Player.STATE_BUFFERING
+                        || player.getPlaybackState() == Player.STATE_READY)) {
+                    playerView.removeCallbacks(rebufferArmRunnable);
+                    playerView.postDelayed(rebufferArmRunnable, REBUFFER_ARM_MS);
+                }
+                if (PlayerActivity.locked && player != null
+                        && player.getPlaybackState() == Player.STATE_ENDED) {
+                    PlayerActivity.locked = false;
+                    clearLockUi();
+                }
             }
         }
 
@@ -8465,7 +8537,7 @@ public class PlayerActivity extends Activity {
             } else if (state == Player.STATE_ENDED) {
                 cancelPlaybackWatchdogs();
                 locked = false;
-                hideSwipeToUnlock();
+                clearLockUi();
                 if (sleepTimer.isAtMediaEnd()) {
                     fireSleepTimer();
                     return;
@@ -9004,6 +9076,7 @@ public class PlayerActivity extends Activity {
         playerView.removeCallbacks(stallWatchdogRunnable);
         playerView.removeCallbacks(stablePlaybackRunnable);
         playerView.removeCallbacks(resumeWatchdogRunnable);
+        playerView.removeCallbacks(rebufferArmRunnable);
         playerView.removeCallbacks(reselectWedgeRunnable);
     }
 
@@ -9276,10 +9349,22 @@ public class PlayerActivity extends Activity {
             if (Settings.System.getInt(getContentResolver(), Settings.System.ACCELEROMETER_ROTATION) == 0) {
                 Settings.System.putInt(getContentResolver(), Settings.System.ACCELEROMETER_ROTATION, 1);
                 restoreOrientationLock = true;
+                mPrefs.setRestoreAutoRotate(true);
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    private void restoreRotationLock() {
+        if (!restoreOrientationLock && !mPrefs.restoreAutoRotate) return;
+        try {
+            Settings.System.putInt(getContentResolver(), Settings.System.ACCELEROMETER_ROTATION, 0);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        restoreOrientationLock = false;
+        mPrefs.setRestoreAutoRotate(false);
     }
 
     boolean useMediaStore() {
@@ -10274,15 +10359,40 @@ public class PlayerActivity extends Activity {
 
     void onLockChanged() {
         if (locked) {
-            playerView.hideController();
-            showSwipeToUnlock();
+            lockScreen();
         } else {
-            hideSwipeToUnlock();
-            playerView.showController();
+            clearLockUi();
         }
         updateRoomBadge();
         updateStatsPanel();
         updateLampaSkipUi();
+    }
+
+    private void lockScreen() {
+        playerView.hideController();
+        final int rotation = getWindowManager().getDefaultDisplay().getRotation();
+        final boolean portrait = getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_PORTRAIT;
+        final boolean reverse = rotation == Surface.ROTATION_180
+                || rotation == Surface.ROTATION_270;
+        if (portrait) {
+            setRequestedOrientation(reverse
+                    ? ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+                    : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        } else {
+            setRequestedOrientation(reverse
+                    ? ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+                    : ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        }
+        backExitGuard.reset();
+        showSwipeToUnlock();
+    }
+
+    private void clearLockUi() {
+        hideSwipeToUnlock();
+        backExitGuard.reset();
+        if (mPrefs != null) Utils.setOrientation(this, mPrefs.orientation);
+        updateRoomBadge();
     }
 
     private void updatebuttonAspectRatioIcon() {

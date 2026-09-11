@@ -776,8 +776,8 @@ public class ResourceContractTest {
         assertTrue(app.contains("com.google.zxing:core:3.5.4"));
         assertTrue(wrapper.contains("gradle-9.7.1-bin.zip"));
         assertTrue(app.contains("applicationId \"com.lampaua.player\""));
-        assertTrue(app.contains("versionCode 20"));
-        assertTrue(app.contains("versionName \"2.0.0\""));
+        assertTrue(app.contains("versionCode 21"));
+        assertTrue(app.contains("versionName \"2.0.1\""));
     }
 
     @Test

@@ -11,15 +11,15 @@
 
 | Donor path | Decision | Reason | Evidence |
 |---|---|---|---|
-| `.github/workflows/android-build.yml` | Exclude donor hunk | Its repository-name guard would disable UA Player releases; retain UA's tag workflow. | Planned |
-| `.github/workflows/android.yml` | Exclude donor deletion | UA Player needs its `main` CI workflow. | Planned |
-| `README.md` | Adapt | Retain UA identity/version and document imported user-facing behavior. | Planned |
+| `.github/workflows/android-build.yml` | Exclude donor hunk | Its repository-name guard would disable UA Player releases; retain UA's tag workflow. | Final range diff confirms the UA tag workflow is retained. |
+| `.github/workflows/android.yml` | Exclude donor deletion | UA Player needs its `main` CI workflow. | Final range diff confirms the UA `main` workflow is retained. |
+| `README.md` | Adapt | Retain UA identity/version and document imported user-facing behavior. | Install, feature, SDK, donor-credit, and release-version sections updated. |
 | `app/build.gradle` | Semantic merge | Import SDK/dependencies while retaining UA package/version/archive/signing/ABI rules. | `donorV147BuildStackMatches`; Media3 1.11.0 dependency graph resolved |
 | `app/libs/lib-decoder-av1-release.aar` | Import byte-for-byte | Must match Media3 1.11.0. | Git blob `f6fcfe1d2a6ad393e0a139b2f2fad735fad28041` matches donor |
 | `app/libs/lib-decoder-ffmpeg-release.aar` | Import byte-for-byte | Must match Media3 1.11.0. | Git blob `87b10d80f56724cde7306225e9890180c11dd04a` matches donor |
 | `app/libs/lib-decoder-iamf-release.aar` | Import byte-for-byte | Must match Media3 1.11.0. | Git blob `1ca4ba4f9bdc6bf79b3956c511badd7945411fe6` matches donor |
 | `app/libs/lib-exoplayer-release.aar` | Import byte-for-byte | Must match Media3 1.11.0. | Git blob `7f55e3c7def6f4672d42ebde095b97b1ce09b52a` matches donor |
-| `app/src/main/java/com/brouken/player/App.java` | Exclude donor hunk | UA Player has no Sentry bootstrap; diagnostics stay local until explicitly shared. | Planned |
+| `app/src/main/java/com/brouken/player/App.java` | Exclude donor hunk | UA Player has no Sentry bootstrap; diagnostics stay local until explicitly shared. | Dependency/source audit confirms no Sentry bootstrap or transport. |
 | `app/src/main/java/com/brouken/player/BottomBarLayout.java` | Import | Donor-owned measured-height parking. | `donorV147BottomBarAndTransferContractsStayIntegrated` passed |
 | `app/src/main/java/com/brouken/player/CustomPlayerView.java` | Semantic merge | Route gesture seeks through the donor one-in-flight gate. | Gesture seek gate compiled; focused TV contract passed |
 | `app/src/main/java/com/brouken/player/PlayerActivity.java` | Semantic merge; donor wins | Full donor runtime behavior plus approved UA hooks only. | Bottom controls, TV seek, decoded-surround default, retained-background lifecycle, route hand-back, four-window connected-load wait, TV decoder hold, bounded reselect/screen recovery, and local analytics compile; focused contracts passed |
@@ -83,6 +83,33 @@
 
 ## Final verification evidence
 
-This section is filled with exact commit IDs, blob IDs, test totals, lint
-counts, APK metadata, certificate, ABI list, size, hash, and ADB status after
-the implementation gates pass.
+- UA reconciliation base before the final independent-review fixes: `313dc81`;
+  the public tag records the complete release commit.
+- Donor release: Just+ `v1.4.7`, commit
+  `f26a71e8e931ed1859a162bd3829d66419aba2b9`.
+- Full clean verification command completed successfully for UA Player
+  `2.0.1` (`versionCode 21`): unit tests, lint, universal debug APK, and
+  universal release APK.
+- Unit tests: 944 executions across four variants, 0 failures, 0 errors,
+  0 skipped.
+- Lint: 0 fatal issues, 0 errors, 265 non-blocking warnings.
+- Signed release APK: `test-builds/UA-Player-2.0.1.apk`.
+- Package: `com.lampaua.player`; version: `2.0.1` (`21`); release build;
+  `debuggable=false`.
+- Native ABIs: `arm64-v8a`, `armeabi-v7a`, matching the retained UA Player
+  release ABI policy.
+- APK size: 31,666,201 bytes.
+- APK SHA-256:
+  `cc5e949baa7762bdc23608b699cb5553bf42f06ebd7b8b3c4c3629cdf2b39268`.
+- Signing certificate SHA-256:
+  `749d118bc8a16a7c0464b8dd0498c53da8a86a668d8f09f551e60cf7d88ee15e`,
+  matching the previous UA Player `2.0.0` artifact.
+- APK signatures: v1, v2, and v3 verified; 16 KiB page-aware zip alignment
+  verified; the project APK verifier passed.
+- Independent release review found no critical issue. Its persistence,
+  completion-position, in-place audio fallback, first-start/rebuffer, TV focus
+  and lock, picker-rotation, local-progress watchdog, and scrim findings were
+  fixed before the final clean gate.
+- `adb devices` found no connected device. Physical phone/TV playback QA is
+  therefore still required after installation; no runtime-device result is
+  claimed by this audit.

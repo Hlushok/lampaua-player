@@ -9,6 +9,7 @@
     <color name="ua_secondary">#FF91B2DB</color>
     <color name="shortcut_background">#F5F5F5</color>
 
+    <color name="controls_scrim">#66041228</color>
     <color name="ui_controls_background">#98000000</color>
     <color name="exo_bottom_bar_background" tools:keep="@color/exo_bottom_bar_background">@color/ui_controls_background</color>
     <color name="exo_black_opacity_70" tools:keep="@color/exo_black_opacity_70">@color/ui_controls_background</color>

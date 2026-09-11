@@ -52,6 +52,7 @@ class Prefs {
     private static final String PREF_KEY_SCALE = "scale";
     private static final String PREF_KEY_SCOPE_URI = "scopeUri";
     private static final String PREF_KEY_ASK_SCOPE = "askScope";
+    private static final String PREF_KEY_RESTORE_AUTO_ROTATE = "restoreAutoRotate";
     private static final String PREF_KEY_AUTO_PIP = "autoPiP";
     private static final String PREF_KEY_TUNNELING = "tunneling";
     private static final String PREF_KEY_FRAMERATE_MATCHING = "frameRateMatching";
@@ -183,6 +184,8 @@ class Prefs {
     public int brightness = -1;
     public boolean firstRun = true;
     public boolean askScope = true;
+    /** True only while a system picker temporarily owns device-wide auto-rotate. */
+    public boolean restoreAutoRotate = false;
     public boolean autoPiP = false;
 
     public boolean tunneling = false;
@@ -304,6 +307,8 @@ class Prefs {
         if (mSharedPreferences.contains(PREF_KEY_SCOPE_URI))
             scopeUri = Uri.parse(mSharedPreferences.getString(PREF_KEY_SCOPE_URI, null));
         askScope = mSharedPreferences.getBoolean(PREF_KEY_ASK_SCOPE, askScope);
+        restoreAutoRotate = mSharedPreferences.getBoolean(
+                PREF_KEY_RESTORE_AUTO_ROTATE, restoreAutoRotate);
         speed = mSharedPreferences.getFloat(PREF_KEY_SPEED, speed);
         loadUserPreferences();
     }
@@ -745,6 +750,14 @@ class Prefs {
         final SharedPreferences.Editor sharedPreferencesEditor = mSharedPreferences.edit();
         sharedPreferencesEditor.putBoolean(PREF_KEY_FIRST_RUN, false);
         sharedPreferencesEditor.apply();
+    }
+
+    /** Commit synchronously because this debt must survive a process kill while the picker is open. */
+    public void setRestoreAutoRotate(final boolean restore) {
+        restoreAutoRotate = restore;
+        final SharedPreferences.Editor sharedPreferencesEditor = mSharedPreferences.edit();
+        sharedPreferencesEditor.putBoolean(PREF_KEY_RESTORE_AUTO_ROTATE, restore);
+        sharedPreferencesEditor.commit();
     }
 
     public void markScopeAsked() {

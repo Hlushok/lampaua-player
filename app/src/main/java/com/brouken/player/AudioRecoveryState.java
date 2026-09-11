@@ -8,6 +8,7 @@ final class AudioRecoveryState {
     private final LinkedHashSet<String> blockedMimes = new LinkedHashSet<>();
     private boolean paused;
     private boolean rebuildPending;
+    private boolean audioEverStarted;
 
     void onPause() {
         paused = true;
@@ -16,6 +17,25 @@ final class AudioRecoveryState {
     void onResume() {
         if (paused) rebuildPending = true;
         paused = false;
+    }
+
+    /**
+     * Marks a real transition into playing. The first start owns a fresh AudioTrack and must never
+     * spend a seek/route latch that was raised while the item was still opening.
+     */
+    boolean onPlaybackStarted() {
+        if (!audioEverStarted) {
+            audioEverStarted = true;
+            paused = false;
+            rebuildPending = false;
+            return false;
+        }
+        onResume();
+        return rebuildPending;
+    }
+
+    void onLongRebuffer() {
+        rebuildPending = true;
     }
 
     void onSeek() {
@@ -46,7 +66,12 @@ final class AudioRecoveryState {
     }
 
     void clearRebuildRequest() {
+        resetForNewPlayback();
+    }
+
+    void resetForNewPlayback() {
         rebuildPending = false;
         paused = false;
+        audioEverStarted = false;
     }
 }
