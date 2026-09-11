@@ -321,7 +321,17 @@ public class PlayerActivity extends Activity {
     private boolean isScrubbing;
     private boolean scrubbingNoticeable;
     private long scrubbingStart;
-    public boolean frameRendered;
+    boolean frameRendered;
+    // A key seek advances the picture as each step lands. Any steps that outrun the decoder are
+    // coalesced and committed once after the key is released.
+    private long keyScrubTarget = -1;
+    private long keyScrubSeeked = -1;
+    private int keyScrubSteps;
+    private boolean keyScrubForward;
+    private long keyScrubLastMs;
+    private static final long KEY_HOLD_STEP_FLOOR_MS = 200;
+    private static final long KEY_HOLD_STEP_CEILING_MS = 600;
+    private final Runnable keyScrubCommit = this::commitKeyScrub;
     private boolean alive;
     public static boolean focusPlay = false;
     private Uri nextUri;
@@ -525,7 +535,6 @@ public class PlayerActivity extends Activity {
     private boolean audioRestartInFlight;
     private int audioRestartRetries;
     private final Runnable audioRestartRunnable = this::restartPassthroughAudio;
-    private final TvSeekController tvSeekController = new TvSeekController();
     private final BackExitGuard backExitGuard = new BackExitGuard(2_000L);
     private static final long DIM_DELAY_MS = 60_000L;
     private static final long PAUSE_RELEASE_MS = 5 * 60 * 1000L;
@@ -1711,8 +1720,11 @@ public class PlayerActivity extends Activity {
                 return;
             }
         } else if (isTvBox && haveMedia) {
-            if (tvSeekController.isArmed()) {
-                tvSeekController.reset();
+            if (keyScrubTarget >= 0) {
+                playerView.removeCallbacks(keyScrubCommit);
+                keyScrubTarget = -1;
+                keyScrubSeeked = -1;
+                keyScrubSteps = 0;
                 backExitGuard.reset();
                 if (playerView != null) {
                     playerView.removeCallbacks(playerView.textClearRunnable);
@@ -1872,14 +1884,14 @@ public class PlayerActivity extends Activity {
             case KeyEvent.KEYCODE_BUTTON_L2:
             case KeyEvent.KEYCODE_MEDIA_REWIND:
                 if (!controllerVisibleFully || keyCode == KeyEvent.KEYCODE_MEDIA_REWIND) {
-                    return previewTvSeek(TvSeekController.BACKWARD, event);
+                    if (seekWithKey(false, event.getRepeatCount() > 0)) return true;
                 }
                 break;
             case KeyEvent.KEYCODE_DPAD_RIGHT:
             case KeyEvent.KEYCODE_BUTTON_R2:
             case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
                 if (!controllerVisibleFully || keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) {
-                    return previewTvSeek(TvSeekController.FORWARD, event);
+                    if (seekWithKey(true, event.getRepeatCount() > 0)) return true;
                 }
                 break;
             case KeyEvent.KEYCODE_DPAD_DOWN:
@@ -1892,6 +1904,11 @@ public class PlayerActivity extends Activity {
             case KeyEvent.KEYCODE_BACK:
                 // Let Activity/OnBackInvokedDispatcher route Back through onBackPressed().
                 break;
+            case KeyEvent.KEYCODE_ESCAPE:
+                // Many TV remotes send EXIT as ESCAPE. Route it through the same staged Back path and
+                // consume it so Android cannot synthesize a second Back event.
+                if (event.getRepeatCount() == 0) onBackPressed();
+                return true;
             case KeyEvent.KEYCODE_UNKNOWN:
                 return super.onKeyDown(keyCode, event);
             default:
@@ -1917,45 +1934,101 @@ public class PlayerActivity extends Activity {
             case KeyEvent.KEYCODE_DPAD_RIGHT:
             case KeyEvent.KEYCODE_BUTTON_R2:
             case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
-                if (tvSeekController.isArmed()) {
-                    commitTvSeek();
-                    return true;
+                if (!isScrubbing) {
+                    playerView.postDelayed(playerView.textClearRunnable, 1_000);
+                }
+                if (keyScrubTarget >= 0) {
+                    playerView.removeCallbacks(keyScrubCommit);
+                    playerView.postDelayed(keyScrubCommit, 520);
                 }
                 break;
         }
         return super.onKeyUp(keyCode, event);
     }
 
-    private boolean previewTvSeek(int direction, KeyEvent event) {
-        if (player == null || !player.isCurrentMediaItemSeekable()) return false;
+    private boolean seekWithKey(boolean forward, boolean held) {
+        if (player == null) return false;
+        final long now = SystemClock.uptimeMillis();
+        // Remote repeat rates vary. Wait at least 200 ms between useful steps, and while the
+        // previous picture has not landed wait up to 600 ms before advancing the target again.
+        if (held && now - keyScrubLastMs
+                < (frameRendered ? KEY_HOLD_STEP_FLOOR_MS : KEY_HOLD_STEP_CEILING_MS)) {
+            return true;
+        }
         playerView.removeCallbacks(playerView.textClearRunnable);
         playerView.showSeekProgress();
-        long eventTime = event == null ? SystemClock.uptimeMillis() : event.getEventTime();
-        if (event != null && event.getRepeatCount() > 0) {
-            tvSeekController.hold(direction, eventTime);
-        } else {
-            tvSeekController.press(direction, eventTime);
+        final long current = player.getCurrentPosition();
+        if (playerView.keySeekStart == -1) {
+            playerView.keySeekStart = current;
         }
-        long current = player.getCurrentPosition();
-        long duration = player.getDuration();
-        long target = tvSeekController.previewTarget(current, duration);
-        StringBuilder position = new StringBuilder(Utils.formatMilis(target));
-        if (duration > 0 && duration != C.TIME_UNSET) {
-            position.append(" · ").append(Math.round(target * 100f / duration)).append('%');
+        final long duration = player.getDuration();
+        if (duration <= 0) {
+            final long target = Math.max(0, current + (forward ? 3_000 : -3_000));
+            player.setSeekParameters(forward
+                    ? SeekParameters.NEXT_SYNC : SeekParameters.PREVIOUS_SYNC);
+            player.seekTo(target);
+            keyScrubLastMs = now;
+            showKeySeekMessage(target);
+            return true;
         }
-        playerView.setCustomErrorMessage(Utils.formatMilisSign(target - current)
-                + "\n" + position);
+
+        // Reversing is a fine correction after an overshoot, so restart the acceleration ladder.
+        keyScrubSteps = forward == keyScrubForward
+                && (held || now - keyScrubLastMs < 450) ? keyScrubSteps + 1 : 0;
+        keyScrubForward = forward;
+        keyScrubLastMs = now;
+        final long from = keyScrubTarget >= 0 ? keyScrubTarget : current;
+        final long step = keyScrubStep(duration);
+        keyScrubTarget = Math.max(0,
+                Math.min(duration, from + (forward ? step : -step)));
+        showKeySeekMessage(keyScrubTarget);
+        setKeySeekDirection(keyScrubTarget);
+        if (seekIfLanded(keyScrubTarget)) keyScrubSeeked = keyScrubTarget;
+        playerView.removeCallbacks(keyScrubCommit);
+        playerView.postDelayed(keyScrubCommit, 700);
         return true;
     }
 
-    private void commitTvSeek() {
-        if (player == null || !tvSeekController.isArmed()) return;
-        long current = player.getCurrentPosition();
-        long target = tvSeekController.consumeTarget(current, player.getDuration());
-        player.setSeekParameters(target < current
-                ? SeekParameters.PREVIOUS_SYNC : SeekParameters.NEXT_SYNC);
+    /** One seek in flight at a time, shared by remote and gesture scrubbing. */
+    boolean seekIfLanded(long position) {
+        if (!frameRendered || player == null) return false;
+        frameRendered = false;
+        player.seekTo(position);
+        return true;
+    }
+
+    private void setKeySeekDirection(long target) {
+        player.setSeekParameters(target >= player.getCurrentPosition()
+                ? SeekParameters.NEXT_SYNC : SeekParameters.PREVIOUS_SYNC);
+    }
+
+    private long keyScrubStep(long duration) {
+        final long cap = Math.min(60_000, Math.max(3_000, duration / 10));
+        if (keyScrubSteps < 2) return 3_000;
+        if (keyScrubSteps < 4) return Math.min(10_000, cap);
+        if (keyScrubSteps < 8) return Math.min(30_000, cap);
+        return cap;
+    }
+
+    private void showKeySeekMessage(long target) {
+        final long duration = player != null ? player.getDuration() : C.TIME_UNSET;
+        final StringBuilder position = new StringBuilder(Utils.formatMilis(target));
+        if (duration > 0) {
+            position.append(" · ").append(Math.round(target * 100f / duration)).append('%');
+        }
+        playerView.setCustomErrorMessage(Utils.formatMilisSign(
+                target - playerView.keySeekStart) + "\n" + position);
+    }
+
+    private void commitKeyScrub() {
+        final long target = keyScrubTarget;
+        final long seeked = keyScrubSeeked;
+        keyScrubTarget = -1;
+        keyScrubSeeked = -1;
+        keyScrubSteps = 0;
+        if (target < 0 || target == seeked || player == null) return;
+        setKeySeekDirection(target);
         player.seekTo(target);
-        playerView.postDelayed(playerView.textClearRunnable, 1000);
     }
 
     @Override
@@ -7711,7 +7784,11 @@ public class PlayerActivity extends Activity {
             playerView.removeCallbacks(audioRestartRunnable);
             playerView.removeCallbacks(hidePausedControllerRunnable);
             playerView.removeCallbacks(pauseReleaseRunnable);
+            playerView.removeCallbacks(keyScrubCommit);
         }
+        keyScrubTarget = -1;
+        keyScrubSeeked = -1;
+        keyScrubSteps = 0;
         stoppedForPause = false;
         audioRestartInFlight = false;
         audioRestartRetries = 0;
@@ -9183,12 +9260,7 @@ public class PlayerActivity extends Activity {
             playerView.clearIcon();
             playerView.setCustomErrorMessage(Utils.formatMilisSign(diff));
         }
-        if (frameRendered) {
-            frameRendered = false;
-            if (player != null) {
-                player.seekTo(position);
-            }
-        }
+        seekIfLanded(position);
     }
 
     void updateSubtitleStyle(final Context context) {

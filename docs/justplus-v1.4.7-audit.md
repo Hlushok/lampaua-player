@@ -21,8 +21,8 @@
 | `app/libs/lib-exoplayer-release.aar` | Import byte-for-byte | Must match Media3 1.11.0. | Git blob `7f55e3c7def6f4672d42ebde095b97b1ce09b52a` matches donor |
 | `app/src/main/java/com/brouken/player/App.java` | Exclude donor hunk | UA Player has no Sentry bootstrap; diagnostics stay local until explicitly shared. | Planned |
 | `app/src/main/java/com/brouken/player/BottomBarLayout.java` | Import | Donor-owned measured-height parking. | `donorV147BottomBarAndTransferContractsStayIntegrated` passed |
-| `app/src/main/java/com/brouken/player/CustomPlayerView.java` | Semantic merge | Route gesture seeks through the donor one-in-flight gate. | Planned |
-| `app/src/main/java/com/brouken/player/PlayerActivity.java` | Semantic merge; donor wins | Full donor runtime behavior plus approved UA hooks only. | Bottom-bar/transfer slice compiled; focused contract passed |
+| `app/src/main/java/com/brouken/player/CustomPlayerView.java` | Semantic merge | Route gesture seeks through the donor one-in-flight gate. | Gesture seek gate compiled; focused TV contract passed |
+| `app/src/main/java/com/brouken/player/PlayerActivity.java` | Semantic merge; donor wins | Full donor runtime behavior plus approved UA hooks only. | Bottom-bar/transfer and TV seek/EXIT slices compiled; focused contracts passed |
 | `app/src/main/java/com/brouken/player/Prefs.java` | Semantic merge; donor wins | Donor defaults/settings plus UA-only preferences. | `showTransfer` imported; focused contract passed |
 | `app/src/main/java/com/brouken/player/Utils.java` | Semantic merge | Donor diagnostic capacity without Sentry transport. | Planned |
 | `app/src/main/res/layout/exo_player_control_view.xml` | Semantic merge; donor wins | Donor bottom-bar container and scrim geometry plus UA resources. | Measured-height container compiled; focused contract passed |

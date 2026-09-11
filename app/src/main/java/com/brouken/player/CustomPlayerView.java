@@ -260,11 +260,7 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
 
     private void seekGesture(final long position) {
         if (!(getContext() instanceof PlayerActivity)) return;
-        Player player = PlayerActivity.player;
-        PlayerActivity activity = (PlayerActivity) getContext();
-        if (player == null || !activity.frameRendered) return;
-        activity.frameRendered = false;
-        player.seekTo(position);
+        ((PlayerActivity) getContext()).seekIfLanded(position);
     }
 
     private String holdSpeedMode() {
