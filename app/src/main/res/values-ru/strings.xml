@@ -196,6 +196,7 @@
     <string name="decoder_compatibility_retry">Ошибка декодера. Повторяю в режиме совместимости</string>
     <string name="resolver_preparing_retry">Поток подготавливается. Повторяю попытку…</string>
     <string name="playback_recovery_retry">Воспроизведение прервано. Переподключаюсь…</string>
+    <string name="error_playback_timeout">Воспроизведение слишком долго не начинается. Попробуйте ещё раз.</string>
     <string name="error_local_media_corrupt">Локальный медиафайл неполный или повреждён.</string>
     <string name="pref_system_volume">Управление громкостью</string>
     <string name="pref_system_volume_on">Использовать громкость устройства</string>

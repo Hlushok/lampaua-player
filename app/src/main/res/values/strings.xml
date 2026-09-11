@@ -108,6 +108,7 @@
     <string name="decoder_compatibility_retry">Decoder error. Retrying in compatibility mode</string>
     <string name="resolver_preparing_retry">The stream is being prepared. Retrying…</string>
     <string name="playback_recovery_retry">Playback interrupted. Reconnecting…</string>
+    <string name="error_playback_timeout">Playback took too long to start. Please try again.</string>
     <string name="error_local_media_corrupt">The local media file is incomplete or damaged.</string>
     <string name="pref_system_volume">Volume control</string>
     <string name="pref_system_volume_on">Use the device volume</string>

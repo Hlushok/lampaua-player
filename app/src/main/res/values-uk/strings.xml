@@ -204,6 +204,7 @@
     <string name="decoder_compatibility_retry">Помилка декодера. Повторюю в режимі сумісності</string>
     <string name="resolver_preparing_retry">Потік готується. Повторюю спробу…</string>
     <string name="playback_recovery_retry">Відтворення перервано. Перепідключаюся…</string>
+    <string name="error_playback_timeout">Відтворення надто довго не починається. Спробуйте ще раз.</string>
     <string name="error_local_media_corrupt">Локальний медіафайл неповний або пошкоджений.</string>
     <string name="pref_system_volume">Керування гучністю</string>
     <string name="pref_system_volume_on">Використовувати гучність пристрою</string>

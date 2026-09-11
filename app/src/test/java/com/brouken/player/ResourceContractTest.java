@@ -184,7 +184,7 @@ public class ResourceContractTest {
         assertTrue(ukrainian.contains("name=\"together_public_needs_password\""));
         assertTrue(ukrainian.contains("name=\"pref_together_relay_summary\""));
         assertTrue(ukrainian.contains("name=\"together_qr_hint\""));
-        assertTrue(build.contains("com.google.zxing:core:3.5.3"));
+        assertTrue(build.contains("com.google.zxing:core:3.5.4"));
         assertTrue(manifest.contains("android.intent.action.SEND"));
         assertTrue(activity.contains("QRCodeWriter"));
         assertTrue(activity.contains("extras.remove(API_RETURN_RESULT)"));

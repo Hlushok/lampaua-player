@@ -122,6 +122,7 @@ import androidx.media3.exoplayer.hls.playlist.HlsPlaylistTracker;
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo;
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil;
+import androidx.media3.exoplayer.video.MediaCodecVideoDecoderException;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.source.LoadEventInfo;
 import androidx.media3.exoplayer.source.MediaLoadData;
@@ -476,6 +477,7 @@ public class PlayerActivity extends Activity {
     private boolean controllerChromeVisible;
     private final Map<View, Boolean> auxiliaryChromeTargets = new WeakHashMap<>();
     private long loadWatchdogBytes;
+    private int loadWatchdogSilentWindows;
     private final Runnable loadTimeoutRunnable = this::reportLoadWatchdog;
     private final Runnable sourceRetryRunnable = () -> {
         if (alive && player != null && player.getPlaybackState() == Player.STATE_IDLE) {
@@ -773,12 +775,14 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onVideoCodecError(EventTime eventTime, Exception error) {
-            Utils.log("video codec error: " + DiagnosticReport.rootMessage(error));
+            Utils.log("video codec error: " + DiagnosticReport.rootMessage(error)
+                    + " " + codecDetails(error));
         }
 
         @Override
         public void onAudioCodecError(EventTime eventTime, Exception error) {
-            Utils.log("audio codec error: " + DiagnosticReport.rootMessage(error));
+            Utils.log("audio codec error: " + DiagnosticReport.rootMessage(error)
+                    + " " + codecDetails(error));
         }
 
         @Override
@@ -4800,6 +4804,8 @@ public class PlayerActivity extends Activity {
         if (error != null) {
             report.append("\nError: ").append(error.getClass().getName()).append('\n');
             report.append("Root message: ").append(DiagnosticReport.rootMessage(error)).append('\n');
+            String codec = codecDetails(error);
+            if (!codec.isEmpty()) report.append("Codec: ").append(codec).append('\n');
             report.append("\nStack trace:\n").append(DiagnosticReport.stackTrace(error));
         }
         return DiagnosticReport.sanitizeText(report.toString());
@@ -5818,6 +5824,7 @@ public class PlayerActivity extends Activity {
             String lowerUrl = lampaPlaylist.useLowerQuality(item);
             if (lowerUrl != null) {
                 boolean resume = player.getPlayWhenReady();
+                Utils.log("quality lowered to a source variant");
                 decoderQualityFallbackTried = true;
                 alternateStreamTypeTried = false;
                 forcedStreamMimeType = null;
@@ -5844,6 +5851,7 @@ public class PlayerActivity extends Activity {
             }
         }
         if (bestLower != null) {
+            Utils.log("quality lowered to " + bestLower.label);
             decoderQualityFallbackTried = true;
             applyVideoQuality(bestLower);
             return true;
@@ -7623,6 +7631,10 @@ public class PlayerActivity extends Activity {
             forceHevcForDolbyVision = false;
             stuckRecoveryAttemptedUri = null;
         }
+        Utils.log("init: network=" + isNetworkUri + " keepPaused=" + keepPaused
+                + " forceHevc=" + forceHevcForDolbyVision + " retries source="
+                + sourceRecoveryAttempts + " compatibility=" + compatibilityRecoveryAttempts
+                + " live=" + liveRecoveryAttempts);
 
         if (player != null) {
             player.removeListener(playerListener);
@@ -8023,6 +8035,7 @@ public class PlayerActivity extends Activity {
     }
 
     public void releasePlayer(boolean save) {
+        if (player != null) Utils.log("release player" + (save ? ", saving" : ""));
         cancelFrameRateSwitchWait();
         videoFreezePolicy.resetWindow();
         cancelSubtitleSearch();
@@ -8098,6 +8111,8 @@ public class PlayerActivity extends Activity {
             return;
         }
         if (audioRestartInFlight || !player.isPlaying()) {
+            Utils.log("audio reselect: waiting, inFlight=" + audioRestartInFlight
+                    + " playing=" + player.isPlaying());
             if (audioRestartRetries < 5) {
                 audioRestartRetries++;
                 playerView.postDelayed(audioRestartRunnable, 100);
@@ -8172,6 +8187,7 @@ public class PlayerActivity extends Activity {
         boolean persist = error.errorCode
                 == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED;
         audioRecoveryState.onWriteFailure(mime);
+        Utils.log("audio passthrough revoked: " + mime + (persist ? ", persisted" : ""));
         sessionRevokedAudioMimes.add(mime);
         if (persist) mPrefs.revokeAudioMime(mime);
         audioSink.block(mime);
@@ -8201,6 +8217,7 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onRenderedFirstFrame() {
+            Utils.log("first frame rendered");
             frameRendered = true;
             resumeFrameRendered = true;
             playerView.removeCallbacks(resumeWatchdogRunnable);
@@ -8210,6 +8227,13 @@ public class PlayerActivity extends Activity {
         @Override
         public void onPositionDiscontinuity(Player.PositionInfo oldPosition,
                                             Player.PositionInfo newPosition, int reason) {
+            if (!isScrubbing) {
+                Utils.log("discontinuity reason=" + reason + " " + oldPosition.positionMs
+                        + " -> " + newPosition.positionMs
+                        + (oldPosition.mediaItemIndex == newPosition.mediaItemIndex ? ""
+                        : " item " + oldPosition.mediaItemIndex + " -> "
+                                + newPosition.mediaItemIndex));
+            }
             videoFreezePolicy.resetWindow();
             if (subtitleOffset != null) subtitleOffset.clear();
             if (secondarySubtitleOffset != null) secondarySubtitleOffset.clear();
@@ -8222,8 +8246,12 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onPlayWhenReadyChanged(boolean playWhenReady, int reason) {
+            Utils.log("playWhenReady=" + playWhenReady + " reason=" + reason);
             if (playWhenReady && stoppedForPause) {
                 stoppedForPause = false;
+                // prepare() creates a fresh output; do not immediately tear it down again by spending
+                // the pause-triggered passthrough reselect request.
+                audioRecoveryState.clearRebuildRequest();
                 if (player != null && player.getPlaybackState() == Player.STATE_IDLE) {
                     Utils.log("pause: re-preparing after the source was let go");
                     player.prepare();
@@ -8239,6 +8267,9 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onIsPlayingChanged(boolean isPlaying) {
+            Utils.log("playing=" + isPlaying + (player == null ? ""
+                    : " playWhenReady=" + player.getPlayWhenReady() + " state="
+                            + playbackStateName(player.getPlaybackState())));
             videoFreezePolicy.resetWindow();
             if (subtitleOffset != null) subtitleOffset.wake();
             if (secondarySubtitleOffset != null) secondarySubtitleOffset.wake();
@@ -8463,6 +8494,9 @@ public class PlayerActivity extends Activity {
                 }
                 return;
             }
+            Utils.log("tracks: video=" + selectedMime(tracks, C.TRACK_TYPE_VIDEO)
+                    + " audio=" + selectedMime(tracks, C.TRACK_TYPE_AUDIO)
+                    + " passthrough=" + (audioSink != null && audioSink.isPassthrough()));
             resolveTrackNames();
             updateLampaTrackDetails();
             updateMediaControlVisibility();
@@ -8481,6 +8515,12 @@ public class PlayerActivity extends Activity {
         public void onPlayerError(PlaybackException error) {
             cancelPlaybackWatchdogs();
             updateLoading(false);
+            Utils.log("error " + error.getErrorCodeName() + ": "
+                    + DiagnosticReport.rootMessage(error)
+                    + (error instanceof ExoPlaybackException
+                    && ((ExoPlaybackException) error).rendererFormat != null
+                    ? " format=" + ((ExoPlaybackException) error).rendererFormat.codecs : "")
+                    + " " + codecDetails(error));
             if (recoverFromAudioTrackFailure(error)) return;
             if (error instanceof ExoPlaybackException) {
                 final ExoPlaybackException exoPlaybackException = (ExoPlaybackException) error;
@@ -8590,6 +8630,43 @@ public class PlayerActivity extends Activity {
         }
     }
 
+    private static String codecDetails(Throwable error) {
+        final StringBuilder details = new StringBuilder();
+        final MediaCodecVideoDecoderException video = firstCause(
+                error, MediaCodecVideoDecoderException.class);
+        if (video != null) details.append("surfaceValid=").append(video.isSurfaceValid);
+        final android.media.MediaCodec.CodecException codec = firstCause(
+                error, android.media.MediaCodec.CodecException.class);
+        if (codec != null) {
+            if (details.length() > 0) details.append(' ');
+            details.append("codec error=0x")
+                    .append(Integer.toHexString(codec.getErrorCode()))
+                    .append(" transient=").append(codec.isTransient())
+                    .append(" recoverable=").append(codec.isRecoverable())
+                    .append(" diagnostic=").append(codec.getDiagnosticInfo());
+        }
+        return details.toString();
+    }
+
+    private static <T extends Throwable> T firstCause(Throwable error, Class<T> type) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (type.isInstance(cause)) return type.cast(cause);
+        }
+        return null;
+    }
+
+    private static String selectedMime(Tracks tracks, int trackType) {
+        for (Tracks.Group group : tracks.getGroups()) {
+            if (group.getType() != trackType || !group.isSelected()) continue;
+            for (int index = 0; index < group.length; index++) {
+                if (group.isTrackSelected(index)) {
+                    return String.valueOf(group.getTrackFormat(index).sampleMimeType);
+                }
+            }
+        }
+        return "none";
+    }
+
     /** Record recovery outcomes only in the user-shareable, redacted local playback trace. */
     private void reportOutcome(String outcome, Throwable error) {
         final StringBuilder line = new StringBuilder("outcome: ").append(outcome);
@@ -8618,6 +8695,7 @@ public class PlayerActivity extends Activity {
         String uri = item.localConfiguration.uri.toString();
         if (uri.equals(stuckRecoveryAttemptedUri)) return false;
         stuckRecoveryAttemptedUri = uri;
+        Utils.log("rebuild: Dolby Vision " + format.codecs + " as HEVC");
         forceHevcForDolbyVision = true;
         pendingStuckRecovery = true;
         restorePlayState = true;
@@ -8704,6 +8782,9 @@ public class PlayerActivity extends Activity {
         decoderCompatibilityMode = true;
         decoderCompatibilityUri = mediaItem.localConfiguration.uri.toString();
         Format format = player.getVideoFormat();
+        Utils.log("decoder compatibility retry " + compatibilityRecoveryAttempts
+                + ": " + (format == null ? "unknown"
+                : format.sampleMimeType + " " + format.codecs));
         if (format != null && MimeTypes.VIDEO_DOLBY_VISION.equals(format.sampleMimeType)) {
             forceHevcForDolbyVision = true;
             pendingStuckRecovery = true;
@@ -8890,16 +8971,20 @@ public class PlayerActivity extends Activity {
         switch (action) {
             case SEEK_BACK_ONE_MS:
                 lastVideoFreezeRecovery = "seek";
+                Utils.log("video freeze: seek (" + videoFreezePolicy.recoveries() + ")");
                 player.setSeekParameters(SeekParameters.EXACT);
                 player.seekTo(Math.max(0L, player.getCurrentPosition() - 1L));
                 return true;
             case PREPARE:
                 lastVideoFreezeRecovery = "prepare";
+                Utils.log("video freeze: prepare (" + videoFreezePolicy.recoveries() + ")");
                 scheduleLoadingIndicator(false);
                 player.prepare();
                 return true;
             case EXHAUSTED:
                 lastVideoFreezeRecovery = "decoder_fallback";
+                Utils.log("video freeze: decoder fallback ("
+                        + videoFreezePolicy.recoveries() + ")");
                 if (!recoverPlayback(PlaybackRecoveryPolicy.FailureKind.DECODER)) {
                     lastVideoFreezeRecovery = "exhausted";
                 }
@@ -8923,6 +9008,11 @@ public class PlayerActivity extends Activity {
     }
 
     private void armLoadWatchdog() {
+        loadWatchdogSilentWindows = 0;
+        rearmLoadWatchdog();
+    }
+
+    private void rearmLoadWatchdog() {
         cancelLoadWatchdog();
         loadWatchdogBytes = TrackNameParsingDataSource.bytesRead.get();
         playerView.postDelayed(loadTimeoutRunnable, VIDEO_LOAD_TIMEOUT_MS);
@@ -8940,16 +9030,48 @@ public class PlayerActivity extends Activity {
                 TrackNameParsingDataSource.bytesRead.get(), sourceKind);
         if (action == LoadWatchdogPolicy.Action.IGNORE) return;
         if (action == LoadWatchdogPolicy.Action.REARM) {
+            Utils.log("watchdog: +" + Math.max(0L,
+                    TrackNameParsingDataSource.bytesRead.get() - loadWatchdogBytes)
+                    + " B, still loading");
             armLoadWatchdog();
             return;
         }
 
+        final long progressed = Math.max(0L,
+                TrackNameParsingDataSource.bytesRead.get() - loadWatchdogBytes);
+        final boolean connected = player != null && player.isLoading()
+                && Utils.isSupportedNetworkUri(currentPlayingUri());
+        if (LoadWatchdogPolicy.shouldWaitForConnectedSource(
+                connected, loadWatchdogSilentWindows)) {
+            loadWatchdogSilentWindows++;
+            Utils.log("watchdog: +" + progressed + " B, loader connected, silent window "
+                    + loadWatchdogSilentWindows + "/" + LoadWatchdogPolicy.MAX_SILENT_WINDOWS);
+            rearmLoadWatchdog();
+            return;
+        }
+
+        // Once playback has succeeded, keep a TV decoder allocated. Some boxes cannot create that same
+        // decoder again after stop(); a later seek or a recovered source can still resume this instance.
+        if (LoadWatchdogPolicy.shouldHoldTvDecoder(isTvBox, playbackEverReady)) {
+            Utils.log("watchdog: +" + progressed + " B, loading=" + player.isLoading()
+                    + ", TV box, holding the decoder");
+            reportOutcome("load-stalled-held", null);
+            if (lampaPlaylist != null) {
+                updateEpisodeControls();
+                updateLampaTopPanel();
+            }
+            showSnack(getString(R.string.error_playback_stalled), null);
+            return;
+        }
+
+        Utils.log("watchdog: +" + progressed + " B, loading="
+                + (player != null && player.isLoading()) + ", stopping");
         reportOutcome("load-timeout", null);
         int message = sourceKind == LoadWatchdogPolicy.SourceKind.LOCAL
-                ? R.string.error_local_media_corrupt : R.string.error_playback_stalled;
+                ? R.string.error_local_media_corrupt
+                : (playbackEverReady ? R.string.error_playback_stalled
+                : R.string.error_playback_timeout);
         cancelLoadWatchdog();
-        showPlaybackReport(getString(R.string.playback_error_report_title),
-                getString(message), null);
         player.stop();
         updateLoading(false);
         if (lampaPlaylist != null) {
@@ -8957,6 +9079,7 @@ public class PlayerActivity extends Activity {
             updateLampaTopPanel();
             playerView.showController();
         }
+        showSnack(getString(message), null);
     }
 
     private LoadWatchdogPolicy.SourceKind currentLoadSourceKind() {
@@ -8984,7 +9107,10 @@ public class PlayerActivity extends Activity {
                 updateLoading(true);
                 Utils.showText(playerView, getString(R.string.playback_recovery_retry), 2500);
                 playerView.removeCallbacks(sourceRetryRunnable);
-                playerView.postDelayed(sourceRetryRunnable, sourceRetryDelayMs());
+                long reprepareDelay = sourceRetryDelayMs();
+                Utils.log("source reprepare " + sourceRecoveryAttempts + " in "
+                        + reprepareDelay + " ms");
+                playerView.postDelayed(sourceRetryRunnable, reprepareDelay);
                 return true;
             case RETRY_SOURCE:
                 recoveryOutcomePending = true;
@@ -8999,6 +9125,7 @@ public class PlayerActivity extends Activity {
                                 : R.string.playback_recovery_retry), 2500);
                 String retryKey = playbackRecoveryKey;
                 long delay = sourceRetryDelayMs();
+                Utils.log("source rebuild " + sourceRecoveryAttempts + " in " + delay + " ms");
                 playerView.postDelayed(() -> {
                     if (isFinishing() || isDestroyed() || switchingPlaylistItem
                             || !Objects.equals(retryKey, playbackRecoveryKey)) return;
@@ -9046,6 +9173,7 @@ public class PlayerActivity extends Activity {
         recoveryOutcomePending = true;
         liveRecoveryAttempts++;
         lastLiveRecoveryAt = now;
+        Utils.log("live stall: rejoin " + liveRecoveryAttempts);
         scheduleLoadingIndicator(true);
         player.seekToDefaultPosition();
         player.prepare();

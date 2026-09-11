@@ -7,10 +7,17 @@ Open-source Android video player for Lampa and LampaUA, based on [Just Player](h
 - Android 6.0+ and Android TV
 - Media3/ExoPlayer playback engine
 
+## Install
+
+Download the current universal APK from the public
+[UA Player releases](https://github.com/Hlushok/lampaua-player/releases/latest) and open it on a
+phone, tablet or TV box. Existing installs update in place when the APK is signed with the same
+UA Player certificate.
+
 ## Features
 
 - HLS, DASH, RTMP, RTSP and regular HTTP media streams, with IPTV/live-window recovery;
-- torrent-aware buffering and in-place retry for transient network reads;
+- torrent-aware buffering with patient connected-load windows and in-place retry for transient network reads;
 - video quality, audio track and subtitle selection;
 - ordered preferred audio and subtitle languages, in-player subtitle styling and opt-in online subtitle search;
 - subtitle timing from -30 to +30 seconds and interruption-free attachment of newly found text subtitles;
@@ -26,10 +33,12 @@ Open-source Android video player for Lampa and LampaUA, based on [Just Player](h
 - 4K-oriented buffering, decoder fallback and dropped-frame fallback;
 - bounded retry and request coalescing for deferred Lampac stream resolution;
 - compatibility recovery after renderer failures, Dolby Vision profile 7 conversion/fallback and manifest detection for extensionless streams;
-- TV-focused D-pad navigation, accelerated seeking and input locking;
+- TV-focused D-pad navigation, picture-synchronised accelerated seeking, EXIT handling and input locking;
 - fit, crop, stretch and explicit aspect-ratio viewing modes;
 - held-touch speed steering, configurable remaining-time display and persisted playback speed;
-- sleep timer, transfer speed, live statistics and local sanitized playback reports;
+- sleep timer, an optional compact transfer line, live statistics and local sanitized playback reports;
+- decoded surround sound by default, with optional Dolby/DTS pass-through for compatible receivers;
+- bounded recovery that keeps an already working TV decoder alive across long pauses and stalled network ranges;
 - optional player-volume boost up to 200% with safe passthrough fallback;
 - independent update discovery with formatted notes from public GitHub Releases.
 
@@ -92,7 +101,7 @@ The JSON playlist can contain direct `url` values or short-lived `resolver_url` 
 Requirements:
 
 - JDK 21
-- Android SDK 36
+- Android SDK 37
 - Android SDK build-tools
 
 Build a universal APK:
@@ -123,4 +132,4 @@ This repository contains only the UA Player Android application. Lampac modules,
 
 UA Player is derived from [moneytoo/Player](https://github.com/moneytoo/Player). The project retains the upstream [Unlicense](LICENSE). Third-party AndroidX Media/decoder components keep their respective licenses.
 
-Selected playback, subtitle and Watch Together behavior was independently adapted after reviewing [just-plus-player/just-plus-player](https://github.com/just-plus-player/just-plus-player) by Oleksandr Zhyzhchenko. UA Player does not include Just+ branding, Sentry or remote diagnostic uploads. Anonymous room aliases are adapted from [LocalSend](https://github.com/localsend/localsend) under Apache-2.0; attribution is retained in the source.
+The player core is synchronized through stable Just+ `v1.4.7` after reviewing [just-plus-player/just-plus-player](https://github.com/just-plus-player/just-plus-player) by Oleksandr Zhyzhchenko. UA Player retains its own identity and LAMPA/LampaUA integration layer, and does not include Just+ branding, Sentry or remote diagnostic uploads. Anonymous room aliases are adapted from [LocalSend](https://github.com/localsend/localsend) under Apache-2.0; attribution is retained in the source.

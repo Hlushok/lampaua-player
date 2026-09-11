@@ -9,6 +9,8 @@ import static com.brouken.player.LoadWatchdogPolicy.Action.REPORT_MIDSTREAM_STAL
 import static com.brouken.player.LoadWatchdogPolicy.SourceKind.LOCAL;
 import static com.brouken.player.LoadWatchdogPolicy.SourceKind.NETWORK;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class LoadWatchdogPolicyTest {
     @Test public void activeTorrentLoadGetsAnotherWindow() {
@@ -34,5 +36,18 @@ public class LoadWatchdogPolicyTest {
     @Test public void callbackAfterReadyIsIgnored() {
         assertEquals(IGNORE, LoadWatchdogPolicy.evaluate(
                 false, true, 0L, 0L, NETWORK));
+    }
+
+    @Test public void connectedTorrentGetsFourSilentWindowsInTotal() {
+        assertTrue(LoadWatchdogPolicy.shouldWaitForConnectedSource(true, 0));
+        assertTrue(LoadWatchdogPolicy.shouldWaitForConnectedSource(true, 2));
+        assertFalse(LoadWatchdogPolicy.shouldWaitForConnectedSource(true, 3));
+        assertFalse(LoadWatchdogPolicy.shouldWaitForConnectedSource(false, 0));
+    }
+
+    @Test public void onlyAStartedTvPlaybackKeepsItsDecoder() {
+        assertTrue(LoadWatchdogPolicy.shouldHoldTvDecoder(true, true));
+        assertFalse(LoadWatchdogPolicy.shouldHoldTvDecoder(true, false));
+        assertFalse(LoadWatchdogPolicy.shouldHoldTvDecoder(false, true));
     }
 }
