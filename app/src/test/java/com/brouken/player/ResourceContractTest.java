@@ -29,6 +29,12 @@ public class ResourceContractTest {
         return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 
+    private static String readRootProjectFile(String relativePath) throws Exception {
+        Path cwd = Paths.get("").toAbsolutePath();
+        Path root = Files.exists(cwd.resolve("settings.gradle")) ? cwd : cwd.getParent();
+        return new String(Files.readAllBytes(root.resolve(relativePath)), StandardCharsets.UTF_8);
+    }
+
     private static String section(String source, String start, String end) {
         int from = source.indexOf(start);
         int to = source.indexOf(end, Math.max(0, from + start.length()));
@@ -755,5 +761,64 @@ public class ResourceContractTest {
         assertTrue(playlist.contains("String toSessionJson()"));
         assertTrue(playlist.contains("playback_results"));
         assertTrue(playlist.contains("_session_segments"));
+    }
+
+    @Test
+    public void donorV147BuildStackMatches() throws Exception {
+        String root = readRootProjectFile("build.gradle");
+        String app = readRootProjectFile("app/build.gradle");
+        String wrapper = readRootProjectFile("gradle/wrapper/gradle-wrapper.properties");
+
+        assertTrue(root.contains("com.android.tools.build:gradle:9.4.0"));
+        assertTrue(app.contains("compileSdk = 37"));
+        assertTrue(app.contains("media3_version = '1.11.0'"));
+        assertTrue(app.contains("com.squareup.okhttp3:okhttp:5.5.0"));
+        assertTrue(app.contains("com.google.zxing:core:3.5.4"));
+        assertTrue(wrapper.contains("gradle-9.7.1-bin.zip"));
+        assertTrue(app.contains("applicationId \"com.lampaua.player\""));
+        assertTrue(app.contains("versionCode 20"));
+        assertTrue(app.contains("versionName \"2.0.0\""));
+    }
+
+    @Test
+    public void donorV147BottomBarAndTransferContractsStayIntegrated() throws Exception {
+        String bar = readProjectFile("src/main/java/com/brouken/player/BottomBarLayout.java");
+        String activity = readProjectFile("src/main/java/com/brouken/player/PlayerActivity.java");
+        String layout = readProjectFile("src/main/res/layout/exo_player_control_view.xml");
+        String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
+
+        assertTrue(bar.contains("void setTravelScale(float scale)"));
+        assertTrue(layout.contains("com.brouken.player.BottomBarLayout"));
+        assertTrue(activity.contains("exoBottomBar.setTravelScale"));
+        assertTrue(activity.contains("private void updateTransfer()"));
+        assertTrue(preferences.contains("app:key=\"showTransfer\""));
+    }
+
+    @Test
+    public void donorV147TvSeekAndExitContractsStayIntegrated() throws Exception {
+        String activity = readProjectFile("src/main/java/com/brouken/player/PlayerActivity.java");
+        String view = readProjectFile("src/main/java/com/brouken/player/CustomPlayerView.java");
+
+        assertTrue(activity.contains("KEY_HOLD_STEP_FLOOR_MS = 200"));
+        assertTrue(activity.contains("KEY_HOLD_STEP_CEILING_MS = 600"));
+        assertTrue(activity.contains("private long keyScrubStep(long duration)"));
+        assertTrue(activity.contains("boolean seekIfLanded(long position)"));
+        assertTrue(activity.contains("case KeyEvent.KEYCODE_ESCAPE:"));
+        assertTrue(view.contains("seekIfLanded(position)"));
+        assertFalse(activity.contains("TvSeekController tvSeekController"));
+    }
+
+    @Test
+    public void donorV147AudioAndRecoveryContractsStayIntegrated() throws Exception {
+        String activity = readProjectFile("src/main/java/com/brouken/player/PlayerActivity.java");
+        String prefs = readProjectFile("src/main/java/com/brouken/player/Prefs.java");
+        String preferences = readProjectFile("src/main/res/xml/root_preferences.xml");
+
+        assertTrue(prefs.contains("PREF_KEY_AUDIO_PASSTHROUGH"));
+        assertTrue(prefs.contains("MimeTypes.AUDIO_RAW"));
+        assertTrue(preferences.contains("app:key=\"audioPassthrough\""));
+        assertTrue(activity.contains("recoverByRestartingTheScreen"));
+        assertTrue(activity.contains("nudgeWedgedReselect"));
+        assertTrue(activity.contains("reportOutcome"));
     }
 }
