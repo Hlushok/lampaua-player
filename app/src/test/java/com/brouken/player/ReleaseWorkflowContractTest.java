@@ -67,6 +67,9 @@ public class ReleaseWorkflowContractTest {
                 "      - name: Build signed universal APKs\n");
         String assemble = section(build,
                 "      - name: Build signed universal APKs\n",
+                "      - name: Ensure v1 v2 and v3 signatures\n");
+        String resign = section(build,
+                "      - name: Ensure v1 v2 and v3 signatures\n",
                 "      - name: Verify release APKs\n");
         String verify = section(build,
                 "      - name: Verify release APKs\n",
@@ -77,7 +80,7 @@ public class ReleaseWorkflowContractTest {
         String cleanup = build.substring(build.indexOf(
                 "      - name: Remove release signing key\n"));
 
-        assertEquals(3, count(build,
+        assertEquals(4, count(build,
                 "SIGNING_KEYSTORE: ${{ runner.temp }}/ua-player-release.jks"));
         assertFalse(build.contains(
                 "runs-on: ubuntu-latest\n    env:\n      SIGNING_KEYSTORE:"));
@@ -94,6 +97,14 @@ public class ReleaseWorkflowContractTest {
         assertTrue(assemble.contains(":app:assembleLegacyUniversalRelease"));
         assertTrue(assemble.contains("-Pandroid.injected.signing.key.alias=androiddebugkey"));
         assertFalse(assemble.contains("-Pandroid.injected.signing.key.alias=key"));
+
+        assertTrue(resign.contains("$build_tools/apksigner\" sign"));
+        assertTrue(resign.contains("--ks-key-alias androiddebugkey"));
+        assertTrue(resign.contains("--ks-pass env:KEYSTORE_PASSWORD"));
+        assertTrue(resign.contains("--v1-signing-enabled true"));
+        assertTrue(resign.contains("--v2-signing-enabled true"));
+        assertTrue(resign.contains("--v3-signing-enabled true"));
+        assertTrue(resign.contains("--v4-signing-enabled false"));
 
         assertTrue(verify.contains(
                 "latest_dir=\"app/build/outputs/apk/latestUniversal/release\""));

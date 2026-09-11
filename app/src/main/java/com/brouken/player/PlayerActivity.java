@@ -154,6 +154,7 @@ import com.brouken.player.skip.SkipController;
 import com.brouken.player.skip.SkipPolicy;
 import com.brouken.player.skip.SkipSegment;
 import com.brouken.player.skip.SkipSessionPolicy;
+import com.brouken.player.skip.SegmentFinder;
 import com.brouken.player.together.Relay;
 import com.brouken.player.together.Room;
 import com.brouken.player.together.RoomAction;
@@ -403,8 +404,12 @@ public class PlayerActivity extends Activity {
     private boolean manualSubtitleMovie;
     private int manualSubtitleSeason = -1;
     private int manualSubtitleEpisode = -1;
+    private int manualSubtitlePlaylistIndex = -1;
+    private List<TitleSearch.Episode> manualSubtitleEpisodes;
+    private int manualSubtitleAbsolute = -1;
     private int titleSearchGeneration;
     private int subtitleViewHeight;
+    private float subtitleShift;
     private AlertDialog subtitleOffsetDialog;
     private AlertDialog skipSessionDialog;
     private boolean switchingPlaylistItem;
@@ -2617,6 +2622,7 @@ public class PlayerActivity extends Activity {
                     }
                     putOfficialQuality(item, intent, "quality_levels", "quality_urls");
                     items.put(item);
+                    LampaPlaylist.putPlaylistTitle(root, apiTitle);
                     root.put("current_index", 0);
                     root.put("auto_next", false);
                     root.put("items", items);
@@ -2632,6 +2638,7 @@ public class PlayerActivity extends Activity {
             boolean autoNext = intent.getBooleanExtra(LampaPlaylist.EXTRA_AUTO_NEXT,
                     intent.getBooleanExtra("auto_next", true));
             lampaPlaylist = LampaPlaylist.fromJson(this, raw, index, autoNext);
+            lampaPlaylist.setTitleIfEmpty(apiTitle);
             alternateStreamTypeTried = false;
             decoderQualityFallbackTried = false;
             resetDecoderCompatibilityMode();
@@ -2723,6 +2730,7 @@ public class PlayerActivity extends Activity {
             }
             if (items.length() == 0) return null;
             JSONObject root = new JSONObject();
+            LampaPlaylist.putPlaylistTitle(root, intent.getStringExtra(API_TITLE));
             root.put("items", items);
             root.put("current_index", currentIndex);
             root.put("auto_next", true);
@@ -2862,7 +2870,12 @@ public class PlayerActivity extends Activity {
         apiAccess = true;
         apiAccessPartial = false;
         mPrefs.setPersistent(false);
-        if (item.title != null || !preserveMissingExtras) apiTitle = item.title;
+        String playlistTitle = lampaPlaylist == null ? null : lampaPlaylist.getTitle();
+        if (playlistTitle != null && !playlistTitle.trim().isEmpty()) {
+            apiTitle = playlistTitle;
+        } else if ((apiTitle == null || apiTitle.trim().isEmpty()) && item.title != null) {
+            apiTitle = item.title;
+        }
         if (!item.headers.isEmpty() || !preserveMissingExtras) {
             apiHeaders.clear();
             apiHeaders.putAll(item.headers);
@@ -2998,6 +3011,7 @@ public class PlayerActivity extends Activity {
         lampaFinishTime.setTextColor(gold);
         lampaFinishTime.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         lampaFinishTime.setGravity(Gravity.END);
+        lampaFinishTime.setSingleLine(true);
         lampaTopTimeBlock.addView(lampaClock);
         lampaTopTimeBlock.addView(lampaFinishTime);
         lampaHeaderButtons = new LinearLayout(this);
@@ -3098,7 +3112,6 @@ public class PlayerActivity extends Activity {
         int clockMaxWidth = ui.dp(narrowPortrait ? 112 : 220);
         lampaClock.setMaxWidth(clockMaxWidth);
         lampaFinishTime.setMaxWidth(clockMaxWidth);
-        lampaFinishTime.setMaxLines(2);
         lampaFinishTime.setEllipsize(null);
         if (overlayClock != null) {
             overlayClock.setTextSize(TypedValue.COMPLEX_UNIT_SP,
@@ -3437,6 +3450,8 @@ public class PlayerActivity extends Activity {
     }
 
     private static final class MenuItem {
+        final int iconRes;
+        final String imageUrl;
         final CharSequence title;
         final CharSequence subtitle;
         final boolean checked;
@@ -3444,11 +3459,23 @@ public class PlayerActivity extends Activity {
         final Runnable action;
 
         MenuItem(CharSequence title, CharSequence subtitle, boolean checked, Runnable action) {
-            this(title, subtitle, checked, false, action);
+            this(0, null, title, subtitle, checked, false, action);
         }
 
-        private MenuItem(CharSequence title, CharSequence subtitle, boolean checked,
-                         boolean chrome, Runnable action) {
+        MenuItem(int iconRes, CharSequence title, CharSequence subtitle,
+                 boolean checked, Runnable action) {
+            this(iconRes, null, title, subtitle, checked, false, action);
+        }
+
+        MenuItem(int iconRes, String imageUrl, CharSequence title, CharSequence subtitle,
+                 boolean checked, Runnable action) {
+            this(iconRes, imageUrl, title, subtitle, checked, false, action);
+        }
+
+        private MenuItem(int iconRes, String imageUrl, CharSequence title,
+                         CharSequence subtitle, boolean checked, boolean chrome, Runnable action) {
+            this.iconRes = iconRes;
+            this.imageUrl = imageUrl;
             this.title = title;
             this.subtitle = subtitle;
             this.checked = checked;
@@ -3457,11 +3484,11 @@ public class PlayerActivity extends Activity {
         }
 
         static MenuItem caption(CharSequence title) {
-            return new MenuItem(title, null, false, true, null);
+            return new MenuItem(0, null, title, null, false, true, null);
         }
 
         static MenuItem rule() {
-            return new MenuItem(null, null, false, true, null);
+            return new MenuItem(0, null, null, null, false, true, null);
         }
     }
 
@@ -3486,6 +3513,11 @@ public class PlayerActivity extends Activity {
     }
 
     private void showSideMenu(CharSequence title, List<MenuItem> items) {
+        showSideMenu(title, items, 34, 48);
+    }
+
+    private void showSideMenu(CharSequence title, List<MenuItem> items,
+                              int posterWidthDp, int posterHeightDp) {
         if (items == null || items.isEmpty()) return;
         final View[] selectedRow = new View[1];
         final View[] firstRow = new View[1];
@@ -3552,6 +3584,26 @@ public class PlayerActivity extends Activity {
             row.setBackground(lampaBackground(item.checked
                             ? Color.argb(190, 10, 39, 76) : Color.argb(70, 4, 18, 40),
                     item.checked ? Color.rgb(240, 183, 38) : Color.rgb(35, 58, 84), 8));
+
+            if (item.imageUrl != null && !item.imageUrl.isEmpty()) {
+                ImageView art = new ImageView(this);
+                art.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                art.setBackgroundColor(Color.rgb(33, 48, 66));
+                LinearLayout.LayoutParams artParams = new LinearLayout.LayoutParams(
+                        ui.dpS(posterWidthDp), ui.dpS(posterHeightDp));
+                artParams.setMarginEnd(ui.dp(12));
+                row.addView(art, 0, artParams);
+                Glide.with(this).load(item.imageUrl).centerCrop().into(art);
+            } else if (item.iconRes != 0) {
+                ImageView icon = new ImageView(this);
+                icon.setImageResource(item.iconRes);
+                icon.setImageTintList(ColorStateList.valueOf(
+                        item.checked ? Color.WHITE : Color.rgb(190, 209, 232)));
+                LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(
+                        ui.dp(22), ui.dp(22));
+                iconParams.setMarginEnd(ui.dp(12));
+                row.addView(icon, 0, iconParams);
+            }
             row.setOnClickListener(view -> {
                 if (menuDialog != null) menuDialog.dismiss();
                 if (item.action != null) item.action.run();
@@ -5088,7 +5140,7 @@ public class PlayerActivity extends Activity {
                 long remaining = Math.max(0, player.getDuration() - player.getCurrentPosition());
                 float speed = player.getPlaybackParameters().speed;
                 if (speed > 0) remaining = (long) (remaining / speed);
-                finish = getString(R.string.playback_finishes_at,
+                finish = getString(R.string.playback_finishes_at_compact,
                         lampaClockFormatter.format(new Date(System.currentTimeMillis() + remaining)));
             }
             lampaFinishTime.setText(finish);
@@ -6312,6 +6364,7 @@ public class PlayerActivity extends Activity {
 
     /** Adapted from Just+ Player PR #130 by Oleksandr Zhyzhchenko (Unlicense). */
     private void paintSubtitle(Uri subtitleUri) {
+        mainLineOff = false;
         paintedSubtitleUri = subtitleUri;
         subtitleTimelineUri = subtitleUri;
         subtitleTimeline = null;
@@ -6437,16 +6490,23 @@ public class PlayerActivity extends Activity {
     }
 
     private void resetSubtitleSessionForMediaChange() {
+        boolean keepManualSeries = switchingPlaylistItem && lampaPlaylist != null
+                && manualSubtitleTmdb != null && !manualSubtitleMovie;
         subtitleOffsetSec = 0;
         secondarySubtitleOffsetSec = 0;
         subtitleSearchSuppressed = null;
         clearSubtitleTimeline();
         secondaryChoiceMedia = null;
-        manualSubtitleMedia = null;
-        manualSubtitleTmdb = null;
-        manualSubtitleMovie = false;
-        manualSubtitleSeason = -1;
-        manualSubtitleEpisode = -1;
+        if (!keepManualSeries) {
+            manualSubtitleMedia = null;
+            manualSubtitleTmdb = null;
+            manualSubtitleMovie = false;
+            manualSubtitleSeason = -1;
+            manualSubtitleEpisode = -1;
+            manualSubtitlePlaylistIndex = -1;
+            manualSubtitleEpisodes = null;
+            manualSubtitleAbsolute = -1;
+        }
         secondaryTrackGroup = null;
         secondaryTrackPending = false;
         secondaryTextTrack.set(null);
@@ -6472,6 +6532,9 @@ public class PlayerActivity extends Activity {
         MediaItem.SubtitleConfiguration selected = selectedSideloadedSubtitle(tracks);
         if (selected == null) {
             if (paintedSubtitleUri == null) clearSubtitleTimeline();
+            return;
+        }
+        if (paintedSubtitleUri != null && !paintedSubtitleUri.equals(selected.uri)) {
             return;
         }
         if (selected.uri.equals(subtitleTimelineUri)) {
@@ -6543,6 +6606,18 @@ public class PlayerActivity extends Activity {
         return Utils.getFileName(this, uri);
     }
 
+    private boolean mainLineDisabled() {
+        if (mainLineOff) return true;
+        if (player == null) return false;
+        if (player.getTrackSelectionParameters().disabledTrackTypes
+                .contains(C.TRACK_TYPE_TEXT)) {
+            return true;
+        }
+        int primary = textRendererIndex(1);
+        return trackSelector != null && primary >= 0
+                && trackSelector.getParameters().getRendererDisabled(primary);
+    }
+
     private void disableSubtitles() {
         if (player == null) return;
         suppressAutomaticSubtitleSearch();
@@ -6551,10 +6626,19 @@ public class PlayerActivity extends Activity {
         if (subtitleOffset != null) subtitleOffset.hide();
         if (secondarySubtitleOffset != null) secondarySubtitleOffset.hide();
         mainLineOff = true;
-        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
-                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                .build());
+        int primary = trackSelector == null ? -1 : textRendererIndex(1);
+        if (primary < 0) {
+            player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                    .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    .build());
+            return;
+        }
+        DefaultTrackSelector.Parameters.Builder builder = trackSelector.buildUponParameters();
+        builder.clearOverridesOfType(C.TRACK_TYPE_TEXT);
+        builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false);
+        builder.setRendererDisabled(primary, true);
+        trackSelector.setParameters(builder);
     }
 
     private void applySubtitle(TrackGroup group, int index) {
@@ -6562,18 +6646,21 @@ public class PlayerActivity extends Activity {
         suppressAutomaticSubtitleSearch();
         clearPaintedSubtitle();
         mainLineOff = false;
-        mainTrackGroup = group;
-        mainTrackIndex = index;
+        int primary = trackSelector == null ? -1 : textRendererIndex(1);
+        if (primary >= 0) {
+            DefaultTrackSelector.Parameters.Builder enable = trackSelector.buildUponParameters();
+            enable.setRendererDisabled(primary, false);
+            trackSelector.setParameters(enable);
+        }
         player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
                 .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                 .setOverrideForType(new TrackSelectionOverride(
                         group, Collections.singletonList(index)))
                 .build());
-        playerView.post(() -> {
-            applyMainLineTrackSelection();
-            applySecondaryTrackSelection();
-        });
+        mainTrackGroup = group;
+        mainTrackIndex = index;
+        applyMainLineTrackSelection();
     }
 
     private boolean secondaryEnabled() {
@@ -6679,115 +6766,332 @@ public class PlayerActivity extends Activity {
         showSideMenu(getString(R.string.subtitle_secondary_title), items);
     }
 
-    private void showManualSubtitleSearch(boolean secondary) {
-        EditText query = new EditText(this);
-        query.setSingleLine(true);
-        query.setHint(R.string.subtitle_search_query_hint);
-        String currentTitle = apiTitle;
+    private static final int TITLE_QUERY_MIN = 3;
+    private static final long TITLE_QUERY_DEBOUNCE_MS = 400;
+
+    private String manualSubtitleSearchTitle() {
+        String seriesTitle = lampaPlaylist == null ? null : lampaPlaylist.getTitle();
         LampaPlaylist.Item current = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
-        if (current != null && current.title != null && !current.title.trim().isEmpty()) {
-            currentTitle = current.title;
+        if (seriesTitle != null && !seriesTitle.trim().isEmpty()) {
+            boolean episodic = current != null && (current.season > 0 || current.episode > 0
+                    || (lampaPlaylist != null && lampaPlaylist.size() > 1));
+            if (!episodic || current.title == null
+                    || !seriesTitle.trim().equalsIgnoreCase(current.title.trim())) {
+                return seriesTitle.trim();
+            }
         }
-        if (currentTitle != null) {
-            query.setText(currentTitle);
-            query.setSelection(query.length());
+        if (apiTitle == null || apiTitle.trim().isEmpty()) return "";
+        if (current != null && current.title != null
+                && apiTitle.trim().equalsIgnoreCase(current.title.trim())) {
+            return "";
         }
-        int pad = Utils.dpToPx(20);
-        query.setPadding(pad, query.getPaddingTop(), pad, query.getPaddingBottom());
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(R.string.subtitle_search_manual)
-                .setView(query)
-                .setPositiveButton(R.string.subtitle_search_action, (selected, which) ->
-                        runManualTitleSearch(query.getText().toString(), secondary))
-                .setNegativeButton(android.R.string.cancel, null)
-                .create();
-        dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
-        dialog.show();
-        query.requestFocus();
+        return apiTitle.trim();
     }
 
-    private void runManualTitleSearch(String query, boolean secondary) {
-        String text = query == null ? "" : query.trim();
-        if (text.isEmpty()) return;
-        int generation = ++titleSearchGeneration;
-        Toast.makeText(this, R.string.subtitle_search_searching, Toast.LENGTH_SHORT).show();
-        Thread worker = new Thread(() -> {
-            List<TitleSearch.Title> titles = TitleSearch.search(text);
-            runOnUiThread(() -> {
-                if (generation != titleSearchGeneration || isFinishing()) return;
-                if (titles.isEmpty()) {
-                    Toast.makeText(this, R.string.subtitle_search_none, Toast.LENGTH_SHORT).show();
+    private void showManualSubtitleSearch(boolean secondary) {
+        EditText query = new EditText(this);
+        query.setInputType(InputType.TYPE_CLASS_TEXT);
+        query.setSingleLine(true);
+        query.setHint(R.string.subtitle_search_hint);
+        query.setImeOptions(android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+
+        LinearLayout results = new LinearLayout(this);
+        results.setOrientation(LinearLayout.VERTICAL);
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.addView(results);
+
+        LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        int pad = ui.dp(16);
+        fields.setPadding(pad, 0, pad, 0);
+        fields.addView(query);
+        int listHeight = Math.min(ui.dpS(260),
+                getResources().getDisplayMetrics().heightPixels / 2);
+        fields.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, listHeight));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.subtitle_search_manual)
+                .setView(fields)
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        Handler handler = new Handler(Looper.getMainLooper());
+        Runnable[] pending = new Runnable[1];
+        query.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence value, int start,
+                                                    int count, int after) { }
+
+            @Override public void onTextChanged(CharSequence value, int start,
+                                                int before, int count) { }
+
+            @Override public void afterTextChanged(Editable value) {
+                if (pending[0] != null) handler.removeCallbacks(pending[0]);
+                String text = value.toString().trim();
+                titleSearchGeneration++;
+                if (text.length() < TITLE_QUERY_MIN) {
+                    results.removeAllViews();
                     return;
                 }
-                List<MenuItem> results = new ArrayList<>();
+                int generation = titleSearchGeneration;
+                pending[0] = () -> searchManualSubtitleTitles(
+                        text, generation, results, dialog, secondary);
+                handler.postDelayed(pending[0], TITLE_QUERY_DEBOUNCE_MS);
+            }
+        });
+        String initialTitle = manualSubtitleSearchTitle();
+        if (!initialTitle.isEmpty()) {
+            query.setText(initialTitle);
+            query.setSelection(query.length());
+        }
+        dialog.setOnShowListener(ignored -> {
+            styleUaAlertDialog(dialog, false);
+            query.requestFocus();
+        });
+        dialog.show();
+    }
+
+    private void searchManualSubtitleTitles(String query, int generation,
+                                            LinearLayout results, AlertDialog dialog,
+                                            boolean secondary) {
+        Thread worker = new Thread(() -> {
+            List<TitleSearch.Title> titles = TitleSearch.search(query);
+            runOnUiThread(() -> {
+                if (isFinishing() || generation != titleSearchGeneration) return;
+                results.removeAllViews();
+                if (titles.isEmpty()) {
+                    results.addView(searchNote(getString(R.string.subtitle_search_none)));
+                    return;
+                }
                 for (TitleSearch.Title title : titles) {
                     String kind = getString(title.movie
                             ? R.string.subtitle_search_movie : R.string.subtitle_search_series);
-                    String year = title.year == null ? null : String.valueOf(title.year);
-                    String summary = year == null ? kind : year + "  \u00B7  " + kind;
-                    results.add(new MenuItem(title.name, summary, false,
-                            () -> chooseManualSubtitleTitle(title, secondary)));
+                    String detail = title.year == null ? kind : title.year + " · " + kind;
+                    results.addView(searchRow(title.posterUrl, ui.dpS(40), ui.dpS(60),
+                            title.name, detail, () -> {
+                                dialog.dismiss();
+                                if (title.movie) {
+                                    applyManualSubtitleTitle(title, -1, -1,
+                                            Collections.emptyList(), secondary);
+                                } else {
+                                    chooseManualSubtitleSeason(title, secondary);
+                                }
+                            }));
                 }
-                showSideMenu(getString(R.string.subtitle_search_results), results);
             });
         }, "SubtitleTitleSearch");
         worker.setDaemon(true);
         worker.start();
     }
 
-    private void chooseManualSubtitleTitle(TitleSearch.Title title, boolean secondary) {
-        if (title.movie) {
-            applyManualSubtitleTitle(title, -1, -1, secondary);
+    private void chooseManualSubtitleSeason(TitleSearch.Title title, boolean secondary) {
+        Thread worker = new Thread(() -> {
+            String imdb = null;
+            try {
+                imdb = SegmentFinder.tmdbExternalImdb(Long.parseLong(title.tmdb), false);
+            } catch (Exception error) {
+                Utils.log("titles: imdb lookup " + error);
+            }
+            List<TitleSearch.Episode> episodes = TitleSearch.episodes(imdb, title.tmdb);
+            runOnUiThread(() -> {
+                if (isFinishing()) return;
+                if (episodes.isEmpty()) {
+                    askManualSeasonEpisode(title, episodes, secondary);
+                    return;
+                }
+                List<Integer> seasons = new ArrayList<>();
+                for (TitleSearch.Episode episode : episodes) {
+                    if (!seasons.contains(episode.season)) seasons.add(episode.season);
+                }
+                if (seasons.size() == 1) {
+                    chooseManualSubtitleEpisode(title, episodes, seasons.get(0), secondary);
+                    return;
+                }
+                MediaId current = currentMediaId();
+                List<MenuItem> items = new ArrayList<>();
+                items.add(manualNumbersRow(title, episodes, secondary));
+                for (int season : seasons) {
+                    items.add(new MenuItem(getString(season == 0
+                                    ? R.string.subtitle_search_specials
+                                    : R.string.subtitle_search_season, season),
+                            null, current.season == season,
+                            () -> chooseManualSubtitleEpisode(
+                                    title, episodes, season, secondary)));
+                }
+                showSideMenu(title.name, items);
+            });
+        }, "SubtitleTitleEpisodes");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private void chooseManualSubtitleEpisode(TitleSearch.Title title,
+                                             List<TitleSearch.Episode> episodes,
+                                             int season, boolean secondary) {
+        List<MenuItem> items = new ArrayList<>();
+        MediaId current = currentMediaId();
+        for (TitleSearch.Episode episode : episodes) {
+            if (episode.season != season) continue;
+            String number = getString(R.string.subtitle_search_episode, episode.number);
+            items.add(new MenuItem(0, episode.stillUrl,
+                    episode.name == null ? number : episode.name,
+                    episode.name == null ? null : number,
+                    current.season == season && current.episode == episode.number,
+                    () -> applyManualSubtitleTitle(
+                            title, season, episode.number, episodes, secondary)));
+        }
+        if (items.isEmpty()) {
+            applyManualSubtitleTitle(title, season, -1, episodes, secondary);
             return;
         }
+        items.add(0, manualNumbersRow(title, episodes, secondary));
+        showSideMenu(title.name, items, 72, 41);
+    }
+
+    private MenuItem manualNumbersRow(TitleSearch.Title title,
+                                      List<TitleSearch.Episode> episodes,
+                                      boolean secondary) {
+        return new MenuItem(getString(R.string.subtitle_search_type), null, false,
+                () -> askManualSeasonEpisode(title, episodes, secondary));
+    }
+
+    private void askManualSeasonEpisode(TitleSearch.Title title,
+                                        List<TitleSearch.Episode> episodes,
+                                        boolean secondary) {
         MediaId current = currentMediaId();
-        EditText season = numericField(current.season > 0 ? current.season : 1,
-                R.string.subtitle_search_season);
-        EditText episode = numericField(current.episode > 0 ? current.episode : 1,
-                R.string.subtitle_search_episode);
+        EditText season = new EditText(this);
+        season.setInputType(InputType.TYPE_CLASS_NUMBER);
+        season.setSingleLine(true);
+        if (current.season >= 0) season.setText(String.valueOf(current.season));
+
+        EditText episode = new EditText(this);
+        episode.setInputType(InputType.TYPE_CLASS_NUMBER);
+        episode.setSingleLine(true);
+        if (current.episode >= 1) episode.setText(String.valueOf(current.episode));
+
         LinearLayout fields = new LinearLayout(this);
         fields.setOrientation(LinearLayout.VERTICAL);
-        int pad = Utils.dpToPx(20);
+        int pad = ui.dp(16);
         fields.setPadding(pad, 0, pad, 0);
+        fields.addView(fieldLabel(R.string.subtitle_search_season_label));
         fields.addView(season);
+        fields.addView(fieldLabel(R.string.subtitle_search_episode_label));
         fields.addView(episode);
+
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(title.name)
+                .setTitle(R.string.subtitle_search_type)
                 .setView(fields)
-                .setPositiveButton(R.string.subtitle_search_action, (selected, which) ->
-                        applyManualSubtitleTitle(title, positiveNumber(season, 1),
-                                positiveNumber(episode, 1), secondary))
+                .setPositiveButton(android.R.string.ok, (selected, which) ->
+                        applyManualSubtitleTitle(title,
+                                number(season.getText().toString(), 1),
+                                number(episode.getText().toString(), -1),
+                                episodes, secondary))
                 .setNegativeButton(android.R.string.cancel, null)
                 .create();
         dialog.setOnShowListener(ignored -> styleUaAlertDialog(dialog, false));
         dialog.show();
-        season.post(season::requestFocus);
     }
 
-    private EditText numericField(int value, int hint) {
-        EditText field = new EditText(this);
-        field.setSingleLine(true);
-        field.setInputType(InputType.TYPE_CLASS_NUMBER);
-        field.setHint(hint);
-        field.setText(String.valueOf(value));
-        return field;
+    private TextView fieldLabel(int textRes) {
+        TextView label = new TextView(this);
+        label.setText(textRes);
+        label.setTextColor(Color.rgb(145, 178, 219));
+        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textCaption());
+        label.setPadding(0, ui.dp(8), 0, 0);
+        return label;
     }
 
-    private static int positiveNumber(EditText field, int fallback) {
+    private static int number(String text, int fallback) {
         try {
-            return Math.max(1, Integer.parseInt(field.getText().toString().trim()));
+            return Integer.parseInt(text.trim());
         } catch (RuntimeException ignored) {
             return fallback;
         }
     }
 
+    private TextView searchNote(CharSequence text) {
+        TextView note = new TextView(this);
+        note.setText(text);
+        note.setTextColor(Color.rgb(145, 178, 219));
+        note.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textBody());
+        note.setPadding(ui.dp(12), ui.dp(10), ui.dp(12), ui.dp(10));
+        return note;
+    }
+
+    private View searchRow(String imageUrl, int imageWidth, int imageHeight,
+                           CharSequence name, CharSequence detail, Runnable action) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(ui.dp(6), ui.dp(6), ui.dp(6), ui.dp(6));
+        row.setClickable(true);
+        row.setFocusable(true);
+        row.setMinimumHeight(ui.rowMinHeight());
+        row.setBackground(lampaBackground(Color.argb(70, 4, 18, 40),
+                Color.rgb(35, 58, 84), 8));
+
+        if (imageUrl != null && !imageUrl.isEmpty()) {
+            ImageView art = new ImageView(this);
+            art.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            art.setBackgroundColor(Color.rgb(33, 48, 66));
+            LinearLayout.LayoutParams artParams = new LinearLayout.LayoutParams(
+                    imageWidth, imageHeight);
+            artParams.setMarginEnd(ui.dp(12));
+            row.addView(art, artParams);
+            Glide.with(this).load(imageUrl).centerCrop().into(art);
+        }
+
+        LinearLayout textBlock = new LinearLayout(this);
+        textBlock.setOrientation(LinearLayout.VERTICAL);
+        textBlock.setLayoutParams(new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView title = new TextView(this);
+        title.setText(name);
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textBody());
+        textBlock.addView(title);
+        TextView summary = null;
+        if (!TextUtils.isEmpty(detail)) {
+            summary = new TextView(this);
+            summary.setText(detail);
+            summary.setTextColor(Color.rgb(145, 178, 219));
+            summary.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textCaption());
+            textBlock.addView(summary);
+        }
+        row.addView(textBlock);
+        fitLongText(row, title, summary);
+        row.setOnFocusChangeListener((view, focused) -> row.setBackground(lampaBackground(
+                focused ? Color.argb(190, 10, 39, 76) : Color.argb(70, 4, 18, 40),
+                focused ? Color.rgb(240, 183, 38) : Color.rgb(35, 58, 84), 8)));
+        row.setOnClickListener(view -> action.run());
+        return row;
+    }
+
     private void applyManualSubtitleTitle(TitleSearch.Title title, int season, int episode,
+                                          List<TitleSearch.Episode> episodes,
                                           boolean secondary) {
         manualSubtitleMedia = mPrefs.mediaUri;
         manualSubtitleTmdb = title.tmdb;
         manualSubtitleMovie = title.movie;
         manualSubtitleSeason = title.movie ? -1 : season;
         manualSubtitleEpisode = title.movie ? -1 : episode;
+        manualSubtitlePlaylistIndex = lampaPlaylist == null
+                ? -1 : lampaPlaylist.getCurrentIndex();
+        manualSubtitleEpisodes = null;
+        manualSubtitleAbsolute = -1;
+        if (!title.movie && episodes != null && !episodes.isEmpty()) {
+            List<TitleSearch.Episode> run = new ArrayList<>();
+            for (TitleSearch.Episode item : episodes) {
+                if (item.season > 0) run.add(item);
+            }
+            manualSubtitleEpisodes = run;
+            for (int index = 0; index < run.size(); index++) {
+                TitleSearch.Episode item = run.get(index);
+                if (item.season == season && item.number == episode) {
+                    manualSubtitleAbsolute = index;
+                    break;
+                }
+            }
+        }
         startManualSubtitleSearch(secondary);
     }
 
@@ -6978,6 +7282,42 @@ public class PlayerActivity extends Activity {
             }
         }
         return -1;
+    }
+
+    private boolean selectSubtitleByName() {
+        if (player == null || paintedSubtitleUri != null || mPrefs.subtitleTrackId != null
+                || hasOverrideType(C.TRACK_TYPE_TEXT) || mainLineDisabled()) {
+            return false;
+        }
+        if (mainLineTrackSelected()) return false;
+        List<String> preferred = AudioLanguagePriority.parse(mPrefs.languageSubtitle);
+        if (preferred.isEmpty()) return false;
+        int best = preferred.size();
+        boolean bestForced = true;
+        TrackGroup bestGroup = null;
+        int bestIndex = 0;
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            for (int index = 0; index < group.length; index++) {
+                Format format = group.getTrackFormat(index);
+                if (!group.isTrackSupported(index) || isPhantomClosedCaption(format)
+                        || Utils.toIso3Language(format.language) != null) {
+                    continue;
+                }
+                int rank = preferred.indexOf(Utils.languageInName(trackName(format), preferred));
+                if (rank < 0) continue;
+                boolean forced = (format.selectionFlags & C.SELECTION_FLAG_FORCED) != 0;
+                if ((bestForced && !forced) || (bestForced == forced && rank < best)) {
+                    best = rank;
+                    bestForced = forced;
+                    bestGroup = group.getMediaTrackGroup();
+                    bestIndex = index;
+                }
+            }
+        }
+        if (bestGroup == null) return false;
+        applySubtitle(bestGroup, bestIndex);
+        return true;
     }
 
     private boolean mainLineTrackSelected() {
@@ -7522,12 +7862,19 @@ public class PlayerActivity extends Activity {
     }
 
     private MediaId currentMediaId() {
-        if (manualSubtitleTmdb != null && Objects.equals(manualSubtitleMedia, mPrefs.mediaUri)) {
-            return new MediaId(null, manualSubtitleTmdb,
-                    manualSubtitleMovie ? -1 : manualSubtitleSeason,
-                    manualSubtitleMovie ? -1 : manualSubtitleEpisode);
-        }
         LampaPlaylist.Item item = lampaPlaylist == null ? null : lampaPlaylist.getCurrent();
+        if (manualSubtitleTmdb != null) {
+            if (manualSubtitleMovie && Objects.equals(manualSubtitleMedia, mPrefs.mediaUri)) {
+                return new MediaId(null, manualSubtitleTmdb, -1, -1);
+            }
+            if (!manualSubtitleMovie && (Objects.equals(manualSubtitleMedia, mPrefs.mediaUri)
+                    || item != null)) {
+                int index = lampaPlaylist == null ? -1 : lampaPlaylist.getCurrentIndex();
+                int[] coordinates = manualSubtitleCoordinates(item, index);
+                return new MediaId(null, manualSubtitleTmdb,
+                        coordinates[0], coordinates[1]);
+            }
+        }
         if (item != null) {
             return new MediaId(item.imdbId,
                     item.tmdbId > 0 ? String.valueOf(item.tmdbId) : null,
@@ -7538,6 +7885,28 @@ public class PlayerActivity extends Activity {
                 firstExtra(extras, "lampaua.tmdb_id", "tmdb_id"),
                 positiveExtra(extras, "lampaua.season", "season"),
                 positiveExtra(extras, "lampaua.episode", "episode"));
+    }
+
+    private int[] manualSubtitleCoordinates(LampaPlaylist.Item item, int index) {
+        if (index == manualSubtitlePlaylistIndex || item == null) {
+            return new int[] { manualSubtitleSeason, manualSubtitleEpisode };
+        }
+        int season = item.season;
+        int episode = item.episode;
+        if (manualSubtitleEpisodes == null || manualSubtitleAbsolute < 0) {
+            return new int[] { season < 1 ? 1 : season, episode };
+        }
+        for (TitleSearch.Episode known : manualSubtitleEpisodes) {
+            if (known.season == season && known.number == episode) {
+                return new int[] { season, episode };
+            }
+        }
+        int absolute = manualSubtitleAbsolute + (index - manualSubtitlePlaylistIndex);
+        if (absolute < 0 || absolute >= manualSubtitleEpisodes.size()) {
+            return new int[] { season < 1 ? 1 : season, episode };
+        }
+        TitleSearch.Episode lined = manualSubtitleEpisodes.get(absolute);
+        return new int[] { lined.season, lined.number };
     }
 
     private static String firstExtra(Bundle extras, String... keys) {
@@ -7565,6 +7934,11 @@ public class PlayerActivity extends Activity {
     private static boolean isPhantomClosedCaption(Format format) {
         return MimeTypes.APPLICATION_CEA608.equals(format.sampleMimeType)
                 && format.accessibilityChannel == Format.NO_VALUE;
+    }
+
+    private String trackName(Format format) {
+        if (format.label != null && !format.label.isEmpty()) return format.label;
+        return format.id == null ? null : resolvedTrackNames.get(format.id);
     }
 
     private static final class TrackingAudioSink extends ForwardingAudioSink {
@@ -7613,9 +7987,11 @@ public class PlayerActivity extends Activity {
 
     private void applyPreferredTextLanguages() {
         if (trackSelector == null) return;
-        List<String> languages = UkrainianSubtitlePolicy.playbackLanguages(
-                mPrefs.subtitleSearch, mPrefs.subtitleTranslate,
-                AudioLanguagePriority.parse(mPrefs.languageSubtitle));
+        List<String> languages = mainLineOff
+                ? Collections.emptyList()
+                : UkrainianSubtitlePolicy.playbackLanguages(
+                        mPrefs.subtitleSearch, mPrefs.subtitleTranslate,
+                        AudioLanguagePriority.parse(mPrefs.languageSubtitle));
         trackSelector.setParameters(trackSelector.buildUponParameters()
                 // Subtitles only start automatically when they match the user's ordered list.
                 .setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT)
@@ -8572,11 +8948,12 @@ public class PlayerActivity extends Activity {
             resolveTrackNames();
             updateLampaTrackDetails();
             updateMediaControlVisibility();
+            updateSubtitleTimeline(tracks);
+            selectSubtitleByName();
             rememberMainLineTrack();
             applySecondaryTrackSelection();
             applyMainLineTrackSelection();
             verifySecondaryTrackReached();
-            updateSubtitleTimeline(tracks);
             autoFillSecondarySubtitle();
             if (playerView != null) playerView.post(PlayerActivity.this::updateSubtitleButton);
             startSubtitleGuess();
@@ -9575,7 +9952,18 @@ public class PlayerActivity extends Activity {
             subtitleView.setBottomPaddingFraction(subtitleBaseBottomFraction());
             subtitleView.setPadding(0, 0, 0, 0);
             Utils.setViewParams(subtitleView, 0, 0, 0, 0, 0, 0, 0, 0);
+            slideSubtitles(subtitleView, 0);
         }
+    }
+
+    private void placeHint(int gap, int mainRoom) {
+        View hint = playerView == null ? null : playerView.findViewById(R.id.subtitle_secondary);
+        if (hint == null) return;
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) hint.getLayoutParams();
+        params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        params.topMargin = 0;
+        params.bottomMargin = gap + mainRoom;
+        hint.setLayoutParams(params);
     }
 
     private static final float SECONDARY_LINE_HEIGHT = 1.3f;
@@ -9596,13 +9984,11 @@ public class PlayerActivity extends Activity {
             return;
         }
 
-        int height = subtitleView.getHeight();
-        if (height <= 0) height = getResources().getDisplayMetrics().heightPixels;
+        int height = subtitleViewHeightPx(subtitleView);
         subtitleViewHeight = height;
         float mainPx = subtitleTextFraction(orientation, subtitlesScale) * height;
         float secondaryPx = subtitleTextFraction(orientation, secondarySubtitlesScale) * height;
-        int band = secondaryActive() && !secondaryOnDemand()
-                ? secondaryBandPx(secondaryPx) : 0;
+        int band = secondaryRestingBandPx(secondaryPx);
         int gap = Math.round(subtitleBaseBottomFraction() * height);
 
         subtitleView.setFixedTextSize(TypedValue.COMPLEX_UNIT_PX, mainPx);
@@ -9611,13 +9997,7 @@ public class PlayerActivity extends Activity {
         Utils.setViewParams(subtitleView, 0, 0, 0, band,
                 margin, 0, margin, 0);
 
-        TextView hint = playerView.findViewById(R.id.subtitle_secondary);
-        if (hint != null) {
-            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) hint.getLayoutParams();
-            params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-            params.bottomMargin = gap + (secondaryOnDemand() ? secondaryBandPx(mainPx) : 0);
-            hint.setLayoutParams(params);
-        }
+        placeHint(gap, secondaryOnDemand() ? secondaryBandPx(mainPx) : 0);
         if (secondarySubtitles != null) {
             secondarySubtitles.style(mPrefs.subtitleSecondaryTextColor,
                     mPrefs.subtitleSecondaryBackgroundColor, secondaryPx,
@@ -9625,6 +10005,19 @@ public class PlayerActivity extends Activity {
                             mPrefs.subtitleStyleBold ? Typeface.BOLD : Typeface.NORMAL),
                     Utils.dpToPx(6), Utils.dpToPx(8), Utils.dpToPx(4));
         }
+        slideSubtitles(subtitleView, 0);
+    }
+
+    private void slideSubtitles(SubtitleView subtitleView, int shift) {
+        float target = -shift;
+        if (subtitleShift == target) return;
+        subtitleShift = target;
+        subtitleView.setTranslationY(target);
+    }
+
+    private int subtitleViewHeightPx(SubtitleView subtitleView) {
+        int measured = subtitleView.getHeight();
+        return measured > 0 ? measured : getResources().getDisplayMetrics().heightPixels;
     }
 
     private float subtitleTextFraction(int orientation, float scale) {
@@ -9644,6 +10037,11 @@ public class PlayerActivity extends Activity {
     private int secondaryBandPx(float textPx) {
         return Math.round(SECONDARY_MAX_LINES * textPx * SECONDARY_LINE_HEIGHT)
                 + 2 * Utils.dpToPx(4) + Utils.dpToPx(12);
+    }
+
+    private int secondaryRestingBandPx(float textPx) {
+        if (secondarySubtitles == null || !secondaryActive() || secondaryOnDemand()) return 0;
+        return secondaryBandPx(textPx);
     }
 
     private int subtitleSideMargin(int orientation, Format format) {

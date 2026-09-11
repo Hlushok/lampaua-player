@@ -535,13 +535,17 @@ class Utils {
     public static boolean isTvBox(Context context) {
         final PackageManager pm = context.getPackageManager();
 
-        // TV for sure
+        // Google TV devices can expose Leanback while reporting a non-TV UI mode to an
+        // externally launched activity. Treat every platform TV signal as authoritative so
+        // touch-only controls (notably the otherwise empty landscape/rotation tile) stay out
+        // of the television header and the remote-focus control row is used instead.
         UiModeManager uiModeManager = (UiModeManager) context.getSystemService(UI_MODE_SERVICE);
-        if (uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION) {
-            return true;
-        }
-
-        if (pm.hasSystemFeature(FEATURE_FIRE_TV)) {
+        if (hasTelevisionSignal(
+                uiModeManager != null
+                        && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION,
+                pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK),
+                pm.hasSystemFeature(PackageManager.FEATURE_TELEVISION),
+                pm.hasSystemFeature(FEATURE_FIRE_TV))) {
             return true;
         }
 
@@ -568,6 +572,11 @@ class Utils {
 
         // Default: No TV - use SAF
         return false;
+    }
+
+    static boolean hasTelevisionSignal(boolean televisionUiMode, boolean leanback,
+                                       boolean televisionFeature, boolean fireTv) {
+        return televisionUiMode || leanback || televisionFeature || fireTv;
     }
 
     public static boolean hasSAFChooser(final PackageManager pm) {

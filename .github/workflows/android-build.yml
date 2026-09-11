@@ -78,6 +78,31 @@ jobs:
             -Pandroid.injected.signing.key.alias=androiddebugkey \
             -Pandroid.injected.signing.key.password="$KEYSTORE_PASSWORD"
 
+      - name: Ensure v1 v2 and v3 signatures
+        shell: bash
+        env:
+          SIGNING_KEYSTORE: ${{ runner.temp }}/ua-player-release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          test -n "$build_tools"
+
+          for apk in \
+            app/build/outputs/apk/latestUniversal/release/*.apk \
+            app/build/outputs/apk/legacyUniversal/release/*.apk; do
+            test -f "$apk"
+            "$build_tools/apksigner" sign \
+              --ks "$SIGNING_KEYSTORE" \
+              --ks-key-alias androiddebugkey \
+              --ks-pass env:KEYSTORE_PASSWORD \
+              --key-pass env:KEYSTORE_PASSWORD \
+              --v1-signing-enabled true \
+              --v2-signing-enabled true \
+              --v3-signing-enabled true \
+              --v4-signing-enabled false \
+              "$apk"
+          done
+
       - name: Verify release APKs
         shell: bash
         run: |

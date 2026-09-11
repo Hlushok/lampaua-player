@@ -7,6 +7,21 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 public class LampaPlaylistSessionTest {
+    @Test public void rootSeriesTitleStaysSeparateFromEpisodeTitle() throws Exception {
+        JSONObject launch = new JSONObject()
+                .put("title", "Назва серіалу")
+                .put("items", new org.json.JSONArray().put(
+                        new JSONObject().put("title", "Серія 5")));
+
+        String title = LampaPlaylist.playlistTitle(launch);
+        JSONObject snapshot = new JSONObject();
+        LampaPlaylist.putPlaylistTitle(snapshot, title);
+
+        assertEquals("Назва серіалу", LampaPlaylist.playlistTitle(snapshot));
+        assertEquals("Серія 5",
+                launch.getJSONArray("items").getJSONObject(0).getString("title"));
+    }
+
     @Test public void sessionItemPreservesResolvedPlaybackState() throws Exception {
         LampaPlaylist.Item source = new LampaPlaylist.Item();
         source.id = "episode-2";

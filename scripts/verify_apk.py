@@ -55,6 +55,7 @@ def verify_resources(aapt2: Path, apk: Path) -> None:
     countdown = resource_block(resources, "skip_available_in")
     cancel = resource_block(resources, "skip_cancel_countdown")
     undo = resource_block(resources, "skip_undo")
+    finish = resource_block(resources, "playback_finishes_at_compact")
 
     if "Пропустити" not in skip_action:
         fail("string/skip_action does not contain the Ukrainian label 'Пропустити'")
@@ -64,7 +65,10 @@ def verify_resources(aapt2: Path, apk: Path) -> None:
         fail("string/skip_cancel_countdown does not contain the Ukrainian cancel label")
     if "Повернутися" not in undo:
         fail("string/skip_undo does not contain the Ukrainian undo label")
-    if any("SideSheetBehavior" in block for block in (skip_action, countdown, cancel, undo)):
+    if "до %1$s" not in finish:
+        fail("string/playback_finishes_at_compact does not preserve the compact Ukrainian time label")
+    if any("SideSheetBehavior" in block
+           for block in (skip_action, countdown, cancel, undo, finish)):
         fail("a skip label resolves to Material SideSheetBehavior")
 
 
@@ -102,6 +106,13 @@ def verify_signature(apksigner: Path, apk: Path, certificate: str | None) -> Non
         fail("apksigner did not report a verified APK")
 
     if certificate:
+        for scheme in ("v1", "v2", "v3"):
+            if not re.search(
+                rf"Verified using {scheme} scheme .*?:\s*true",
+                output,
+                flags=re.IGNORECASE,
+            ):
+                fail(f"required APK signature scheme {scheme} is missing")
         match = re.search(
             r"certificate SHA-256 digest:\s*([0-9a-f:]+)", output, flags=re.IGNORECASE
         )

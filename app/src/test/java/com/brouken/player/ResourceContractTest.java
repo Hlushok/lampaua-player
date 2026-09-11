@@ -362,10 +362,10 @@ public class ResourceContractTest {
         assertTrue(activity.contains("action.undoAvailable"));
         assertTrue(activity.contains("clearExpiredSkipPlaylistUndo"));
 
-        // The end-time label may wrap, but its final digits must never be ellipsized away.
-        assertTrue(activity.contains("narrowPortrait ? 112 : 220"));
-        assertTrue(activity.contains("lampaFinishTime.setMaxLines(2);"));
-        assertTrue(activity.contains("lampaFinishTime.setEllipsize(null);"));
+        // The end-time value is compact and single-line, so the calculated time stays visible.
+        assertTrue(activity.contains("R.string.playback_finishes_at_compact"));
+        assertTrue(activity.contains("lampaFinishTime.setSingleLine(true);"));
+        assertFalse(activity.contains("lampaFinishTime.setMaxLines(2);"));
     }
 
     @Test
@@ -776,8 +776,8 @@ public class ResourceContractTest {
         assertTrue(app.contains("com.google.zxing:core:3.5.4"));
         assertTrue(wrapper.contains("gradle-9.7.1-bin.zip"));
         assertTrue(app.contains("applicationId \"com.lampaua.player\""));
-        assertTrue(app.contains("versionCode 21"));
-        assertTrue(app.contains("versionName \"2.0.1\""));
+        assertTrue(app.contains("versionCode 22"));
+        assertTrue(app.contains("versionName \"2.0.2\""));
     }
 
     @Test

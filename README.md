@@ -3,7 +3,7 @@
 Open-source Android video player for Lampa and LampaUA, based on [Just Player](https://github.com/moneytoo/Player).
 
 - Android application ID: `com.lampaua.player`
-- Current version: `2.0.1` (`versionCode 21`)
+- Current version: `2.0.2` (`versionCode 22`)
 - Android 6.0+ and Android TV
 - Media3/ExoPlayer playback engine
 
@@ -73,6 +73,7 @@ The JSON playlist can contain direct `url` values or short-lived `resolver_url` 
 
 ```json
 {
+  "title": "Назва серіалу",
   "current_index": 0,
   "auto_next": true,
   "items": [

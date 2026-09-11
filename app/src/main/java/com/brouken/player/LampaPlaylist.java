@@ -138,6 +138,7 @@ final class LampaPlaylist {
     private final List<Item> items = new ArrayList<>();
     private final HashMap<Integer, ArrayList<ResolveCallback>> pendingResolves = new HashMap<>();
     private final JSONArray playbackResults = new JSONArray();
+    private String title;
     private int currentIndex;
     private boolean autoNext = true;
 
@@ -161,6 +162,7 @@ final class LampaPlaylist {
             playlist.autoNext = requestedAutoNext;
         } else {
             root = new JSONObject(trimmed);
+            playlist.title = playlistTitle(root);
             source = root.optJSONArray("items");
             if (source == null) source = root.optJSONArray("playlist");
             if (source == null) source = root.optJSONArray("data");
@@ -190,6 +192,17 @@ final class LampaPlaylist {
             playlist.currentIndex = 0;
         }
         return playlist;
+    }
+
+    static String playlistTitle(JSONObject root) {
+        return root == null ? null : firstText(root,
+                "series_title", "seriesTitle", "collection_title", "collectionTitle", "title");
+    }
+
+    static void putPlaylistTitle(JSONObject root, String title) throws JSONException {
+        if (root != null && title != null && !title.trim().isEmpty()) {
+            root.put("title", title.trim());
+        }
     }
 
     static Item parseItem(JSONObject json) {
@@ -271,6 +284,13 @@ final class LampaPlaylist {
     boolean isEmpty() { return items.isEmpty(); }
     boolean isAutoNext() { return autoNext; }
     int getCurrentIndex() { return currentIndex; }
+    String getTitle() { return title; }
+    void setTitleIfEmpty(String fallback) {
+        if ((title == null || title.trim().isEmpty())
+                && fallback != null && !fallback.trim().isEmpty()) {
+            title = fallback.trim();
+        }
+    }
     Item getCurrent() { return get(currentIndex); }
     Item get(int index) { return index >= 0 && index < items.size() ? items.get(index) : null; }
     boolean hasNext() { return currentIndex + 1 < items.size(); }
@@ -278,6 +298,7 @@ final class LampaPlaylist {
     String toSessionJson() {
         try {
             JSONObject root = new JSONObject();
+            putPlaylistTitle(root, title);
             root.put("current_index", currentIndex);
             root.put("auto_next", autoNext);
             JSONArray serializedItems = new JSONArray();
