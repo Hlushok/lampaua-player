@@ -226,6 +226,13 @@
     <string name="pref_show_clock_off">Годинник показується лише з елементами керування</string>
     <string name="pref_show_stats">Жива статистика відтворення</string>
     <string name="pref_show_stats_summary">Показувати буфер, мережу, декодер і пропущені кадри разом з елементами керування</string>
+    <string name="pref_show_transfer">Рядок передачі</string>
+    <string name="pref_show_transfer_on">Буфер, мережа та бітрейт показуються одним рядком над смугою перемотування</string>
+    <string name="pref_show_transfer_off">Показники передачі залишаються на панелі статистики</string>
+    <string name="stats_buffer">Буфер: %1$d с (%2$d%%)</string>
+    <string name="stats_network">Мережа: %1$s</string>
+    <string name="stats_stream">Потік: %1$s</string>
+    <string name="stats_overall">Середній: %1$s</string>
     <string name="resolver_not_ready">Джерело не підготувало потік. Відкрийте його повторно.</string>
     <string name="live_stream_fallback">Пробую альтернативний режим прямого потоку</string>
     <string name="update_available_title">Оновлення UA Player</string>

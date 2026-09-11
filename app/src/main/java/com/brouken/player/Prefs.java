@@ -61,6 +61,7 @@ class Prefs {
     private static final String PREF_KEY_HOLD_SPEED_MODE = "holdSpeedMode";
     private static final String PREF_KEY_TIME_REMAINING = "timeRemaining";
     private static final String PREF_KEY_SHOW_STATS = "showStats";
+    private static final String PREF_KEY_SHOW_TRANSFER = "showTransfer";
     private static final String PREF_KEY_SHOW_CLOCK = "showClock";
     private static final String PREF_KEY_FILE_ACCESS = "fileAccess";
     private static final String PREF_KEY_DECODER_PRIORITY = "decoderPriority";
@@ -168,6 +169,8 @@ class Prefs {
     public String holdSpeedMode = HOLD_SPEED_ADJUST;
     public boolean timeRemaining = false;
     public boolean showStats = false;
+    /** Buffer, network and bitrate on a line above the seek bar. */
+    public boolean showTransfer = false;
     public boolean showClock = false;
 
     public String subtitleTrackId;
@@ -304,6 +307,7 @@ class Prefs {
         timeRemaining = mSharedPreferences.getBoolean(
                 PREF_KEY_TIME_REMAINING, timeRemaining);
         showStats = mSharedPreferences.getBoolean(PREF_KEY_SHOW_STATS, showStats);
+        showTransfer = mSharedPreferences.getBoolean(PREF_KEY_SHOW_TRANSFER, showTransfer);
         showClock = mSharedPreferences.getBoolean(PREF_KEY_SHOW_CLOCK, showClock);
         tunneling = mSharedPreferences.getBoolean(PREF_KEY_TUNNELING, tunneling);
         frameRateMatching = mSharedPreferences.getBoolean(PREF_KEY_FRAMERATE_MATCHING, frameRateMatching);

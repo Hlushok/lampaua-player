@@ -105,6 +105,7 @@ import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultDataSource;
 import androidx.media3.datasource.HttpDataSource;
 import androidx.media3.datasource.okhttp.OkHttpDataSource;
+import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.DecoderCounters;
 import androidx.media3.exoplayer.ExoPlaybackException;
@@ -399,6 +400,7 @@ public class PlayerActivity extends Activity {
     private TextView roomPill;
     private TextView roomMessage;
     private TextView statsView;
+    private TextView transferView;
     private TextView speedBoostIndicator;
     private Drawable speedBoostIconForward;
     private Drawable speedBoostIconRewind;
@@ -1025,6 +1027,7 @@ public class PlayerActivity extends Activity {
         setupTogetherOverlay();
         setupHoldSpeedOverlay();
         setupStatsOverlay();
+        setupTransferOverlay();
 
         if (!isTvBox) {
             swipeToUnlock = new SwipeToUnlockView(this);
@@ -1129,30 +1132,32 @@ public class PlayerActivity extends Activity {
                         windowInsets.getSystemWindowInsetTop(), insetTopIgnoringVisibility);
                 int bottomInset = windowInsets.getSystemWindowInsetBottom() + ui.overscanV();
 
-                int bottomBarPaddingBottom = 0;
-                int progressBarMarginBottom = 0;
+                final int bottomBarPaddingBottom = bottomInset;
+                final int progressBarMarginBottom = bottomInset;
+
+                final View exoTop = findViewById(R.id.exo_top);
+                exoTop.getLayoutParams().height = 0;
+                Utils.setViewMargins(exoTop, 0, 0, 0, 0);
+
+                // Grow the bar into the system/overscan inset on every supported Android release.
+                // Padding the whole control view instead pulls the scrims off the screen edge and
+                // exposes a strip of video below them.
+                final BottomBarLayout exoBottomBar = findViewById(R.id.exo_bottom_bar);
+                final int barHeight = getResources().getDimensionPixelSize(
+                        R.dimen.exo_styled_bottom_bar_height);
+                final ViewGroup.LayoutParams bottomBarParams = exoBottomBar.getLayoutParams();
+                bottomBarParams.height = barHeight + bottomBarPaddingBottom;
+                exoBottomBar.setLayoutParams(bottomBarParams);
+                // Media3 still parks the bar by the unmodified resource height.
+                exoBottomBar.setTravelScale((float) bottomBarParams.height / barHeight);
+                view.setPadding(0, 0, 0, 0);
 
                 if (Build.VERSION.SDK_INT >= 35) {
                     final int left = windowInsets.getInsets(WindowInsets.Type.navigationBars()).left;
                     final int right = windowInsets.getInsets(WindowInsets.Type.navigationBars()).right;
 
-                    final View exoTop = findViewById(R.id.exo_top);
-                    exoTop.getLayoutParams().height = 0;
-                    Utils.setViewMargins(exoTop, 0, 0, 0, 0);
-
-                    final FrameLayout exoBottomBar = findViewById(R.id.exo_bottom_bar);
-                    ViewGroup.LayoutParams params = exoBottomBar.getLayoutParams();
-                    params.height = getResources().getDimensionPixelSize(
-                            R.dimen.exo_styled_bottom_bar_height) + bottomInset;
-                    exoBottomBar.setLayoutParams(params);
-
                     findViewById(R.id.exo_left).getLayoutParams().width = left;
                     findViewById(R.id.exo_right).getLayoutParams().width = right;
-
-                    bottomBarPaddingBottom = bottomInset;
-                    progressBarMarginBottom = bottomInset;
-                } else {
-                    view.setPadding(0, 0, 0, bottomInset);
                 }
 
                 Utils.setViewParams(titleView, paddingLeft + titleViewPaddingHorizontal, titleViewPaddingVertical, paddingRight + titleViewPaddingHorizontal, titleViewPaddingVertical,
@@ -1170,6 +1175,43 @@ public class PlayerActivity extends Activity {
                     topParams.rightMargin = insetHorizontal + ui.gridH();
                     topParams.topMargin = stableTopInset + ui.overscanV() + ui.dp(8);
                     lampaTopPanel.setLayoutParams(topParams);
+                }
+
+                final int auxiliaryBottom = bottomInset
+                        + getResources().getDimensionPixelSize(
+                                R.dimen.exo_styled_progress_margin_bottom)
+                        + ui.dpS(24);
+                if (roomPill != null
+                        && roomPill.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                    FrameLayout.LayoutParams pillParams =
+                            (FrameLayout.LayoutParams) roomPill.getLayoutParams();
+                    pillParams.leftMargin = insetHorizontal + ui.gridH();
+                    pillParams.bottomMargin = auxiliaryBottom;
+                    roomPill.setLayoutParams(pillParams);
+                }
+                if (lampaSkipPanel != null
+                        && lampaSkipPanel.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                    FrameLayout.LayoutParams skipParams =
+                            (FrameLayout.LayoutParams) lampaSkipPanel.getLayoutParams();
+                    skipParams.rightMargin = insetHorizontal + ui.gridH();
+                    skipParams.bottomMargin = auxiliaryBottom;
+                    lampaSkipPanel.setLayoutParams(skipParams);
+                }
+                if (transferView != null
+                        && transferView.getLayoutParams() instanceof CoordinatorLayout.LayoutParams) {
+                    CoordinatorLayout.LayoutParams transferParams =
+                            (CoordinatorLayout.LayoutParams) transferView.getLayoutParams();
+                    transferParams.leftMargin = insetHorizontal + ui.gridH();
+                    transferParams.rightMargin = insetHorizontal + ui.gridH();
+                    transferParams.bottomMargin = auxiliaryBottom;
+                    transferView.setLayoutParams(transferParams);
+                }
+                if (statsView != null
+                        && statsView.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                    FrameLayout.LayoutParams statsParams =
+                            (FrameLayout.LayoutParams) statsView.getLayoutParams();
+                    statsParams.leftMargin = insetHorizontal + ui.gridH();
+                    statsView.setLayoutParams(statsParams);
                 }
 
                 Utils.setViewParams(findViewById(R.id.exo_bottom_bar), paddingLeft, 0, paddingRight, bottomBarPaddingBottom,
@@ -1331,6 +1373,7 @@ public class PlayerActivity extends Activity {
                 updateOverlayClock();
                 updateRoomBadge();
                 updateStatsPanel();
+                updateTransfer();
                 schedulePausedControllerHide();
 
                 if (PlayerActivity.restoreControllerTimeout) {
@@ -3449,6 +3492,28 @@ public class PlayerActivity extends Activity {
         playerView.addView(statsView, params);
     }
 
+    private void setupTransferOverlay() {
+        transferView = new TextView(this);
+        transferView.setTextColor(0xB3FFFFFF);
+        transferView.setTypeface(Typeface.MONOSPACE);
+        transferView.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.textInfo());
+        transferView.setMaxLines(3);
+        transferView.setEllipsize(TextUtils.TruncateAt.END);
+        transferView.setPadding(Utils.dpToPx(10), Utils.dpToPx(5),
+                Utils.dpToPx(10), Utils.dpToPx(5));
+        transferView.setBackground(lampaBackground(
+                Color.argb(153, 0, 0, 0), Color.TRANSPARENT, 8));
+        transferView.setVisibility(View.GONE);
+
+        CoordinatorLayout.LayoutParams params = new CoordinatorLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.gravity = Gravity.BOTTOM | Gravity.START;
+        params.leftMargin = Utils.dpToPx(22);
+        params.rightMargin = Utils.dpToPx(22);
+        params.bottomMargin = Utils.dpToPx(88);
+        coordinatorLayout.addView(transferView, params);
+    }
+
     private void fadeAuxiliaryChrome(View view, boolean visible, boolean immediate) {
         if (view == null) return;
         Boolean previousTarget = auxiliaryChromeTargets.get(view);
@@ -4020,14 +4085,99 @@ public class PlayerActivity extends Activity {
             }
             roomMessage.setVisibility(visible ? View.VISIBLE : View.GONE);
         }
+        // The transfer line owns the same row and yields while the room badge is present.
+        updateTransfer();
     }
 
     private void updateStatsPanel() {
         if (statsView == null) return;
         boolean visible = mPrefs != null && mPrefs.showStats && player != null
                 && controllerChromeVisible && !inPip && !locked;
-        if (visible) statsView.setText(playbackStatisticsSnapshot().render(playbackStatisticsLabels()));
+        if (visible) {
+            statsView.setText(playbackStatisticsSnapshot().render(
+                    playbackStatisticsLabels(), !mPrefs.showTransfer));
+        }
         fadeAuxiliaryChrome(statsView, visible, inPip || locked);
+    }
+
+    /** Buffer, network and bitrate on their own row above the seek bar. */
+    private void updateTransfer() {
+        if (transferView == null || mPrefs == null) return;
+        if (!mPrefs.showTransfer || player == null || !controllerChromeVisible
+                || inPip || locked || isVisible(roomPill)) {
+            fadeAuxiliaryChrome(transferView, false, inPip || locked);
+            return;
+        }
+
+        final List<String> fields = new ArrayList<>();
+        addTransferField(fields, bufferText());
+        addTransferField(fields, networkText());
+        addTransferField(fields, bitrateText(player.getVideoFormat()));
+        final boolean portrait = getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_PORTRAIT;
+        transferView.setText(TextUtils.join(portrait ? "\n" : " \u00B7 ", fields));
+
+        final CoordinatorLayout.LayoutParams params =
+                (CoordinatorLayout.LayoutParams) transferView.getLayoutParams();
+        final int rowWidth = coordinatorLayout.getWidth()
+                - params.leftMargin - params.rightMargin;
+        final int freeWidth = isVisible(lampaSkipPanel)
+                ? rowWidth - lampaSkipPanel.getWidth() - ui.dpS(8)
+                : rowWidth;
+        if (freeWidth > 0) transferView.setMaxWidth(freeWidth);
+        fadeAuxiliaryChrome(transferView, true, false);
+    }
+
+    private static boolean isVisible(View view) {
+        return view != null && view.getVisibility() == View.VISIBLE;
+    }
+
+    private static void addTransferField(List<String> fields, String value) {
+        if (!TextUtils.isEmpty(value)) fields.add(value.replace(' ', '\u00A0'));
+    }
+
+    private String bufferText() {
+        final long bufferedMs = player.getTotalBufferedDuration();
+        return getString(R.string.stats_buffer, bufferedMs / 1000,
+                (int) Math.min(100, bufferedMs * 100 / bufferCeilingMs()));
+    }
+
+    private String networkText() {
+        final long bitrate = currentTransferBitrate();
+        return bitrate > 0
+                ? getString(R.string.stats_network,
+                        getString(R.string.quality_bitrate, bitrate / 1_000_000f))
+                : null;
+    }
+
+    private String bitrateText(Format video) {
+        if (video != null && video.bitrate != Format.NO_VALUE) {
+            return getString(R.string.stats_stream,
+                    getString(R.string.quality_bitrate, video.bitrate / 1_000_000f));
+        }
+        final float overall = overallBitrate();
+        return overall > 0
+                ? getString(R.string.stats_overall,
+                        getString(R.string.quality_bitrate, overall))
+                : null;
+    }
+
+    private long bufferCeilingMs() {
+        final float overall = overallBitrate();
+        if (overall <= 0f) return DefaultLoadControl.DEFAULT_MAX_BUFFER_MS;
+        final long byteCeilingMs = (long) ((DefaultLoadControl.DEFAULT_VIDEO_BUFFER_SIZE
+                + DefaultLoadControl.DEFAULT_AUDIO_BUFFER_SIZE) * 8L / (overall * 1000f));
+        return Math.max(1_000L,
+                Math.min(DefaultLoadControl.DEFAULT_MAX_BUFFER_MS, byteCeilingMs));
+    }
+
+    private float overallBitrate() {
+        if (player == null) return 0f;
+        final long durationMs = player.getDuration();
+        final String key = currentMediaKey();
+        if (durationMs <= 0 || key == null) return 0f;
+        final Long length = contentLengths.get(key);
+        return length == null ? 0f : length / (durationMs * 125f);
     }
 
     /** Keep one clock in the header slot, even while the controller itself is hidden. */
@@ -4613,6 +4763,7 @@ public class PlayerActivity extends Activity {
         updateLampaSkipUi();
         updateTransferRateUi();
         updateStatsPanel();
+        updateTransfer();
     }
 
     private void rememberPlaybackReport() {
@@ -5774,6 +5925,7 @@ public class PlayerActivity extends Activity {
             updateLampaSegmentMarkers();
             updateLampaSkipUi();
             updateStatsPanel();
+            updateTransfer();
             updateOverlayClock();
             updateMediaControlVisibility();
             resetPausedScreenGuard();

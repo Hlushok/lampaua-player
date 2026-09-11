@@ -60,14 +60,20 @@ final class PlaybackStatistics {
         }
 
         String render(Labels labels) {
+            return render(labels, true);
+        }
+
+        String render(Labels labels, boolean includeTransfer) {
             List<String> rows = new ArrayList<>();
             if (container != null) rows.add(labels.container + ": " + container);
             if (width > 0 && height > 0) rows.add(labels.video + ": " + width + " \u00D7 " + height
                     + (videoCodec == null ? "" : " \u00B7 " + videoCodec));
             if (frameRate > 0) rows.add(String.format(Locale.US, "%s: %.2f", labels.fps, frameRate));
-            if (bitrate > 0) rows.add(String.format(Locale.US, "%s: %.2f Mbps", labels.bitrate, bitrate / 1_000_000f));
-            rows.add(String.format(Locale.US, "%s: %.1f s", labels.buffer, bufferedMs / 1000f));
-            if (transferBitrate > 0) rows.add(String.format(Locale.US, "%s: %.2f Mbps", labels.network, transferBitrate / 1_000_000f));
+            if (includeTransfer) {
+                if (bitrate > 0) rows.add(String.format(Locale.US, "%s: %.2f Mbps", labels.bitrate, bitrate / 1_000_000f));
+                rows.add(String.format(Locale.US, "%s: %.1f s", labels.buffer, bufferedMs / 1000f));
+                if (transferBitrate > 0) rows.add(String.format(Locale.US, "%s: %.2f Mbps", labels.network, transferBitrate / 1_000_000f));
+            }
             if (videoDecoder != null) rows.add(labels.decoder + ": " + videoDecoder);
             if (audio != null) rows.add(labels.audio + ": " + audio);
             rows.add(labels.droppedFrames + ": " + droppedFrames);

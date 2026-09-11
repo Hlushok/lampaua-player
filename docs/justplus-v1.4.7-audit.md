@@ -20,16 +20,16 @@
 | `app/libs/lib-decoder-iamf-release.aar` | Import byte-for-byte | Must match Media3 1.11.0. | Git blob `1ca4ba4f9bdc6bf79b3956c511badd7945411fe6` matches donor |
 | `app/libs/lib-exoplayer-release.aar` | Import byte-for-byte | Must match Media3 1.11.0. | Git blob `7f55e3c7def6f4672d42ebde095b97b1ce09b52a` matches donor |
 | `app/src/main/java/com/brouken/player/App.java` | Exclude donor hunk | UA Player has no Sentry bootstrap; diagnostics stay local until explicitly shared. | Planned |
-| `app/src/main/java/com/brouken/player/BottomBarLayout.java` | Import | Donor-owned measured-height parking. | Planned |
+| `app/src/main/java/com/brouken/player/BottomBarLayout.java` | Import | Donor-owned measured-height parking. | `donorV147BottomBarAndTransferContractsStayIntegrated` passed |
 | `app/src/main/java/com/brouken/player/CustomPlayerView.java` | Semantic merge | Route gesture seeks through the donor one-in-flight gate. | Planned |
-| `app/src/main/java/com/brouken/player/PlayerActivity.java` | Semantic merge; donor wins | Full donor runtime behavior plus approved UA hooks only. | Planned |
-| `app/src/main/java/com/brouken/player/Prefs.java` | Semantic merge; donor wins | Donor defaults/settings plus UA-only preferences. | Planned |
+| `app/src/main/java/com/brouken/player/PlayerActivity.java` | Semantic merge; donor wins | Full donor runtime behavior plus approved UA hooks only. | Bottom-bar/transfer slice compiled; focused contract passed |
+| `app/src/main/java/com/brouken/player/Prefs.java` | Semantic merge; donor wins | Donor defaults/settings plus UA-only preferences. | `showTransfer` imported; focused contract passed |
 | `app/src/main/java/com/brouken/player/Utils.java` | Semantic merge | Donor diagnostic capacity without Sentry transport. | Planned |
-| `app/src/main/res/layout/exo_player_control_view.xml` | Semantic merge; donor wins | Donor bottom-bar container and scrim geometry plus UA resources. | Planned |
-| `app/src/main/res/values-ru/strings.xml` | Import donor additions | Keep complete resource parity. | Planned |
-| `app/src/main/res/values-uk/strings.xml` | Adapt donor additions | Preserve correct Ukrainian copy. | Planned |
-| `app/src/main/res/values/strings.xml` | Import donor additions | Default resource contract. | Planned |
-| `app/src/main/res/xml/root_preferences.xml` | Semantic merge; donor wins | Donor rows/order/defaults; no translation-target picker. | Planned |
+| `app/src/main/res/layout/exo_player_control_view.xml` | Semantic merge; donor wins | Donor bottom-bar container and scrim geometry plus UA resources. | Measured-height container compiled; focused contract passed |
+| `app/src/main/res/values-ru/strings.xml` | Import donor additions | Keep complete resource parity. | Transfer strings imported; resources compiled |
+| `app/src/main/res/values-uk/strings.xml` | Adapt donor additions | Preserve correct Ukrainian copy. | Transfer strings imported; resources compiled |
+| `app/src/main/res/values/strings.xml` | Import donor additions | Default resource contract. | Transfer strings imported; resources compiled |
+| `app/src/main/res/xml/root_preferences.xml` | Semantic merge; donor wins | Donor rows/order/defaults; no translation-target picker. | `showTransfer` row imported; focused contract passed |
 | `build.gradle` | Import donor tool version | Android Gradle Plugin 9.4.0. | `donorV147BuildStackMatches` passed |
 | `gradle/wrapper/gradle-wrapper.properties` | Import donor tool version | Gradle 9.7.1. | Gradle 9.7.1 executed successfully |
 

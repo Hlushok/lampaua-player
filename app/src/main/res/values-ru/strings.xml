@@ -219,6 +219,13 @@
     <string name="pref_show_clock_off">Часы показываются только с элементами управления</string>
     <string name="pref_show_stats">Статистика воспроизведения</string>
     <string name="pref_show_stats_summary">Показывать буфер, сеть, декодер и пропущенные кадры вместе с элементами управления</string>
+    <string name="pref_show_transfer">Строка передачи</string>
+    <string name="pref_show_transfer_on">Буфер, сеть и битрейт показываются одной строкой над полосой перемотки</string>
+    <string name="pref_show_transfer_off">Показатели передачи остаются на панели статистики</string>
+    <string name="stats_buffer">Буфер: %1$d с (%2$d%%)</string>
+    <string name="stats_network">Сеть: %1$s</string>
+    <string name="stats_stream">Поток: %1$s</string>
+    <string name="stats_overall">Средний: %1$s</string>
     <string name="resolver_not_ready">Источник не подготовил поток. Откройте его повторно.</string>
     <string name="update_available">Доступно обновление: %1$s → %2$s</string>
     <string name="update_stops_playback">Установка обновления закроет текущее видео.</string>

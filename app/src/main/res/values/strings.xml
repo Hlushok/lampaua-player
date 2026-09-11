@@ -130,6 +130,13 @@
     <string name="pref_show_clock_off">Clock shows only with the player controls</string>
     <string name="pref_show_stats">Live playback statistics</string>
     <string name="pref_show_stats_summary">Show buffer, network, decoder and dropped frames while controls are visible</string>
+    <string name="pref_show_transfer">Transfer line</string>
+    <string name="pref_show_transfer_on">Buffer, network and bitrate are shown on one line above the seek bar</string>
+    <string name="pref_show_transfer_off">Transfer figures stay in the statistics panel</string>
+    <string name="stats_buffer">Buffer: %1$d s (%2$d%%)</string>
+    <string name="stats_network">Network: %1$s</string>
+    <string name="stats_stream">Stream: %1$s</string>
+    <string name="stats_overall">Average: %1$s</string>
     <string name="resolver_not_ready">The source did not prepare a playable stream. Please open it again.</string>
     <string name="live_stream_fallback">Trying alternate live-stream mode</string>
     <string name="playback_finishes_at">Finishes at %1$s</string>
