@@ -4,13 +4,17 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    env:
+      EXPECTED_SIGNING_CERT_SHA256: 749D118BC8A16A7C0464B8DD0498C53DA8A86A668D8F09F551E60CF7D88EE15E
 
     steps:
       - uses: actions/checkout@v6
@@ -22,17 +26,57 @@ jobs:
           java-version: 21
           cache: gradle
 
-      - name: Restore release signing key
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > "${GITHUB_WORKSPACE}/keystore.jks"
-
-      - name: Build signed universal APKs
+      - name: Test and lint
         run: |
           chmod +x gradlew
-          ./gradlew clean :app:testLatestUniversalDebugUnitTest :app:lintLatestUniversalRelease :app:assembleLatestUniversalRelease :app:assembleLegacyUniversalRelease --console=plain \
-            -Pandroid.injected.signing.store.file="${GITHUB_WORKSPACE}/keystore.jks" \
-            -Pandroid.injected.signing.store.password="${{ secrets.KEYSTORE_PASSWORD }}" \
-            -Pandroid.injected.signing.key.alias=key \
-            -Pandroid.injected.signing.key.password="${{ secrets.KEYSTORE_PASSWORD }}"
+          ./gradlew clean :app:testLatestUniversalDebugUnitTest :app:lintLatestUniversalRelease --console=plain
+
+      - name: Restore release signing key
+        shell: bash
+        env:
+          SIGNING_KEYSTORE: ${{ runner.temp }}/ua-player-release.jks
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [[ -z "$KEYSTORE_BASE64" ]]; then
+            echo "::error::KEYSTORE_BASE64 secret is missing"
+            exit 1
+          fi
+          if [[ -z "$KEYSTORE_PASSWORD" ]]; then
+            echo "::error::KEYSTORE_PASSWORD secret is missing"
+            exit 1
+          fi
+
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$SIGNING_KEYSTORE"
+          if [[ ! -s "$SIGNING_KEYSTORE" ]]; then
+            echo "::error::Decoded signing keystore is empty"
+            exit 1
+          fi
+
+          keytool -list \
+            -keystore "$SIGNING_KEYSTORE" \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -alias androiddebugkey > /dev/null
+
+          cert_sha256="$(keytool -exportcert \
+            -keystore "$SIGNING_KEYSTORE" \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -alias androiddebugkey | sha256sum | awk '{ print toupper($1) }')"
+          if [[ "$cert_sha256" != "$EXPECTED_SIGNING_CERT_SHA256" ]]; then
+            echo "::error::Signing certificate SHA-256 mismatch"
+            exit 1
+          fi
+
+      - name: Build signed universal APKs
+        env:
+          SIGNING_KEYSTORE: ${{ runner.temp }}/ua-player-release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          ./gradlew :app:assembleLatestUniversalRelease :app:assembleLegacyUniversalRelease --console=plain \
+            -Pandroid.injected.signing.store.file="$SIGNING_KEYSTORE" \
+            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias=androiddebugkey \
+            -Pandroid.injected.signing.key.password="$KEYSTORE_PASSWORD"
 
       - name: Verify release APKs
         shell: bash
@@ -41,28 +85,68 @@ jobs:
           apkanalyzer="$(find "$ANDROID_HOME/cmdline-tools" -name apkanalyzer -type f -print -quit)"
           test -n "$build_tools"
           test -n "$apkanalyzer"
-          mapfile -t apks < <(find app/build/outputs/apk -path '*/release/*.apk' -type f -print)
-          test "${#apks[@]}" -eq 2
+
+          latest_dir="app/build/outputs/apk/latestUniversal/release"
+          legacy_dir="app/build/outputs/apk/legacyUniversal/release"
+          mapfile -t latest_apks < <(find "$latest_dir" -maxdepth 1 -name '*.apk' -type f -print)
+          mapfile -t legacy_apks < <(find "$legacy_dir" -maxdepth 1 -name '*.apk' -type f -print)
+          test "${#latest_apks[@]}" -eq 1
+          test "${#legacy_apks[@]}" -eq 1
+          apks=("${latest_apks[0]}" "${legacy_apks[0]}")
+
           for apk in "${apks[@]}"; do
             python3 scripts/verify_apk.py \
               --apk "$apk" \
               --aapt2 "$build_tools/aapt2" \
               --apksigner "$build_tools/apksigner" \
-              --apkanalyzer "$apkanalyzer"
+              --apkanalyzer "$apkanalyzer" \
+              --certificate "$EXPECTED_SIGNING_CERT_SHA256"
           done
-
-      - name: Prepare draft GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            app/build/outputs/apk/latestUniversal/release/*.apk
-            app/build/outputs/apk/legacyUniversal/release/*.apk
-          prerelease: true
-          draft: true
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v6
         with:
           name: release
-          path: app/build/outputs/apk/*/release/*.apk
+          path: |
+            app/build/outputs/apk/latestUniversal/release/*.apk
+            app/build/outputs/apk/legacyUniversal/release/*.apk
           if-no-files-found: error
+
+      - name: Remove release signing key
+        if: always()
+        shell: bash
+        env:
+          SIGNING_KEYSTORE: ${{ runner.temp }}/ua-player-release.jks
+        run: rm -f "$SIGNING_KEYSTORE"
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download verified release APKs
+        uses: actions/download-artifact@v8
+        with:
+          name: release
+          path: release
+
+      - name: Validate downloaded release APKs
+        shell: bash
+        run: |
+          mapfile -t latest_apks < <(find release/latestUniversal/release -maxdepth 1 -name '*.apk' -type f -print)
+          mapfile -t legacy_apks < <(find release/legacyUniversal/release -maxdepth 1 -name '*.apk' -type f -print)
+          test "${#latest_apks[@]}" -eq 1
+          test "${#legacy_apks[@]}" -eq 1
+
+      - name: Publish stable GitHub release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: |
+            release/latestUniversal/release/*.apk
+            release/legacyUniversal/release/*.apk
+          fail_on_unmatched_files: true
+          prerelease: false
+          draft: false
