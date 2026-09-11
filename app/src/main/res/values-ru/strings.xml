@@ -338,6 +338,9 @@
     <string name="pref_reset_audio_workarounds">Сбросить изученные исправления звука</string>
     <string name="pref_reset_audio_workarounds_summary">Забыть форматы, которые устройство научилось декодировать вместо сквозной передачи</string>
     <string name="pref_reset_audio_workarounds_done">Очищено</string>
+    <string name="pref_audio_passthrough">Прямая передача объёмного звука</string>
+    <string name="pref_audio_passthrough_on">Дорожки Dolby и DTS передаются на ресивер без декодирования</string>
+    <string name="pref_audio_passthrough_off">Все дорожки декодирует плеер; включите для ресивера, который сам воспроизводит Atmos, DTS:X или lossless</string>
     <string name="pref_controls_header">Управление</string>
     <string name="pref_onscreen_header">На экране</string>
     <string name="pref_features_header">Возможности</string>

@@ -16,6 +16,8 @@ import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.RESOLVER_NOT
 import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.SOURCE_CONFIGURATION;
 import static com.brouken.player.PlaybackRecoveryPolicy.FailureKind.TRUNCATED_LOCAL_FILE;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class PlaybackRecoveryPolicyTest {
 
@@ -83,5 +85,20 @@ public class PlaybackRecoveryPolicyTest {
                 PlaybackRecoveryPolicy.recoveryPosition(250_000L, 245_000L, true));
         assertEquals(0L,
                 PlaybackRecoveryPolicy.recoveryPosition(0L, 245_000L, false));
+    }
+
+    @Test public void screenRestartIsOneShotUntilReadyResetsIt() {
+        assertTrue(PlaybackRecoveryPolicy.canRestartScreen(true, false, true, true));
+        assertFalse(PlaybackRecoveryPolicy.canRestartScreen(true, true, true, true));
+        assertFalse(PlaybackRecoveryPolicy.canRestartScreen(false, false, true, true));
+    }
+
+    @Test public void wedgedAudioReselectHasARecoveryBudget() {
+        assertTrue(PlaybackRecoveryPolicy.canNudgeReselect(
+                true, true, true, true, 5_000L, 0));
+        assertFalse(PlaybackRecoveryPolicy.canNudgeReselect(
+                true, true, true, true, 4_999L, 0));
+        assertFalse(PlaybackRecoveryPolicy.canNudgeReselect(
+                true, true, true, true, 20_000L, 2));
     }
 }

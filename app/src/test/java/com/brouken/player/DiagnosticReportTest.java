@@ -75,4 +75,11 @@ public class DiagnosticReportTest {
         assertEquals("https://cdn.test/[redacted]",
                 DiagnosticReport.sanitizeNetworkUri(signed));
     }
+
+    @Test
+    public void traceSanitizerDropsNetworkQueriesAndFragments() {
+        assertEquals("load https://media.test/live/movie.m3u8 failed",
+                Utils.stripUrlQuery(
+                        "load https://media.test/live/movie.m3u8?token=secret#part failed"));
+    }
 }

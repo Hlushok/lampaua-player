@@ -9,6 +9,7 @@ import android.preference.PreferenceManager;
 import android.provider.DocumentsContract;
 import android.view.accessibility.CaptioningManager;
 
+import androidx.media3.common.MimeTypes;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.CaptionStyleCompat;
@@ -22,8 +23,10 @@ import java.io.FileOutputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 
 class Prefs {
@@ -56,6 +59,7 @@ class Prefs {
     private static final String PREF_KEY_REPEAT_TOGGLE = "repeatToggle";
     private static final String PREF_KEY_TV_SINGLE_BACK = "tvSingleBack";
     private static final String PREF_KEY_KEEP_AWAKE_ON_PAUSE = "keepAwakeOnPause";
+    private static final String PREF_KEY_AUDIO_PASSTHROUGH = "audioPassthrough";
     private static final String PREF_KEY_SPEED = "speed";
     private static final String PREF_KEY_HOLD_SPEED = "holdSpeed";
     private static final String PREF_KEY_HOLD_SPEED_MODE = "holdSpeedMode";
@@ -219,6 +223,9 @@ class Prefs {
     public boolean skipFetchOnline = true;
     public String skipUndo = SKIP_UNDO_ALL;
     public boolean skipHideWhenLocked = false;
+    // Decode compressed surround in the player by default. Passthrough is opt-in for receivers
+    // that should render Dolby/DTS bitstreams themselves.
+    public boolean audioPassthrough = false;
     public boolean systemVolume = true;
     public int playerVolume = 100;
     public int volumeBoost = 0;
@@ -316,6 +323,8 @@ class Prefs {
         tvSingleBack = mSharedPreferences.getBoolean(PREF_KEY_TV_SINGLE_BACK, tvSingleBack);
         keepAwakeOnPause = mSharedPreferences.getBoolean(
                 PREF_KEY_KEEP_AWAKE_ON_PAUSE, keepAwakeOnPause);
+        audioPassthrough = mSharedPreferences.getBoolean(
+                PREF_KEY_AUDIO_PASSTHROUGH, audioPassthrough);
         fileAccess = mSharedPreferences.getString(PREF_KEY_FILE_ACCESS, fileAccess);
         decoderPriority = Integer.parseInt(mSharedPreferences.getString(PREF_KEY_DECODER_PRIORITY, String.valueOf(decoderPriority)));
         mapDV7ToHevc = mSharedPreferences.getBoolean(PREF_KEY_MAP_DV7, mapDV7ToHevc);
@@ -385,6 +394,16 @@ class Prefs {
                 PREF_KEY_TOGETHER_INVITE_PAGE, togetherInvitePage);
         revokedAudioMimes = mSharedPreferences.getStringSet(
                 PREF_KEY_REVOKED_AUDIO_MIMES, Collections.emptySet());
+        // Older recovery code could persist audio/raw. PCM is the format every decoder feeds into
+        // the sink, so denying it disables every audio track rather than only broken passthrough.
+        if (revokedAudioMimes.contains(MimeTypes.AUDIO_RAW)) {
+            final Set<String> cleaned = new HashSet<>(revokedAudioMimes);
+            cleaned.remove(MimeTypes.AUDIO_RAW);
+            revokedAudioMimes = cleaned;
+            mSharedPreferences.edit()
+                    .putStringSet(PREF_KEY_REVOKED_AUDIO_MIMES, cleaned)
+                    .apply();
+        }
         togetherNick = mSharedPreferences.getString(PREF_KEY_TOGETHER_NICK, "");
         if (togetherNick == null || togetherNick.trim().isEmpty()) {
             togetherNick = AliasGenerator.random();
@@ -399,7 +418,9 @@ class Prefs {
 
     /** Remembers a passthrough format whose AudioTrack could not be opened on this device. */
     public void revokeAudioMime(String mime) {
-        if (mime == null || mime.trim().isEmpty()) return;
+        if (mime == null || mime.trim().isEmpty() || MimeTypes.AUDIO_RAW.equals(mime.trim())) {
+            return;
+        }
         Set<String> updated = new HashSet<>(revokedAudioMimes);
         updated.add(mime.trim());
         revokedAudioMimes = updated;
@@ -866,5 +887,19 @@ class Prefs {
             nonPersitentPosition = -1L;
         }
         this.persistentMode = persistentMode;
+    }
+
+    /**
+     * Comparable snapshot of settings that can affect the player. Room identity is excluded because it
+     * does not require tearing down a retained decoder when returning from Settings.
+     */
+    public Map<String, ?> snapshot() {
+        final Map<String, Object> all = new HashMap<>(mSharedPreferences.getAll());
+        all.remove(PREF_KEY_TOGETHER_NICK);
+        all.remove(PREF_KEY_TOGETHER_PASSWORD);
+        all.remove(PREF_KEY_TOGETHER_PUBLIC);
+        all.remove(PREF_KEY_TOGETHER_RELAY);
+        all.remove(PREF_KEY_TOGETHER_INVITE_PAGE);
+        return all;
     }
 }

@@ -66,4 +66,16 @@ final class PlaybackRecoveryPolicy {
         if (currentPosition > 0L) return currentPosition;
         return everReady && lastObservedPosition > 0L ? lastObservedPosition : 0L;
     }
+
+    static boolean canRestartScreen(boolean tvBox, boolean restartUsed,
+                                    boolean haveMedia, boolean playerAvailable) {
+        return tvBox && !restartUsed && haveMedia && playerAvailable;
+    }
+
+    static boolean canNudgeReselect(boolean playerAvailable, boolean settling,
+                                    boolean playWhenReady, boolean buffering,
+                                    long bufferedAheadMs, int nudges) {
+        return playerAvailable && settling && playWhenReady && buffering
+                && bufferedAheadMs >= 5_000L && nudges < 2;
+    }
 }

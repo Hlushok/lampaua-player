@@ -417,30 +417,31 @@ class Utils {
     }
 
     /** Bounded in-memory trace included with playback reports. */
-    private static final int LOG_LINES = 200;
+    private static final int LOG_LINES = 500;
     private static final ArrayDeque<String> LOG = new ArrayDeque<>();
     private static final long LOG_BASE_MS = monotonicTimeMs();
     private static String lastLogged;
     private static int lastLoggedRepeats;
 
     public static void log(final String text) {
+        final String safeText = stripUrlQuery(text == null ? "null" : text);
         if (BuildConfig.DEBUG) {
-            Log.d("JustPlayer", text);
+            Log.d("UAPlayer", safeText);
         }
         synchronized (LOG) {
-            if (text.equals(lastLogged)) {
+            if (safeText.equals(lastLogged)) {
                 lastLoggedRepeats++;
                 // Rewrite the tail rather than grow: the count is the information, the repetition is not.
                 LOG.removeLast();
-                LOG.addLast(logLine(text) + " (x" + (lastLoggedRepeats + 1) + ")");
+                LOG.addLast(logLine(safeText) + " (x" + (lastLoggedRepeats + 1) + ")");
                 return;
             }
-            lastLogged = text;
+            lastLogged = safeText;
             lastLoggedRepeats = 0;
             while (LOG.size() >= LOG_LINES) {
                 LOG.removeFirst();
             }
-            LOG.addLast(logLine(text));
+            LOG.addLast(logLine(safeText));
         }
     }
 
@@ -453,6 +454,15 @@ class Utils {
 
     private static long monotonicTimeMs() {
         return System.nanoTime() / 1_000_000L;
+    }
+
+    // Remove query strings and fragments from network URLs embedded in diagnostic text. Tokens and
+    // session identifiers normally live there; route information remains useful for local reports.
+    private static final java.util.regex.Pattern URL_QUERY =
+            java.util.regex.Pattern.compile("((?:https?|rtsps?)://[^\\s?#]+)[?#][^\\s,)}\\]\\\"']*");
+
+    public static String stripUrlQuery(final String text) {
+        return text == null ? null : URL_QUERY.matcher(text).replaceAll("$1");
     }
 
     /** The trace so far, oldest first; empty string when nothing has been traced. */

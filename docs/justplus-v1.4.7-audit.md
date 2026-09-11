@@ -22,14 +22,14 @@
 | `app/src/main/java/com/brouken/player/App.java` | Exclude donor hunk | UA Player has no Sentry bootstrap; diagnostics stay local until explicitly shared. | Planned |
 | `app/src/main/java/com/brouken/player/BottomBarLayout.java` | Import | Donor-owned measured-height parking. | `donorV147BottomBarAndTransferContractsStayIntegrated` passed |
 | `app/src/main/java/com/brouken/player/CustomPlayerView.java` | Semantic merge | Route gesture seeks through the donor one-in-flight gate. | Gesture seek gate compiled; focused TV contract passed |
-| `app/src/main/java/com/brouken/player/PlayerActivity.java` | Semantic merge; donor wins | Full donor runtime behavior plus approved UA hooks only. | Bottom-bar/transfer and TV seek/EXIT slices compiled; focused contracts passed |
-| `app/src/main/java/com/brouken/player/Prefs.java` | Semantic merge; donor wins | Donor defaults/settings plus UA-only preferences. | `showTransfer` imported; focused contract passed |
-| `app/src/main/java/com/brouken/player/Utils.java` | Semantic merge | Donor diagnostic capacity without Sentry transport. | Planned |
+| `app/src/main/java/com/brouken/player/PlayerActivity.java` | Semantic merge; donor wins | Full donor runtime behavior plus approved UA hooks only. | Bottom controls, TV seek, decoded-surround default, retained-background lifecycle, route hand-back, bounded reselect/screen recovery, and local analytics compile; focused contracts passed |
+| `app/src/main/java/com/brouken/player/Prefs.java` | Semantic merge; donor wins | Donor defaults/settings plus UA-only preferences. | `showTransfer`, `audioPassthrough=false`, settings snapshots, and persisted `audio/raw` cleanup imported; focused contracts passed |
+| `app/src/main/java/com/brouken/player/Utils.java` | Semantic merge | Donor diagnostic capacity without Sentry transport. | 500-line trace and global query/fragment redaction imported; diagnostic tests passed |
 | `app/src/main/res/layout/exo_player_control_view.xml` | Semantic merge; donor wins | Donor bottom-bar container and scrim geometry plus UA resources. | Measured-height container compiled; focused contract passed |
-| `app/src/main/res/values-ru/strings.xml` | Import donor additions | Keep complete resource parity. | Transfer strings imported; resources compiled |
-| `app/src/main/res/values-uk/strings.xml` | Adapt donor additions | Preserve correct Ukrainian copy. | Transfer strings imported; resources compiled |
-| `app/src/main/res/values/strings.xml` | Import donor additions | Default resource contract. | Transfer strings imported; resources compiled |
-| `app/src/main/res/xml/root_preferences.xml` | Semantic merge; donor wins | Donor rows/order/defaults; no translation-target picker. | `showTransfer` row imported; focused contract passed |
+| `app/src/main/res/values-ru/strings.xml` | Import donor additions | Keep complete resource parity. | Transfer and passthrough strings imported; resources compiled |
+| `app/src/main/res/values-uk/strings.xml` | Adapt donor additions | Preserve correct Ukrainian copy. | Transfer and passthrough strings imported; resources compiled |
+| `app/src/main/res/values/strings.xml` | Import donor additions | Default resource contract. | Transfer and passthrough strings imported; resources compiled |
+| `app/src/main/res/xml/root_preferences.xml` | Semantic merge; donor wins | Donor rows/order/defaults; no translation-target picker. | `showTransfer` and opt-in `audioPassthrough` rows imported; focused contracts passed |
 | `build.gradle` | Import donor tool version | Android Gradle Plugin 9.4.0. | `donorV147BuildStackMatches` passed |
 | `gradle/wrapper/gradle-wrapper.properties` | Import donor tool version | Gradle 9.7.1. | Gradle 9.7.1 executed successfully |
 
@@ -72,6 +72,12 @@
 | `736dbe97` | Merge PR 202 | TV seek task |
 | `422026df` | Merge PR 203 | Covered by child commits |
 | `f26a71e8` | Release v1.4.7 | Build/runtime and README adaptation |
+
+## Focused task evidence
+
+- Audio/recovery/diagnostics slice: 28 selected unit-test executions, 0 failures, 0 errors.
+- Media3 1.11.0 compiled every imported analytics callback and audio-sink override.
+- No Sentry dependency, automatic reporting preference, tag, release, or published artifact was added.
 
 ## Final verification evidence
 
