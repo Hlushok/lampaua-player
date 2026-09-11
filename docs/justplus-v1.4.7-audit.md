@@ -14,11 +14,11 @@
 | `.github/workflows/android-build.yml` | Exclude donor hunk | Its repository-name guard would disable UA Player releases; retain UA's tag workflow. | Planned |
 | `.github/workflows/android.yml` | Exclude donor deletion | UA Player needs its `main` CI workflow. | Planned |
 | `README.md` | Adapt | Retain UA identity/version and document imported user-facing behavior. | Planned |
-| `app/build.gradle` | Semantic merge | Import SDK/dependencies while retaining UA package/version/archive/signing/ABI rules. | Planned |
-| `app/libs/lib-decoder-av1-release.aar` | Import byte-for-byte | Must match Media3 1.11.0. | Planned |
-| `app/libs/lib-decoder-ffmpeg-release.aar` | Import byte-for-byte | Must match Media3 1.11.0. | Planned |
-| `app/libs/lib-decoder-iamf-release.aar` | Import byte-for-byte | Must match Media3 1.11.0. | Planned |
-| `app/libs/lib-exoplayer-release.aar` | Import byte-for-byte | Must match Media3 1.11.0. | Planned |
+| `app/build.gradle` | Semantic merge | Import SDK/dependencies while retaining UA package/version/archive/signing/ABI rules. | `donorV147BuildStackMatches`; Media3 1.11.0 dependency graph resolved |
+| `app/libs/lib-decoder-av1-release.aar` | Import byte-for-byte | Must match Media3 1.11.0. | Git blob `f6fcfe1d2a6ad393e0a139b2f2fad735fad28041` matches donor |
+| `app/libs/lib-decoder-ffmpeg-release.aar` | Import byte-for-byte | Must match Media3 1.11.0. | Git blob `87b10d80f56724cde7306225e9890180c11dd04a` matches donor |
+| `app/libs/lib-decoder-iamf-release.aar` | Import byte-for-byte | Must match Media3 1.11.0. | Git blob `1ca4ba4f9bdc6bf79b3956c511badd7945411fe6` matches donor |
+| `app/libs/lib-exoplayer-release.aar` | Import byte-for-byte | Must match Media3 1.11.0. | Git blob `7f55e3c7def6f4672d42ebde095b97b1ce09b52a` matches donor |
 | `app/src/main/java/com/brouken/player/App.java` | Exclude donor hunk | UA Player has no Sentry bootstrap; diagnostics stay local until explicitly shared. | Planned |
 | `app/src/main/java/com/brouken/player/BottomBarLayout.java` | Import | Donor-owned measured-height parking. | Planned |
 | `app/src/main/java/com/brouken/player/CustomPlayerView.java` | Semantic merge | Route gesture seeks through the donor one-in-flight gate. | Planned |
@@ -30,8 +30,8 @@
 | `app/src/main/res/values-uk/strings.xml` | Adapt donor additions | Preserve correct Ukrainian copy. | Planned |
 | `app/src/main/res/values/strings.xml` | Import donor additions | Default resource contract. | Planned |
 | `app/src/main/res/xml/root_preferences.xml` | Semantic merge; donor wins | Donor rows/order/defaults; no translation-target picker. | Planned |
-| `build.gradle` | Import donor tool version | Android Gradle Plugin 9.4.0. | Planned |
-| `gradle/wrapper/gradle-wrapper.properties` | Import donor tool version | Gradle 9.7.1. | Planned |
+| `build.gradle` | Import donor tool version | Android Gradle Plugin 9.4.0. | `donorV147BuildStackMatches` passed |
+| `gradle/wrapper/gradle-wrapper.properties` | Import donor tool version | Gradle 9.7.1. | Gradle 9.7.1 executed successfully |
 
 ## Commit ledger
 

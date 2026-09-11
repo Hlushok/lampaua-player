@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace 'com.brouken.player'
-    compileSdk = 36
+    compileSdk = 37
     ndkVersion '29.0.14206865'
 
     defaultConfig {
@@ -101,8 +101,7 @@ android {
 }
 
 dependencies {
-    def media3_version = '1.11.0-beta01'
-    def androidxCoreVersion = '1.8.0'
+    def media3_version = '1.11.0'
     implementation "androidx.media3:media3-session:$media3_version"
     implementation "androidx.media3:media3-datasource:$media3_version"
     // Media reads go through OkHttp rather than HttpURLConnection, for the connection pool (see
@@ -139,12 +138,11 @@ dependencies {
     implementation 'com.getkeepsafe.taptargetview:taptargetview:1.13.3'
     implementation 'com.google.android.material:material:1.12.0'
     implementation 'androidx.coordinatorlayout:coordinatorlayout:1.3.0'
-    implementation "androidx.core:core:$androidxCoreVersion"
     implementation 'androidx.appcompat:appcompat:1.7.1'
     implementation 'androidx.preference:preference:1.2.1'
-    implementation 'com.squareup.okhttp3:okhttp:5.3.2'
+    implementation 'com.squareup.okhttp3:okhttp:5.5.0'
     implementation 'com.github.bumptech.glide:glide:4.16.0'
-    implementation 'com.google.zxing:core:3.5.3'
+    implementation 'com.google.zxing:core:3.5.4'
     implementation 'com.sigpwned:chardet4j:78.1.0'
     implementation project(path: ':doubletapplayerview')
     implementation project(path: ':android-file-chooser')
