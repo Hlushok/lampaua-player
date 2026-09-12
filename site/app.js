@@ -4,6 +4,43 @@
   const repository = "Hlushok/lampaua-player";
   const releasesUrl = `https://github.com/${repository}/releases/latest`;
   const releaseApiUrl = `https://api.github.com/repos/${repository}/releases/latest`;
+  const header = document.querySelector(".site-header");
+  const menuToggle = document.querySelector(".menu-toggle");
+  const siteNavigation = document.querySelector(".site-nav");
+
+  const setMenuOpen = (open) => {
+    if (!header || !menuToggle) return;
+    header.dataset.menuOpen = String(open);
+    menuToggle.setAttribute("aria-expanded", String(open));
+    menuToggle.setAttribute("aria-label", open ? "Закрити меню" : "Відкрити меню");
+  };
+
+  if (header && menuToggle && siteNavigation) {
+    menuToggle.addEventListener("click", () => {
+      setMenuOpen(menuToggle.getAttribute("aria-expanded") !== "true");
+    });
+
+    siteNavigation.addEventListener("click", (event) => {
+      if (event.target.closest("a")) setMenuOpen(false);
+    });
+
+    document.addEventListener("click", (event) => {
+      if (menuToggle.getAttribute("aria-expanded") === "true" && !header.contains(event.target)) {
+        setMenuOpen(false);
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && menuToggle.getAttribute("aria-expanded") === "true") {
+        setMenuOpen(false);
+        menuToggle.focus();
+      }
+    });
+
+    window.matchMedia("(min-width: 768px)").addEventListener("change", (event) => {
+      if (event.matches) setMenuOpen(false);
+    });
+  }
 
   const setText = (selector, value) => {
     document.querySelectorAll(selector).forEach((element) => {

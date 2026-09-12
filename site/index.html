@@ -27,7 +27,7 @@
         <span>UA Player</span>
       </a>
 
-      <nav class="site-nav" aria-label="Основна навігація">
+      <nav class="site-nav" id="site-navigation" aria-label="Основна навігація">
         <a href="#features">Можливості</a>
         <a href="#lampa">Для LAMPA</a>
         <a href="#subtitles">Субтитри</a>
@@ -37,6 +37,11 @@
          href="https://github.com/Hlushok/lampaua-player/releases/latest">
         Завантажити
       </a>
+
+      <button class="menu-toggle" type="button" aria-expanded="false"
+              aria-controls="site-navigation" aria-label="Відкрити меню">
+        <span></span><span></span><span></span>
+      </button>
     </div>
   </header>
 
@@ -51,7 +56,7 @@
             <span class="live-dot" aria-hidden="true"></span>
             Android · Android TV
           </div>
-          <h1 id="hero-title">Відео з LAMPA —<br><span>на вашому екрані.</span></h1>
+          <h1 id="hero-title">Відео з LAMPA&nbsp;—<br><span>на вашому екрані.</span></h1>
           <p class="hero-lead">
             UA Player відкриває потоки, плейлисти й субтитри з LAMPA та LampaUA
             на телефоні, планшеті, TV box і телевізорі.
