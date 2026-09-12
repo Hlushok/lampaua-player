@@ -94,7 +94,7 @@ public class ReleaseWorkflowContractTest {
         assertTrue(restore.contains("Signing certificate SHA-256 mismatch"));
 
         assertTrue(assemble.contains(":app:assembleLatestUniversalRelease"));
-        assertTrue(assemble.contains(":app:assembleLegacyUniversalRelease"));
+        assertFalse(assemble.contains(":app:assembleLegacyUniversalRelease"));
         assertTrue(assemble.contains("-Pandroid.injected.signing.key.alias=androiddebugkey"));
         assertFalse(assemble.contains("-Pandroid.injected.signing.key.alias=key"));
 
@@ -108,16 +108,13 @@ public class ReleaseWorkflowContractTest {
 
         assertTrue(verify.contains(
                 "latest_dir=\"app/build/outputs/apk/latestUniversal/release\""));
-        assertTrue(verify.contains(
-                "legacy_dir=\"app/build/outputs/apk/legacyUniversal/release\""));
         assertTrue(verify.contains("test \"${#latest_apks[@]}\" -eq 1"));
-        assertTrue(verify.contains("test \"${#legacy_apks[@]}\" -eq 1"));
+        assertFalse(verify.contains("legacyUniversal"));
         assertTrue(verify.contains("--certificate \"$EXPECTED_SIGNING_CERT_SHA256\""));
 
         assertTrue(upload.contains(
                 "app/build/outputs/apk/latestUniversal/release/*.apk"));
-        assertTrue(upload.contains(
-                "app/build/outputs/apk/legacyUniversal/release/*.apk"));
+        assertFalse(upload.contains("legacyUniversal"));
         assertTrue(upload.contains("if-no-files-found: error"));
         assertTrue(cleanup.contains("if: always()"));
         assertTrue(cleanup.contains("rm -f \"$SIGNING_KEYSTORE\""));
@@ -137,8 +134,7 @@ public class ReleaseWorkflowContractTest {
         assertTrue(publish.contains("uses: actions/download-artifact@v8"));
         assertTrue(publish.contains(
                 "find release/latestUniversal/release -maxdepth 1"));
-        assertTrue(publish.contains(
-                "find release/legacyUniversal/release -maxdepth 1"));
+        assertFalse(publish.contains("legacyUniversal"));
         assertTrue(publish.contains(
                 "uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64"));
         assertTrue(publish.contains("# v3.0.3"));
