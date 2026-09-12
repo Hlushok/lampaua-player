@@ -170,8 +170,7 @@ a {
 }
 
 .site-nav a,
-.footer-links a,
-.legacy-link {
+.footer-links a {
   color: var(--muted-strong);
   text-decoration: none;
   font-size: 0.95rem;
@@ -180,8 +179,7 @@ a {
 }
 
 .site-nav a:hover,
-.footer-links a:hover,
-.legacy-link:hover {
+.footer-links a:hover {
   color: var(--ink);
 }
 
@@ -1058,16 +1056,6 @@ section[id] {
 
 .download-actions {
   margin-top: 2rem;
-}
-
-.legacy-link {
-  min-height: 44px;
-  padding: 0.55rem 0.6rem;
-  display: inline-flex;
-  align-items: center;
-  text-decoration: underline;
-  text-decoration-color: rgba(195, 206, 222, 0.34);
-  text-underline-offset: 4px;
 }
 
 .release-card {

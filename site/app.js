@@ -84,10 +84,9 @@
       const release = await response.json();
       const assets = Array.isArray(release.assets) ? release.assets : [];
       const primaryApk = assets.find((asset) =>
-        /^LampaUA\.Player\.v.+\.apk$/i.test(asset.name || "") &&
+        /^UA-Player-.+\.apk$/i.test(asset.name || "") &&
         !/-legacy\.apk$/i.test(asset.name || "")
       );
-      const legacyApk = assets.find((asset) => /-legacy\.apk$/i.test(asset.name || ""));
 
       const version = release.tag_name || "Актуальна";
       setText("[data-release-version]", version);
@@ -104,16 +103,11 @@
         setDownloadUrl("latest", release.html_url);
       }
 
-      if (legacyApk?.browser_download_url) {
-        setDownloadUrl("legacy", legacyApk.browser_download_url);
-      }
-
       if (release.published_at) {
         setText("[data-release-date]", formatDate(release.published_at));
       }
     } catch (error) {
       setDownloadUrl("latest", releasesUrl);
-      setDownloadUrl("legacy", releasesUrl);
     }
   };
 
