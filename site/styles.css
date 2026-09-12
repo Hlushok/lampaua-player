@@ -265,7 +265,7 @@ a:focus-visible {
 
 .hero {
   position: relative;
-  padding: clamp(4.5rem, 7vw, 6.5rem) 0 clamp(4rem, 6vw, 5.5rem);
+  padding: 0.65rem 0 clamp(4rem, 6vw, 5.5rem);
   display: flex;
   align-items: center;
   isolation: isolate;
@@ -1293,7 +1293,7 @@ section[id] {
 
   .hero {
     display: block;
-    padding: 3.6rem 0 3.5rem;
+    padding: 1.25rem 0 3.5rem;
   }
 
   .hero-grid {
