@@ -12386,6 +12386,12 @@ public class PlayerActivity extends Activity {
             // Enrich via the per-capture ScopeCallback overload (not withScope) so the tags/extras land
             // on exactly this event.
             io.sentry.Sentry.captureException(error, scope -> enrichPlaybackScope(error, scope));
+            if (shouldSuggestAudioPassthrough(error)) {
+                stopWithMessage(getString(R.string.error_audio_multichannel_passthrough),
+                        errorReport(error), R.string.pref_title,
+                        () -> openSettings("audioPassthrough"));
+                return;
+            }
             if (error instanceof ExoPlaybackException) {
                 final ExoPlaybackException exoPlaybackException = (ExoPlaybackException) error;
                 if (exoPlaybackException.type == ExoPlaybackException.TYPE_SOURCE) {
@@ -12979,7 +12985,17 @@ public class PlayerActivity extends Activity {
      * and a write failure carries no such cause, so it is read from the renderer format the exception was
      * raised for instead.
      */
-    private static String audioFailureMime(PlaybackException error) {
+    private boolean shouldSuggestAudioPassthrough(PlaybackException error) {
+        final Format format = audioFailureFormat(error);
+        final String sourceMime = player != null
+                ? selectedMime(player.getCurrentTracks(), C.TRACK_TYPE_AUDIO) : null;
+        return format != null && isMatroskaMedia()
+                && AudioTrackFailureAdvisor.shouldSuggestPassthrough(
+                error.errorCode, sourceMime, format.sampleMimeType, format.channelCount,
+                isTvBox, mPrefs.audioPassthrough);
+    }
+
+    private static Format audioFailureFormat(PlaybackException error) {
         if (error.errorCode != PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED
                 && error.errorCode != PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED) {
             return null;
@@ -12987,16 +13003,21 @@ public class PlayerActivity extends Activity {
         for (Throwable cause = error.getCause(); cause != null; cause = cause.getCause()) {
             if (cause instanceof AudioSink.InitializationException) {
                 Format format = ((AudioSink.InitializationException) cause).format;
-                return format != null ? format.sampleMimeType : null;
+                return format;
             }
         }
         if (error instanceof ExoPlaybackException) {
             final Format format = ((ExoPlaybackException) error).rendererFormat;
             if (format != null && MimeTypes.isAudio(format.sampleMimeType)) {
-                return format.sampleMimeType;
+                return format;
             }
         }
         return null;
+    }
+
+    private static String audioFailureMime(PlaybackException error) {
+        final Format format = audioFailureFormat(error);
+        return format != null ? format.sampleMimeType : null;
     }
 
     /**
@@ -13718,7 +13739,12 @@ public class PlayerActivity extends Activity {
     // What stays usable is everything that never needed the player — the volume/brightness gestures, the
     // gear (and the settings screen behind it) and the playlist, if there is one to step through.
     private void stopWithMessage(final String text, final String details) {
-        showSnack(text, details);
+        stopWithMessage(text, details, 0, null);
+    }
+
+    private void stopWithMessage(final String text, final String details, final int actionText,
+                                 @Nullable final Runnable action) {
+        showSnack(text, details, actionText, action);
         releasePlayer(false);
         playerView.setPlayer(null);
         playerView.setCustomErrorMessage(text);
@@ -14060,20 +14086,34 @@ public class PlayerActivity extends Activity {
     }
 
     void showSnack(final String textPrimary, final String textSecondary) {
+        showSnack(textPrimary, textSecondary, 0, null);
+    }
+
+    private void showSnack(final String textPrimary, final String textSecondary,
+                           final int actionText, @Nullable final Runnable action) {
         // On TV the Snackbar action button is not reachable with the D-pad, so the "Details" affordance
         // would be lost. Present the error as an AlertDialog instead — its buttons are D-pad focusable.
         if (isTvBox) {
             final AlertDialog.Builder builder = new AlertDialog.Builder(this);
             builder.setMessage(textPrimary);
-            builder.setPositiveButton(android.R.string.ok, (dialogInterface, i) -> dialogInterface.dismiss());
+            if (action != null) {
+                builder.setPositiveButton(actionText, (dialogInterface, i) -> action.run());
+                builder.setNegativeButton(R.string.error_close, null);
+            } else {
+                builder.setPositiveButton(android.R.string.ok,
+                        (dialogInterface, i) -> dialogInterface.dismiss());
+            }
             if (textSecondary != null) {
                 builder.setNeutralButton(R.string.error_details, (dialogInterface, i) -> showErrorScreen(textSecondary, textSecondary));
             }
             builder.show();
             return;
         }
-        snackbar = Snackbar.make(coordinatorLayout, textPrimary, Snackbar.LENGTH_LONG);
-        if (textSecondary != null) {
+        snackbar = Snackbar.make(coordinatorLayout, textPrimary,
+                action != null ? Snackbar.LENGTH_INDEFINITE : Snackbar.LENGTH_LONG);
+        if (action != null) {
+            snackbar.setAction(actionText, v -> action.run());
+        } else if (textSecondary != null) {
             snackbar.setAction(R.string.error_details, v -> showErrorScreen(textSecondary, textSecondary));
         }
         snackbar.setAnchorView(R.id.exo_bottom_bar);

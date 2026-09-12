@@ -18,6 +18,7 @@
     <string name="error_playback_general">Не вдалося відтворити це відео.</string>
     <string name="error_playback_timeout">Відтворення надто довго не починається. Спробуйте ще раз.</string>
     <string name="error_playback_stalled">Відтворення зупинилося і не продовжилося. Спробуйте ще раз.</string>
+    <string name="error_audio_multichannel_passthrough">Пристрій не зміг відтворити багатоканальну аудіодоріжку. Увімкніть «Налаштування → Звук → Пряма передача об’ємного звуку» та повторіть запуск відео.</string>
     <string name="error_stream_interrupted">Ефір постійно переривається, продовжити не вдалося. Спробуйте пізніше.</string>
     <string name="error_software_video_too_slow">%1$s %2$s на цьому пристрої декодується програмно, і процесор не встигає. Спробуйте копію з меншою роздільною здатністю.</string>
     <string name="error_stream_broken">Потік відео пошкоджено або недоступний. Спробуйте ще раз.</string>
