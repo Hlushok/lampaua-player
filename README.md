@@ -6,6 +6,7 @@ Open-source Android video player for Lampa and LampaUA, based on [Just Player](h
 - Current version: `2.0.2` (`versionCode 22`)
 - Android 6.0+ and Android TV
 - Media3/ExoPlayer playback engine
+- Website: [hlushok.github.io/lampaua-player](https://hlushok.github.io/lampaua-player/)
 
 ## Install
 

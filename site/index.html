@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#050a12">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="UA Player — відеоплеєр для LAMPA та LampaUA на Android і Android TV. Потоки, серіали, субтитри, Watch Together та керування з пульта.">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="uk_UA">
+  <meta property="og:title" content="UA Player — плеєр для LAMPA та LampaUA">
+  <meta property="og:description" content="Дивіться потоки, серіали й субтитри з LAMPA на Android та Android TV.">
+  <meta property="og:url" content="https://hlushok.github.io/lampaua-player/">
+  <link rel="canonical" href="https://hlushok.github.io/lampaua-player/">
+  <link rel="icon" type="image/png" href="assets/ua-player-icon.png">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+  <title>UA Player — плеєр для LAMPA та LampaUA</title>
+</head>
+<body id="top">
+  <a class="skip-link" href="#main">До основного вмісту</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="#top" aria-label="UA Player — на початок сторінки">
+        <img src="assets/ua-player-icon.png" alt="" width="48" height="48">
+        <span>UA Player</span>
+      </a>
+
+      <nav class="site-nav" aria-label="Основна навігація">
+        <a href="#features">Можливості</a>
+        <a href="#lampa">Для LAMPA</a>
+        <a href="#subtitles">Субтитри</a>
+      </nav>
+
+      <a class="button button-small button-gold" data-download="latest"
+         href="https://github.com/Hlushok/lampaua-player/releases/latest">
+        Завантажити
+      </a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-glow hero-glow-blue" aria-hidden="true"></div>
+      <div class="hero-glow hero-glow-gold" aria-hidden="true"></div>
+
+      <div class="shell hero-grid">
+        <div class="hero-copy">
+          <div class="eyebrow">
+            <span class="live-dot" aria-hidden="true"></span>
+            Android · Android TV
+          </div>
+          <h1 id="hero-title">Відео з LAMPA —<br><span>на вашому екрані.</span></h1>
+          <p class="hero-lead">
+            UA Player відкриває потоки, плейлисти й субтитри з LAMPA та LampaUA
+            на телефоні, планшеті, TV box і телевізорі.
+          </p>
+
+          <div class="hero-actions">
+            <a class="button button-primary" data-download="latest"
+               href="https://github.com/Hlushok/lampaua-player/releases/latest">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/>
+              </svg>
+              <span>Завантажити APK</span>
+            </a>
+            <a class="button button-ghost" href="https://github.com/Hlushok/lampaua-player"
+               target="_blank" rel="noopener noreferrer">
+              Відкрити GitHub
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 17 17 7M8 7h9v9"/>
+              </svg>
+            </a>
+          </div>
+
+          <ul class="release-facts" aria-label="Відомості про реліз">
+            <li><strong data-release-version>v2.0.2</strong><span>актуальна версія</span></li>
+            <li><strong>Android 6.0+</strong><span>телефон і TV</span></li>
+            <li><strong>Universal APK</strong><span>ARM 32/64-bit</span></li>
+          </ul>
+        </div>
+
+        <div class="hero-stage" aria-label="Інтерфейс UA Player">
+          <div class="stage-orbit" aria-hidden="true"></div>
+          <div class="app-emblem">
+            <img src="assets/ua-player-icon.png" alt="Логотип UA Player" width="180" height="180">
+          </div>
+          <figure class="player-shot">
+            <div class="shot-chrome">
+              <span></span><span></span><span></span>
+              <b>UA PLAYER · NOW PLAYING</b>
+            </div>
+            <img src="assets/player-screen.png"
+                 alt="Екран UA Player із назвою серії, часом завершення та панеллю керування"
+                 width="1280" height="576">
+            <figcaption>
+              <span><i aria-hidden="true"></i> Точне керування</span>
+              <span>Телефон · TV</span>
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="signal-strip" aria-label="Підтримувані можливості">
+      <div class="signal-track">
+        <span>HLS</span><i></i><span>DASH</span><i></i><span>RTMP</span><i></i>
+        <span>RTSP</span><i></i><span>4K HEVC</span><i></i><span>AV1</span><i></i>
+        <span>MKV</span><i></i><span>Android TV</span>
+      </div>
+    </section>
+
+    <section class="section shell" id="features" aria-labelledby="features-title">
+      <div class="section-heading">
+        <p class="kicker">Один плеєр</p>
+        <h2 id="features-title">Усе потрібне для перегляду</h2>
+        <p>Без переходів між кількома застосунками: від вибору серії до наступного епізоду.</p>
+      </div>
+
+      <div class="feature-grid">
+        <article class="feature-card feature-card-wide">
+          <span class="feature-number">01</span>
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/><path d="M4 5v14"/></svg>
+          </div>
+          <h3>Потоки й файли</h3>
+          <p>HLS, DASH, RTMP, RTSP, HTTP, MP4, MKV та AVI. Апаратне декодування з резервним програмним режимом.</p>
+          <div class="format-line" aria-label="Відеоформати">
+            <span>H.264</span><span>HEVC</span><span>AV1</span><span>Dolby Vision</span>
+          </div>
+        </article>
+
+        <article class="feature-card">
+          <span class="feature-number">02</span>
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10h3m4 0h3M7 14h5m2 0h3"/></svg>
+          </div>
+          <h3>Розумні субтитри</h3>
+          <p>Дві доріжки, пошук онлайн, власний стиль, синхронізація та переклад українською.</p>
+        </article>
+
+        <article class="feature-card">
+          <span class="feature-number">03</span>
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M6 4h12v16H6zM9 8h6m-6 4h6m-6 4h3"/></svg>
+          </div>
+          <h3>Серіали без пауз</h3>
+          <p>Плейлист епізодів, обкладинки, продовження з місця зупинки та автоматичний перехід далі.</p>
+        </article>
+
+        <article class="feature-card">
+          <span class="feature-number">04</span>
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="3"/><circle cx="17" cy="8" r="2"/><path d="M3 20c.4-4 2-6 5-6s4.6 2 5 6m1-6c3 0 5 2 5 5"/></svg>
+          </div>
+          <h3>Дивитися разом</h3>
+          <p>Кімнати з паролем, QR-запрошення та синхронізація перегляду між сумісними пристроями.</p>
+        </article>
+
+        <article class="feature-card">
+          <span class="feature-number">05</span>
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 22h8m-4-4v4M7 10h10"/></svg>
+          </div>
+          <h3>Створено для TV</h3>
+          <p>Помітний фокус, логічний Back, швидке перемотування та повне керування пультом без сенсорного екрана.</p>
+        </article>
+
+        <article class="feature-card feature-card-accent">
+          <span class="feature-number">06</span>
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.4 8 8 9 4.6-1 8-4 8-9V7l-8-4Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></svg>
+          </div>
+          <h3>Стабільне відтворення</h3>
+          <p>Відновлення після мережевих збоїв, HLS і torrent-затримок, помилок декодера та довгих пауз.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section integration-section" id="lampa" aria-labelledby="lampa-title">
+      <div class="shell integration-grid">
+        <div class="section-heading section-heading-left">
+          <p class="kicker">Для екосистеми LAMPA</p>
+          <h2 id="lampa-title">Вибрали відео — далі працює UA Player</h2>
+          <p>
+            Плеєр отримує назву, серію, постер, якість, заголовки, субтитри й скіпи,
+            а після перегляду повертає позицію назад у LAMPA.
+          </p>
+          <a class="text-link" href="https://github.com/Hlushok/lampaua-player#lampa-integration"
+             target="_blank" rel="noopener noreferrer">
+            Докладно про інтеграцію
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg>
+          </a>
+        </div>
+
+        <div class="flow-panel" aria-label="Схема взаємодії LAMPA та UA Player">
+          <div class="flow-node">
+            <span class="node-label">01</span>
+            <strong>LAMPA</strong>
+            <small>Обираєте фільм або серію</small>
+          </div>
+          <div class="flow-connector" aria-hidden="true"><span></span></div>
+          <div class="flow-node flow-node-active">
+            <span class="node-label">02</span>
+            <strong>UA Player</strong>
+            <small>Дивитеся у зручному режимі</small>
+          </div>
+          <div class="flow-connector" aria-hidden="true"><span></span></div>
+          <div class="flow-node">
+            <span class="node-label">03</span>
+            <strong>Продовження</strong>
+            <small>Позиція зберігається в LAMPA</small>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section shell subtitle-section" id="subtitles" aria-labelledby="subtitles-title">
+      <div class="subtitle-demo" aria-label="Можливості субтитрів UA Player">
+        <div class="demo-header">
+          <span>Субтитри</span>
+          <span class="demo-status">Увімкнено</span>
+        </div>
+        <div class="subtitle-row is-selected">
+          <span class="track-mark">A</span>
+          <div><strong>Українська</strong><small>Основна доріжка</small></div>
+          <span class="check" aria-hidden="true">✓</span>
+        </div>
+        <div class="subtitle-row">
+          <span class="track-mark">B</span>
+          <div><strong>English</strong><small>Додаткові субтитри</small></div>
+          <span class="track-meta">SRT</span>
+        </div>
+        <div class="translation-row">
+          <span>Автопереклад</span>
+          <strong>→ Українська</strong>
+        </div>
+        <div class="timing-line" aria-hidden="true">
+          <span>-30 с</span><i><b></b></i><span>+30 с</span>
+        </div>
+      </div>
+
+      <div class="section-heading section-heading-left subtitle-copy">
+        <p class="kicker">Текст має бути вчасно</p>
+        <h2 id="subtitles-title">Субтитри, які підлаштовуються під вас</h2>
+        <p>
+          Обирайте дві мови одночасно, шукайте субтитри за назвою серіалу,
+          змінюйте вигляд і виправляйте затримку від −30 до +30 секунд.
+        </p>
+        <ul class="check-list">
+          <li>Автопереклад доступний за потреби, цільова мова — лише українська.</li>
+          <li>До зовнішнього сервісу перекладу надсилається тільки текст реплік.</li>
+          <li>Знайдені субтитри підключаються без перезапуску відео.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section download-section" id="download" aria-labelledby="download-title">
+      <div class="shell download-card">
+        <div class="download-copy">
+          <p class="kicker">Готові дивитися?</p>
+          <h2 id="download-title">Завантажте UA Player</h2>
+          <p>
+            Основний універсальний APK для Android 6.0+ та Android TV.
+            Файл завантажується безпосередньо з публічного GitHub Release.
+          </p>
+          <div class="download-actions">
+            <a class="button button-primary" data-download="latest"
+               href="https://github.com/Hlushok/lampaua-player/releases/latest">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg>
+              <span>Завантажити APK</span>
+            </a>
+            <a class="legacy-link" data-download="legacy"
+               href="https://github.com/Hlushok/lampaua-player/releases/latest">
+              Legacy-версія
+            </a>
+          </div>
+        </div>
+
+        <dl class="release-card" aria-live="polite">
+          <div><dt>Версія</dt><dd data-release-version>v2.0.2</dd></div>
+          <div><dt>Файл</dt><dd data-release-file>LampaUA.Player.v2.0.2.apk</dd></div>
+          <div><dt>Розмір</dt><dd data-release-size>31,4 МБ</dd></div>
+          <div><dt>Опубліковано</dt><dd data-release-date>11 вересня 2026</dd></div>
+          <div class="digest-row">
+            <dt>SHA-256</dt>
+            <dd><code data-release-digest>8f84c93dbb107d34fa3bfe99bef529abb0e7afec09e02ee63a7e47a073075046</code></dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer-grid">
+      <div class="footer-brand">
+        <img src="assets/ua-player-icon.png" alt="" width="42" height="42">
+        <div><strong>UA Player</strong><span>Powered by KinoHub</span></div>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/Hlushok/lampaua-player" target="_blank" rel="noopener noreferrer">Код</a>
+        <a href="https://github.com/Hlushok/lampaua-player/releases/latest" target="_blank" rel="noopener noreferrer">Релізи</a>
+        <a href="https://github.com/Hlushok/lampaua-player/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">Ліцензія</a>
+      </div>
+      <p>Відкритий плеєр для LAMPA та LampaUA.</p>
+    </div>
+  </footer>
+</body>
+</html>
