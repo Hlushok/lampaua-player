@@ -12,12 +12,16 @@ import static org.junit.Assert.assertTrue;
 
 public class ResourceContractTest {
 
-    private static String read(String relativePath) throws Exception {
+    private static Path resolve(String relativePath) {
         Path path = Paths.get(relativePath);
         if (!Files.exists(path)) {
             path = Paths.get("app").resolve(relativePath);
         }
-        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+        return path;
+    }
+
+    private static String read(String relativePath) throws Exception {
+        return new String(Files.readAllBytes(resolve(relativePath)), StandardCharsets.UTF_8);
     }
 
     @Test
@@ -70,6 +74,18 @@ public class ResourceContractTest {
         assertTrue(player.contains("final LinearLayout displayParent = headerButtons"));
         assertTrue(player.contains("if (!isTvBox) {\n            displayParent.addView(buttonRotation)"));
         assertTrue(player.contains("endsAtView.setVisibility(View.VISIBLE)"));
+    }
+
+    @Test
+    public void launcherLogoHasNoSquareUnderlay() throws Exception {
+        final String adaptiveIcon = read("src/main/res/mipmap-anydpi-v26/ic_launcher.xml");
+        final String playerLayout = read("src/main/res/layout/activity_player.xml");
+
+        assertTrue(adaptiveIcon.contains("@android:color/transparent"));
+        assertTrue(adaptiveIcon.contains("@drawable/ua_player_launcher_icon"));
+        assertTrue(playerLayout.contains("android:src=\"@drawable/ua_player_icon\""));
+        assertTrue(Files.isRegularFile(resolve(
+                "src/main/res/drawable-nodpi/ua_player_launcher_icon.png")));
     }
 
     @Test
