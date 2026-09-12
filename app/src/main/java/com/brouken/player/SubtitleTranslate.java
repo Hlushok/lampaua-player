@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.Callable;
@@ -60,6 +61,9 @@ import okhttp3.ResponseBody;
  * it. Nothing is written back out either: the result is plain text on the original timings.
  */
 final class SubtitleTranslate {
+
+    /** UA Player always produces Ukrainian; source languages remain user-selectable. */
+    static final String TARGET_LANGUAGE = "ukr";
 
     private SubtitleTranslate() {}
 
@@ -247,12 +251,7 @@ final class SubtitleTranslate {
                 out.add(folded);
             }
         }
-        final StringBuilder joined = new StringBuilder();
-        for (final String id : out) {
-            if (joined.length() > 0) joined.append(',');
-            joined.append(id);
-        }
-        return joined.toString();
+        return TextUtils.join(",", out);
     }
 
     /**
@@ -310,6 +309,32 @@ final class SubtitleTranslate {
             sources.add("eng");
         }
         return sources;
+    }
+
+    /**
+     * Source languages for UA Player's fixed Ukrainian target. Any valid language chosen by the
+     * viewer is accepted, followed by useful defaults for a fresh install. The target itself is
+     * never offered as translation input.
+     */
+    static List<String> sourcesFor(String targetIso3, List<String> preferredSources) {
+        if (!TARGET_LANGUAGE.equals(targetIso3)) {
+            return sourcesFor(targetIso3);
+        }
+        final LinkedHashSet<String> sources = new LinkedHashSet<>();
+        if (preferredSources != null) {
+            for (String language : preferredSources) {
+                final String normalized = language == null
+                        ? null : language.trim().toLowerCase(Locale.US);
+                if (normalized != null && normalized.matches("[a-z]{3}")
+                        && !TARGET_LANGUAGE.equals(normalized)) {
+                    sources.add(normalized);
+                }
+            }
+        }
+        sources.add("rus");
+        sources.add("eng");
+        sources.add("pol");
+        return new ArrayList<>(sources);
     }
 
     /**

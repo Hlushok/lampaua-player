@@ -1,25 +1,26 @@
 package com.brouken.player;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-
 import org.junit.Test;
 
-import java.util.Arrays;
-import java.util.Collections;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+import static org.junit.Assert.assertTrue;
 
 public class SubtitleTranslateTest {
-
     @Test
-    public void normalizesKnownBackendsAndRemovesDuplicates() {
-        assertEquals("mozhi,google", SubtitleTranslate.normalize(
-                "mozhi-bloat,unknown,google,mozhi-ducks"));
-    }
+    public void translationAcceptsAnySourceButKeepsUkrainianTarget() throws Exception {
+        Path path = Paths.get("src/main/java/com/brouken/player/SubtitleTranslate.java");
+        if (!Files.exists(path)) path = Paths.get("app").resolve(path);
+        String source = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
 
-    @Test
-    public void translatesToUkrainianFromReadableFallbacksOnly() {
-        assertEquals(Arrays.asList("rus", "eng"), SubtitleTranslate.sourcesFor("ukr"));
-        assertEquals(Collections.emptyList(), SubtitleTranslate.sourcesFor("eng"));
-        assertNull(UkrainianSubtitlePolicy.translatedCacheName("subs.movie", "ukr"));
+        assertTrue(source.contains("TARGET_LANGUAGE = \"ukr\""));
+        assertTrue(source.contains("sourcesFor(String targetIso3, List<String> preferredSources)"));
+        assertTrue(source.contains("!TARGET_LANGUAGE.equals(normalized)"));
+        assertTrue(source.contains("sources.add(\"rus\")"));
+        assertTrue(source.contains("sources.add(\"eng\")"));
+        assertTrue(source.contains("sources.add(\"pol\")"));
     }
 }

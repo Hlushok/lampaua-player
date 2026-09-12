@@ -127,23 +127,32 @@
         style="@style/ExoStyledControls.Button.Center.Secondary"
         android:src="@drawable/exo_styled_controls_delete"/>
 
-    <ImageButton android:id="@+id/lampaua_prev"
+    <ImageButton android:id="@+id/exo_prev"
         style="@style/ExoStyledControls.Button.Center.Previous"/>
 
     <include layout="@layout/exo_player_control_rewind_button" />
 
-    <ImageButton android:id="@+id/exo_play_pause"
-        style="@style/ExoStyledControls.Button.Center.PlayPause"/>
-
-    <ProgressBar android:id="@+id/loading"
-        style="?android:attr/progressBarStyle"
+    <FrameLayout
         android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:visibility="gone"/>
+        android:layout_height="wrap_content">
+
+      <ImageButton android:id="@+id/exo_play_pause"
+          style="@style/ExoStyledControls.Button.Center.PlayPause"
+          android:layout_gravity="center"/>
+
+      <ProgressBar android:id="@+id/loading"
+          android:layout_width="60dp"
+          android:layout_height="60dp"
+          android:layout_gravity="center"
+          android:indeterminate="true"
+          android:indeterminateDrawable="@drawable/spinner_ring_anim"
+          android:visibility="gone"/>
+
+    </FrameLayout>
 
     <include layout="@layout/exo_player_control_ffwd_button" />
 
-    <ImageButton android:id="@+id/lampaua_next"
+    <ImageButton android:id="@+id/exo_next"
         style="@style/ExoStyledControls.Button.Center.Next"/>
 
     <ImageButton android:id="@+id/next"
@@ -151,6 +160,16 @@
         android:src="@drawable/exo_styled_controls_next"/>
 
   </LinearLayout>
+
+  <!-- Transfer rate, shown under the loading ring once buffering drags on (PlayerActivity.updateLoading).
+       Sits in the control view rather than in the ring's own FrameLayout, which would clip it; the exact
+       offset below the ring and the text size come from UiMetrics, like the ring's size. -->
+  <TextView android:id="@+id/loading_speed"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_gravity="center"
+      android:textColor="#B3FFFFFF"
+      android:visibility="gone"/>
 
   <View android:id="@+id/exo_top"
       android:layout_width="match_parent"

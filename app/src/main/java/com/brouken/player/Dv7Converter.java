@@ -41,26 +41,26 @@ import java.util.Map;
  *
  * <p>Profile 7 is HDR10-compatible HEVC plus two extra NAL unit types: 62 carries the RPU metadata and
  * 63 the enhancement layer. Media3 assembles neither, and a device decoder only switches the HDMI
- * pipeline into Dolby Vision for the single-layer profiles (5 and 8.1) - so the picture comes out as
+ * pipeline into Dolby Vision for the single-layer profiles (5 and 8.1) — so the picture comes out as
  * plain HDR10 even when the vendor's {@code video/dolby-vision} decoder was the one that opened.
  * Rewriting the RPU into its profile 8.1 form and dropping the enhancement layer produces the single-layer
  * stream a profile 8 decoder takes, which is what Kodi, Vimu and Dune do on the same hardware. Nothing is
  * re-encoded; only metadata is touched.
  *
  * <p>The rewriting itself, and the native libdovi it needs, come from ExoplayerHdrUtils. What that
- * library does not do is read Matroska {@code BlockAdditional}: in a dual-layer remux - the common UHD
- * Blu-ray case - the enhancement layer and the RPU live there rather than in band, and the stock
+ * library does not do is read Matroska {@code BlockAdditional}: in a dual-layer remux — the common UHD
+ * Blu-ray case — the enhancement layer and the RPU live there rather than in band, and the stock
  * {@link MatroskaExtractor} discards them, so a converter downstream never sees an RPU at all. That hook
- * is what this class adds, alongside the codec string rewrite ({@code dvhe.07...} -> {@code dvhe.08...}) that
- * routes the track to the profile 8 decoder - Media3 reads the profile out of {@link Format#codecs}, not
+ * is what this class adds, alongside the codec string rewrite ({@code dvhe.07…} → {@code dvhe.08…}) that
+ * routes the track to the profile 8 decoder — Media3 reads the profile out of {@link Format#codecs}, not
  * out of the bitstream. The library also touches the RPU and nothing else, so an enhancement layer that
  * arrived in band rather than in a block addition would survive into a stream the codec string calls
  * single-layer; dropping it is this class's job too.
  *
  * <p>Failure model: the codec string is rewritten only <em>after</em> a frame has actually been
- * converted, and no sample byte reaches the player before that decision is final. Anything unexpected -
+ * converted, and no sample byte reaches the player before that decision is final. Anything unexpected —
  * a frame with no RPU, no libdovi for this ABI, an encrypted sample, a container framing samples in a
- * shape this cannot account for - replays the buffered bytes verbatim and leaves the track exactly as
+ * shape this cannot account for — replays the buffered bytes verbatim and leaves the track exactly as
  * the player handled it before. The playback dump says which of those happened.
  */
 final class Dv7Converter extends ForwardingExtractorsFactory {
@@ -77,8 +77,8 @@ final class Dv7Converter extends ForwardingExtractorsFactory {
     private static final int MAX_ENHANCEMENT_LAYER_BYTES = 8 * 1024 * 1024;
     /**
      * Sanity bound on one access unit. A UHD keyframe at Blu-ray bitrates is a few MB; past this the
-     * accounting has gone wrong somewhere, and growing a direct buffer without limit on a 32-bit box -
-     * which is what these files get played on - is how a player runs out of address space.
+     * accounting has gone wrong somewhere, and growing a direct buffer without limit on a 32-bit box —
+     * which is what these files get played on — is how a player runs out of address space.
      */
     private static final int MAX_FRAME_BYTES = 32 * 1024 * 1024;
 
@@ -104,7 +104,7 @@ final class Dv7Converter extends ForwardingExtractorsFactory {
      * @param delegate the factory whose extractors are to be wrapped.
      * @param subtitleParserFactory the very factory {@code delegate} was configured with. Replacing
      *     {@link MatroskaExtractor} means re-creating it, and its subtitle handling is a constructor
-     *     argument - passing the same instance keeps embedded Matroska subtitles working by
+     *     argument — passing the same instance keeps embedded Matroska subtitles working by
      *     construction rather than by matching Media3's defaults from memory.
      */
     Dv7Converter(ExtractorsFactory delegate, SubtitleParser.Factory subtitleParserFactory) {
@@ -136,14 +136,14 @@ final class Dv7Converter extends ForwardingExtractorsFactory {
 
     /**
      * Every extractor gets its own wrapper and its own state. Media3 asks for a set of extractors per
-     * media period, and a playlist has more than one period alive at a time - state shared across them
+     * media period, and a playlist has more than one period alive at a time — state shared across them
      * would mean one item's RPU reaching another item's frame.
      */
     private Extractor[] wrap(Extractor[] extractors) {
         for (int i = 0; i < extractors.length; i++) {
             // Matroska is replaced rather than only wrapped: the enhancement layer hook is a protected
             // method, and a ForwardingExtractor delegates to somebody else's instance instead of
-            // subclassing it. The wrapper still goes on top of the replacement - MatroskaExtractor.init()
+            // subclassing it. The wrapper still goes on top of the replacement — MatroskaExtractor.init()
             // is final, so the ExtractorOutput cannot be intercepted from inside the subclass.
             final Extractor extractor = extractors[i] instanceof MatroskaExtractor
                     ? new Dv7MatroskaExtractor(subtitleParserFactory)
@@ -207,7 +207,7 @@ final class Dv7Converter extends ForwardingExtractorsFactory {
      * The stock Matroska extractor plus the one thing it drops: the Dolby Vision enhancement layer.
      * Media3 reads a {@code BlockGroup}'s {@code Block} first and commits the sample only at the end of
      * the group, so an RPU found here is always in hand before the sample it belongs to is committed. It
-     * goes straight to that track's own output rather than into shared state - a file with more than one
+     * goes straight to that track's own output rather than into shared state — a file with more than one
      * video track must not have them read each other's metadata.
      */
     private static final class Dv7MatroskaExtractor extends MatroskaExtractor {
@@ -254,11 +254,11 @@ final class Dv7Converter extends ForwardingExtractorsFactory {
      *
      * <p>Implements {@link TrackOutput} directly rather than extending {@code ForwardingTrackOutput}:
      * that class forwards the two convenience overloads straight to its delegate instead of to itself,
-     * and those are the ones Media3's extractors mostly call for sample data - a subclass of it would
+     * and those are the ones Media3's extractors mostly call for sample data — a subclass of it would
      * never see most of a frame. Implementing the interface makes its default methods dispatch here.
      *
-     * <p>Sample data arrives in parts: the picture itself, and - for a Matroska block that has any block
-     * additions at all - a supplemental length prefix alongside it. Main bytes go into the direct buffer
+     * <p>Sample data arrives in parts: the picture itself, and — for a Matroska block that has any block
+     * additions at all — a supplemental length prefix alongside it. Main bytes go into the direct buffer
      * libdovi rewrites in place, everything else goes aside, and the arrival order is recorded so a
      * bail-out can replay the sample byte for byte.
      *
@@ -354,7 +354,7 @@ final class Dv7Converter extends ForwardingExtractorsFactory {
             // The profile lives in the codec string and that is what the decoder is chosen by, so it is
             // rewritten only once a frame has really converted: a track that never converts keeps
             // advertising exactly what the container said. Re-applied to later formats so a mid-stream
-            // change cannot put profile 7 back, but only to a format that is still profile 7 - such a
+            // change cannot put profile 7 back, but only to a format that is still profile 7 — such a
             // change may be to something else entirely, and rewriting that codec string would invent a
             // codec nothing can decode.
             delegate.format(codecsRewritten && isDolbyVisionProfile7(format)
@@ -423,7 +423,7 @@ final class Dv7Converter extends ForwardingExtractorsFactory {
             if (cryptoData != null || offset != 0 || mainLength == 0 || mainLength + sideLength != size) {
                 // Either the sample is encrypted, or its bytes did not all come through this path (offset
                 // counts bytes written after the sample). Rewriting on top of either would put the sample
-                // queue out of step with itself, so the track goes back to being forwarded - one sample's
+                // queue out of step with itself, so the track goes back to being forwarded — one sample's
                 // worth of doubt is not worth a corrupted stream.
                 replayBuffered();
                 giveUp("profile 7, unchanged (sample framing not rewritable)");
@@ -495,7 +495,7 @@ final class Dv7Converter extends ForwardingExtractorsFactory {
                     delegate.format(publishedFormat.buildUpon()
                             .setCodecs(toProfile8(publishedFormat.codecs)).build());
                 }
-                owner.status = "profile 7 -> 8.1 ("
+                owner.status = "profile 7 → 8.1 ("
                         + (dualLayer ? "RPU from the enhancement layer" : "in-band RPU")
                         + (length > base ? ", enhancement layer dropped" : "") + ")";
                 owner.shortStatus = "DV 7 → 8.1 · " + (dualLayer ? "RPU from EL" : "in-band RPU");
@@ -683,7 +683,7 @@ final class Dv7Converter extends ForwardingExtractorsFactory {
                 && (format.codecs.startsWith("dvhe.07") || format.codecs.startsWith("dvh1.07"));
     }
 
-    /** {@code dvhe.07.06} -> {@code dvhe.08.06}, leaving the level and the sample entry prefix alone. */
+    /** {@code dvhe.07.06} → {@code dvhe.08.06}, leaving the level and the sample entry prefix alone. */
     private static String toProfile8(String codecs) {
         return codecs.substring(0, 5) + "08" + codecs.substring(7);
     }
@@ -691,15 +691,15 @@ final class Dv7Converter extends ForwardingExtractorsFactory {
     /**
      * Copies an Annex-B access unit into {@code target} with the Dolby Vision enhancement layer left out.
      *
-     * <p>libdovi rewrites the RPU and nothing else, so an enhancement layer that arrived in band - which is
-     * how a remux carries it when it is not in a Matroska block addition - would survive into a stream the
+     * <p>libdovi rewrites the RPU and nothing else, so an enhancement layer that arrived in band — which is
+     * how a remux carries it when it is not in a Matroska block addition — would survive into a stream the
      * codec string calls profile 8.1. That profile is single-layer by definition, and a device handed a
      * dual-layer stream under its name keeps it out of the Dolby Vision pipeline and shows HDR10: the very
-     * symptom this class exists to fix. Losing what the enhancement layer carried is what a profile 7 -> 8.1
+     * symptom this class exists to fix. Losing what the enhancement layer carried is what a profile 7 → 8.1
      * conversion is; the base layer and the rewritten RPU are the picture.
      *
      * @return the number of bytes written, or -1 if this is not Annex-B framing it can walk, or the access
-     *     unit carries no RPU at all - nothing here to convert, so the caller must leave the track alone.
+     *     unit carries no RPU at all — nothing here to convert, so the caller must leave the track alone.
      */
     static int copyWithoutEnhancementLayer(byte[] source, int length, ByteBuffer target) {
         int unit = startCodeAt(source, 0, length);
@@ -762,7 +762,7 @@ final class Dv7Converter extends ForwardingExtractorsFactory {
             }
             position += nalUnitLengthFieldLength;
             // A NAL unit is at least its two header bytes, and a four-byte length field can hold a number
-            // far larger than the block - read as a long so this check cannot itself overflow.
+            // far larger than the block — read as a long so this check cannot itself overflow.
             if (length < 2 || position + length > limit) {
                 return false;
             }

@@ -31,6 +31,7 @@ import android.os.storage.StorageVolume;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.provider.Settings;
+import android.os.SystemClock;
 import android.util.Log;
 import android.util.Rational;
 import android.view.Display;
@@ -41,11 +42,16 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
+import android.widget.Toast;
 
 import androidx.annotation.RequiresApi;
+import androidx.core.text.HtmlCompat;
 import androidx.documentfile.provider.DocumentFile;
+import androidx.annotation.OptIn;
 import androidx.media3.common.Format;
 import androidx.media3.common.MimeTypes;
+import androidx.media3.common.util.UnstableApi;
+import androidx.media3.common.util.Util;
 
 import com.obsez.android.lib.filechooser.ChooserDialog;
 import com.sigpwned.chardet4j.Chardet;
@@ -76,7 +82,7 @@ class Utils {
 
     public static final String FEATURE_FIRE_TV = "amazon.hardware.fire_tv";
 
-    public static final String[] supportedExtensionsVideo = new String[] { "3gp", "m4v", "mkv", "mov", "mp4", "ts", "webm" };
+    public static final String[] supportedExtensionsVideo = new String[] { "3gp", "avi", "m4v", "mkv", "mov", "mp4", "ts", "webm" };
     public static final String[] supportedExtensionsSubtitle = new String[] { "srt", "ssa", "ass", "vtt", "ttml", "dfxp", "xml" };
 
     public static final String[] supportedMimeTypesVideo = new String[] {
@@ -87,6 +93,8 @@ class Utils {
             "video/quicktime", // .mov
             "video/mp2ts", // .ts, but also incompatible .m2ts
             MimeTypes.VIDEO_H263, // .3gp
+            "video/avi", // .avi
+            "video/x-msvideo", // .avi, older mime table
             // For remote storages:
             "video/x-m4v", // .m4v
     };
@@ -103,7 +111,7 @@ class Utils {
         return (int) (dp * Resources.getSystem().getDisplayMetrics().density);
     }
 
-    /** True when the user has turned animations off system-wide. */
+    /** True when the user has turned animations off system-wide (developer options, accessibility). */
     public static boolean isReducedMotion(Context context) {
         return Settings.Global.getFloat(context.getContentResolver(),
                 Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f;
@@ -142,10 +150,7 @@ class Utils {
                 WindowInsetsController windowInsetsController = window.getInsetsController();
                 if (windowInsetsController != null) {
                     if (show) {
-                        // Playback controls may temporarily expose the navigation bar,
-                        // but the status bar should never cover the player surface.
-                        windowInsetsController.show(WindowInsets.Type.navigationBars());
-                        windowInsetsController.hide(WindowInsets.Type.statusBars());
+                        windowInsetsController.show(WindowInsets.Type.systemBars());
                     } else {
                         windowInsetsController.hide(WindowInsets.Type.systemBars());
                     }
@@ -155,8 +160,7 @@ class Utils {
             if (show) {
                 playerView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_FULLSCREEN);
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
             } else {
                 playerView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LOW_PROFILE
                         | View.SYSTEM_UI_FLAG_FULLSCREEN
@@ -195,11 +199,12 @@ class Utils {
         return result;
     }
 
-    public static boolean isVolumeMax(final AudioManager audioManager) {
-        return PlayerActivity.systemVolume
-                ? audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-                    == audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                : PlayerActivity.playerVolume >= 99.5f;
+    // Some senders pass HTML-escaped text in intent extras (e.g. "В&#039;язниця").
+    public static String unescapeHtml(String text) {
+        if (text == null || text.indexOf('&') < 0) {
+            return text;
+        }
+        return HtmlCompat.fromHtml(text, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim();
     }
 
     public static boolean isVolumeMin(final AudioManager audioManager) {
@@ -207,76 +212,168 @@ class Utils {
         return audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) == min;
     }
 
+    /**
+     * The volume as shown to the user: 0-100% of the system range, plus one 10% step per boost level.
+     * The raw stream index is device specific (15, 16, 150 …), so it is never displayed directly.
+     */
+    public static int getVolumePercent(final Context context, final AudioManager audioManager) {
+        if (PlayerActivity.boostLevel > 0)
+            return 100 + PlayerActivity.boostLevel * 10;
+        if (!PlayerActivity.systemVolume)
+            return Math.round(PlayerActivity.playerVolume);
+        final int max = getVolume(context, true, audioManager);
+        if (max <= 0)
+            return 0;
+        return Math.round(getVolume(context, false, audioManager) * 100f / max);
+    }
+
+    public static boolean canBoostVolume() {
+        return PlayerActivity.boostProcessor != null || boostEffectUsable();
+    }
+
+    private static boolean boostEffectUsable() {
+        try {
+            return PlayerActivity.loudnessEnhancer != null && PlayerActivity.loudnessEnhancer.hasControl();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    /**
+     * Pushes boostLevel into whichever boost actually works on this device: the LoudnessEnhancer effect
+     * where it does (it compresses rather than clips, so it takes far more gain), otherwise the PCM
+     * processor. Also called right after a LoudnessEnhancer is created, because boostLevel outlives both
+     * the effect and the activity, so a fresh effect starts at zero gain while the level still says
+     * otherwise.
+     */
+    static void applyBoost() {
+        boolean applied = false;
+        if (PlayerActivity.loudnessEnhancer != null) {
+            try {
+                PlayerActivity.loudnessEnhancer.setTargetGain(PlayerActivity.boostLevel * 200);
+                PlayerActivity.loudnessEnhancer.setEnabled(PlayerActivity.boostLevel > 0);
+                applied = true;
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+        if (PlayerActivity.boostProcessor != null) {
+            // Straight amplitude, so the gain matches what the OSD says (200% = twice as loud); clipping
+            // rules out the effect's 20 dB ceiling anyway.
+            PlayerActivity.boostProcessor.setGain(applied ? 1f : 1f + PlayerActivity.boostLevel * 0.1f);
+        }
+    }
+
+    /**
+     * Hearing warning for the boost zone, shown once per session however the volume was raised — gesture,
+     * hardware keys, mouse wheel or joystick all end up here.
+     */
+    private static void warnAboutBoost(final Context context) {
+        if (PlayerActivity.boostWarned || PlayerActivity.boostLevel <= 0)
+            return;
+        PlayerActivity.boostWarned = true;
+        Toast.makeText(context, R.string.volume_high_warning, Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * The player's own attenuation, used instead of the system stream when systemVolume is off. It is a
+     * multiplier on top of the system volume, so 100% means "as loud as the device currently is".
+     */
+    static void applyPlayerVolume() {
+        if (PlayerActivity.player != null)
+            PlayerActivity.player.setVolume(PlayerActivity.playerVolume / 100f);
+    }
+
+    /**
+     * Absolute volume set from the vertical gesture: 0-100% maps onto the system range (or onto the
+     * player's own attenuation while systemVolume is off), 101-200% leaves that maxed out and adds boost.
+     * Displayed value is read back, so it never overstates what was actually applied.
+     */
+    public static void setVolumePercent(final Context context, final AudioManager audioManager, final CustomPlayerView playerView, final float percent) {
+        playerView.removeCallbacks(playerView.textClearRunnable);
+
+        if (PlayerActivity.systemVolume) {
+            final int max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+            final int index = Math.round(Math.min(percent, 100f) / 100f * max);
+            if (index != audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)) {
+                try {
+                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, index, 0);
+                } catch (RuntimeException e) {
+                    // Setting the volume can be denied (Do Not Disturb, device policy)
+                    e.printStackTrace();
+                }
+            }
+        } else {
+            PlayerActivity.playerVolume = Math.min(percent, 100f);
+            applyPlayerVolume();
+        }
+
+        PlayerActivity.boostLevel = percent > 100f ? Math.min(10, Math.round((percent - 100f) / 10f)) : 0;
+        applyBoost();
+        warnAboutBoost(context);
+
+        playerView.showVolume(getVolumePercent(context, audioManager));
+    }
+
     public static void adjustVolume(final Context context, final AudioManager audioManager, final CustomPlayerView playerView, final boolean raise, boolean canBoost, boolean clear) {
         playerView.removeCallbacks(playerView.textClearRunnable);
 
-        final int volume = PlayerActivity.systemVolume
-                ? getVolume(context, false, audioManager) : Math.round(PlayerActivity.playerVolume);
-        final int volumeMax = PlayerActivity.systemVolume
-                ? getVolume(context, true, audioManager) : 100;
-        final boolean maxed = volume >= volumeMax;
-        if (!maxed) PlayerActivity.boostLevel = 0;
-        canBoost = canBoost && PlayerActivity.canBoostCurrentOutput();
+        if (!canBoostVolume()) {
+            canBoost = false;
+        }
 
-        if (!maxed || (PlayerActivity.boostLevel == 0 && !raise)) {
+        int volume = 0;
+        final boolean maxedOut;
+        if (PlayerActivity.systemVolume) {
+            volume = getVolume(context, false, audioManager);
+            maxedOut = volume == getVolume(context, true, audioManager);
+        } else {
+            // Slightly below 100 to absorb float slop from repeated steps, which would otherwise leave
+            // the level a hair under maximum and never let boost engage.
+            maxedOut = PlayerActivity.playerVolume >= 99.5f;
+        }
+
+        // Boost only exists on top of a maxed-out level, so drop it whenever the level is below that:
+        // a volume change outside the app, or a level carried over from the other volume mode.
+        if (!maxedOut) {
+            PlayerActivity.boostLevel = 0;
+        }
+
+        if (!maxedOut || (PlayerActivity.boostLevel == 0 && !raise)) {
             applyBoost();
             if (PlayerActivity.systemVolume) {
-                audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC,
-                        raise ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_LOWER,
-                        AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+                audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, raise ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_LOWER, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+                final int volumeNew = getVolume(context, false, audioManager);
+                // Custom volume step on Samsung devices (Sound Assistant)
+                if (raise && volume == volumeNew) {
+                    playerView.volumeUpsInRow++;
+                } else {
+                    playerView.volumeUpsInRow = 0;
+                }
+                if (playerView.volumeUpsInRow > 4 && !isVolumeMin(audioManager)) {
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE | AudioManager.FLAG_SHOW_UI);
+                }
             } else {
-                float step = 100f / Math.max(1,
-                        audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
-                PlayerActivity.playerVolume = Math.max(0f, Math.min(100f,
-                        PlayerActivity.playerVolume + (raise ? step : -step)));
+                // Same step as the system's, so the button feels the same whichever mode is on
+                final float step = 100f / Math.max(1, audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
+                PlayerActivity.playerVolume = Math.max(0f, Math.min(100f, PlayerActivity.playerVolume + (raise ? step : -step)));
                 applyPlayerVolume();
             }
         } else {
-            int maxSteps = (int) Math.ceil(PlayerActivity.maxVolumeBoost / 10f);
-            if (canBoost && raise && PlayerActivity.boostLevel < maxSteps) {
+            if (canBoost && raise && PlayerActivity.boostLevel < 10)
                 PlayerActivity.boostLevel++;
-            } else if (!raise && PlayerActivity.boostLevel > 0) {
+            else if (!raise && PlayerActivity.boostLevel > 0)
                 PlayerActivity.boostLevel--;
-            }
+
             applyBoost();
         }
 
-        int basePercent;
-        if (PlayerActivity.systemVolume) {
-            int max = Math.max(1, getVolume(context, true, audioManager));
-            basePercent = Math.round(getVolume(context, false, audioManager) * 100f / max);
-        } else {
-            basePercent = Math.round(PlayerActivity.playerVolume);
-        }
-        int extra = Math.min(PlayerActivity.maxVolumeBoost, PlayerActivity.boostLevel * 10);
-        boolean volumeActive = basePercent > 0;
-        playerView.setCustomErrorMessage(volumeActive ? " " + (basePercent + extra) + "%" : "");
-        playerView.setIconVolume(volumeActive);
-        playerView.setHighlight(PlayerActivity.boostLevel > 0);
+        warnAboutBoost(context);
+        playerView.showVolume(getVolumePercent(context, audioManager));
 
         if (clear) {
             playerView.postDelayed(playerView.textClearRunnable, CustomPlayerView.MESSAGE_TIMEOUT_KEY);
-        }
-    }
-
-    static void applyPlayerVolume() {
-        if (PlayerActivity.player != null) {
-            PlayerActivity.player.setVolume(PlayerActivity.systemVolume
-                    ? 1f : Math.max(0f, Math.min(1f, PlayerActivity.playerVolume / 100f)));
-        }
-    }
-
-    static void applyBoost() {
-        int extra = Math.min(PlayerActivity.maxVolumeBoost, PlayerActivity.boostLevel * 10);
-        if (!PlayerActivity.canBoostCurrentOutput()) extra = 0;
-        if (PlayerActivity.boostProcessor != null) {
-            PlayerActivity.boostProcessor.setGain(1f + extra / 100f);
-        }
-        if (PlayerActivity.loudnessEnhancer != null) {
-            try {
-                PlayerActivity.loudnessEnhancer.setEnabled(false);
-            } catch (Exception ignored) {
-            }
         }
     }
 
@@ -321,14 +418,14 @@ class Utils {
                 );
     }
 
-    public static void showText(final CustomPlayerView playerView, final String text, final long timeout) {
+    public static void showText(final CustomPlayerView playerView, final CharSequence text, final long timeout) {
         playerView.removeCallbacks(playerView.textClearRunnable);
         playerView.clearIcon();
         playerView.setCustomErrorMessage(text);
         playerView.postDelayed(playerView.textClearRunnable, timeout);
     }
 
-    public static void showText(final CustomPlayerView playerView, final String text) {
+    public static void showText(final CustomPlayerView playerView, final CharSequence text) {
         showText(playerView, text, 1200);
     }
 
@@ -362,7 +459,6 @@ class Utils {
 
                 break;
             case SYSTEM:
-            case UNSPECIFIED:
                 activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
                 break;
             /*case SENSOR:
@@ -400,6 +496,51 @@ class Utils {
             return new Rational(format.width, format.height);
     }
 
+    /**
+     * Pads a side-panel's content for the system bars, the way every picker in this app wants it.
+     *
+     * The status bar is hidden while a picker is open (applyPickerBars), so its height is only breathing
+     * room — but breathing room the content genuinely needs, since the window spans the full height and the
+     * camera cutout lives up there. Hence the height is read IGNORING VISIBILITY: {@code getInsets()} reports
+     * zero for a bar that is currently hidden, and a panel opened from another panel (the skip-offset and
+     * sleep-timer panels come off a side menu, which has already turned the bars off) would then get no top
+     * padding at all and put its header under the cutout. The playlist panel only ever escaped this by being
+     * opened straight off the controls, while the bars were still up.
+     *
+     * In portrait the status-bar height reads well; landscape is much shorter (and its status-bar inset can
+     * include the camera cutout), where that same height looks oversized — use a compact fixed inset there.
+     * Pad the bottom for the nav/gesture bar. dp keeps it density/resolution-adaptive.
+     *
+     * @param insetSource any attached view, used to read the window insets
+     * @param target      the view whose padding is set (horizontal padding comes from the caller's own grid)
+     */
+    public static void padForPickerInsets(final Activity activity, final UiMetrics ui, final View insetSource,
+                                         final View target, final int hPad,
+                                         final int extraTopPx, final int extraBottomPx) {
+        final boolean landscape = activity.getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_LANDSCAPE;
+        int padTop = landscape ? ui.pickerTopPadLand() : ui.dp(24);
+        int padBottom = ui.overscanV();
+        final WindowInsets rootInsets = insetSource.getRootWindowInsets();
+        if (rootInsets != null) {
+            if (Build.VERSION.SDK_INT >= 30) {
+                if (!landscape) {
+                    padTop = rootInsets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top;
+                }
+                padBottom = rootInsets.getInsetsIgnoringVisibility(
+                        WindowInsets.Type.navigationBars()).bottom + ui.overscanV();
+            } else {
+                // No ignoring-visibility variant before 30, and the legacy inset drops to 0 just the same
+                // once the bars are off — so the floor above stands in for it.
+                if (!landscape) {
+                    padTop = Math.max(padTop, rootInsets.getSystemWindowInsetTop());
+                }
+                padBottom = Math.max(padBottom, rootInsets.getSystemWindowInsetBottom() + ui.overscanV());
+            }
+        }
+        target.setPadding(hPad, padTop + extraTopPx, hPad, padBottom + extraBottomPx);
+    }
+
     public static String formatMilis(long time) {
         final int totalSeconds = Math.abs((int) time / 1000);
         final int seconds = totalSeconds % 60;
@@ -416,53 +557,78 @@ class Utils {
             return (time < 0 ? "−" : "+") + formatMilis(time);
     }
 
-    /** Bounded in-memory trace included with playback reports. */
+    public static String formatChannels(int count) {
+        switch (count) {
+            case 1: return "1.0";
+            case 2: return "2.0";
+            case 3: return "2.1";
+            case 4: return "4.0";
+            case 5: return "5.0";
+            case 6: return "5.1";
+            case 7: return "6.1";
+            case 8: return "7.1";
+            default: return count + "ch";
+        }
+    }
+
+    public static String formatBitrate(int bitrate) {
+        if (bitrate <= 0) { // Format.NO_VALUE is -1
+            return null;
+        }
+        if (bitrate >= 1_000_000) {
+            return String.format(Locale.US, "%.1f Mbps", bitrate / 1_000_000f);
+        }
+        return (bitrate / 1000) + " kbps";
+    }
+
+    /**
+     * Every line the app traces about itself. Kept in memory in every build, not only a debug one: the
+     * subtitle search, the fetchers and the title lookup already say what they asked and what came back,
+     * and that is exactly what a report about "it finds nothing for me" has to carry — but Log.d reaches
+     * nobody who is not holding an adb cable. The report screen appends recentLog(), so the trace leaves
+     * a phone by the Upload button and a TV box by its QR.
+     *
+     * <p>Bounded, and consecutive duplicates are folded: onTracksChanged fires several times per item,
+     * so the same "not searching" line would otherwise push everything useful out of the window. Sized
+     * for a playback session that is recovering — a line per load, state change and recovery rung — so
+     * the report still reaches back to what started it.
+     *
+     * <p>Every line is also a Sentry breadcrumb (a no-op unless Sentry was initialised), so the report
+     * and the event carry the same timeline.
+     */
     private static final int LOG_LINES = 500;
     private static final ArrayDeque<String> LOG = new ArrayDeque<>();
-    private static final long LOG_BASE_MS = monotonicTimeMs();
+    private static final long LOG_BASE_MS = SystemClock.elapsedRealtime();
     private static String lastLogged;
     private static int lastLoggedRepeats;
 
     public static void log(final String text) {
-        final String safeText = stripUrlQuery(text == null ? "null" : text);
         if (BuildConfig.DEBUG) {
-            Log.d("UAPlayer", safeText);
+            Log.d("UAPlayer", text);
         }
+        io.sentry.Sentry.addBreadcrumb(text);
         synchronized (LOG) {
-            if (safeText.equals(lastLogged)) {
+            if (text.equals(lastLogged)) {
                 lastLoggedRepeats++;
                 // Rewrite the tail rather than grow: the count is the information, the repetition is not.
                 LOG.removeLast();
-                LOG.addLast(logLine(safeText) + " (x" + (lastLoggedRepeats + 1) + ")");
+                LOG.addLast(logLine(text) + " (x" + (lastLoggedRepeats + 1) + ")");
                 return;
             }
-            lastLogged = safeText;
+            lastLogged = text;
             lastLoggedRepeats = 0;
             while (LOG.size() >= LOG_LINES) {
                 LOG.removeFirst();
             }
-            LOG.addLast(logLine(safeText));
+            LOG.addLast(logLine(text));
         }
     }
 
     // Seconds since the process started rather than a wall clock: what a reader needs from this is how
     // long a source took and where a fifteen-second budget ran out, not what time it was.
     private static String logLine(final String text) {
-        final long ms = monotonicTimeMs() - LOG_BASE_MS;
+        final long ms = SystemClock.elapsedRealtime() - LOG_BASE_MS;
         return String.format(Locale.US, "%6.2f %s", ms / 1000f, text);
-    }
-
-    private static long monotonicTimeMs() {
-        return System.nanoTime() / 1_000_000L;
-    }
-
-    // Remove query strings and fragments from network URLs embedded in diagnostic text. Tokens and
-    // session identifiers normally live there; route information remains useful for local reports.
-    private static final java.util.regex.Pattern URL_QUERY =
-            java.util.regex.Pattern.compile("((?:https?|rtsps?)://[^\\s?#]+)[?#][^\\s,)}\\]\\\"']*");
-
-    public static String stripUrlQuery(final String text) {
-        return text == null ? null : URL_QUERY.matcher(text).replaceAll("$1");
     }
 
     /** The trace so far, oldest first; empty string when nothing has been traced. */
@@ -528,20 +694,48 @@ class Utils {
         final String scheme = uri.getScheme();
         if (scheme == null)
             return false;
-        return scheme.startsWith("http") || scheme.equals("rtsp")
-                || scheme.equals("rtmp") || scheme.equals("udp");
+        return scheme.startsWith("http") || scheme.equals("rtsp");
+    }
+
+    // Matches the query/fragment of an http(s)/rtsp URL inside free text so it can be dropped.
+    private static final java.util.regex.Pattern URL_QUERY =
+            java.util.regex.Pattern.compile("((?:https?|rtsps?)://[^\\s?#]+)[?#][^\\s,)}\\]\"']*");
+
+    // Removes the query string (and fragment) from any http(s)/rtsp URL found in the text, since query
+    // strings are where tokens/session ids live. Keeps scheme, host, port and path; leaves the rest intact.
+    public static String stripUrlQuery(final String text) {
+        if (text == null)
+            return null;
+        return URL_QUERY.matcher(text).replaceAll("$1");
+    }
+
+    // Privacy-safe rendering of a media URI for crash/error reports: keeps scheme, host, port and path
+    // (the route) only. Query string, userinfo and fragment are dropped, since query values carry
+    // tokens/session ids; request headers are never attached anywhere.
+    public static String uriToReportString(final Uri uri) {
+        if (uri == null)
+            return null;
+        final String host = uri.getHost();
+        if (host == null)
+            return uri.getScheme();
+        final StringBuilder sb = new StringBuilder();
+        if (uri.getScheme() != null)
+            sb.append(uri.getScheme()).append("://");
+        sb.append(host);
+        if (uri.getPort() != -1)
+            sb.append(':').append(uri.getPort());
+        if (uri.getEncodedPath() != null)
+            sb.append(uri.getEncodedPath());
+        return sb.toString();
     }
 
     public static boolean isTvBox(Context context) {
         final PackageManager pm = context.getPackageManager();
 
-        // Google TV devices can expose Leanback while reporting a non-TV UI mode to an
-        // externally launched activity. Treat every platform TV signal as authoritative so
-        // touch-only controls (notably the otherwise empty landscape/rotation tile) stay out
-        // of the television header and the remote-focus control row is used instead.
+        // Google TV can expose Leanback while reporting a non-TV UI mode to an externally launched
+        // activity. Every platform TV signal is authoritative so touch-only controls stay out of its UI.
         UiModeManager uiModeManager = (UiModeManager) context.getSystemService(UI_MODE_SERVICE);
-        if (hasTelevisionSignal(
-                uiModeManager != null
+        if (hasTelevisionSignal(uiModeManager != null
                         && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION,
                 pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK),
                 pm.hasSystemFeature(PackageManager.FEATURE_TELEVISION),
@@ -590,54 +784,84 @@ class Utils {
         return (int)(rate * 100f);
     }
 
-    static boolean handleFrameRate(final PlayerActivity activity, float frameRate) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            activity.frameRateSettled();
-            return false;
-        }
-        boolean switchingModes = false;
-        try {
-            Display display = frameRate > 0f
+    @RequiresApi(api = Build.VERSION_CODES.M)
+    static void handleFrameRate(final PlayerActivity activity, float frameRate) {
+        activity.runOnUiThread(() -> {
+            boolean switchingModes = false;
+
+            // A detached decor view answers null. Falling through to the settled path rather than returning:
+            // the caller has already told the player a switch is pending, so bailing out here left the
+            // file on its first frame with no spinner and no error. Unreachable until the rate started
+            // coming from Format — before that a stream had no rate at all and never entered this block.
+            final Display display = frameRate > 0
                     ? activity.getWindow().getDecorView().getDisplay() : null;
             if (display != null) {
                 Display.Mode[] supportedModes = display.getSupportedModes();
                 Display.Mode activeMode = display.getMode();
-                List<Display.Mode> sameResolution = new ArrayList<>();
-                for (Display.Mode mode : supportedModes) {
-                    if (mode.getPhysicalWidth() == activeMode.getPhysicalWidth()
-                            && mode.getPhysicalHeight() == activeMode.getPhysicalHeight()) {
-                        sameResolution.add(mode);
-                    }
-                }
 
-                if (sameResolution.size() > 1) {
-                    float[] rates = new float[sameResolution.size()];
-                    for (int index = 0; index < sameResolution.size(); index++) {
-                        rates[index] = sameResolution.get(index).getRefreshRate();
+                if (supportedModes.length > 1) {
+                    // Refresh rate >= video FPS
+                    List<Display.Mode> modesHigh = new ArrayList<>();
+                    // Max refresh rate
+                    Display.Mode modeTop = activeMode;
+                    int modesResolutionCount = 0;
+
+                    // Filter only resolutions same as current
+                    for (Display.Mode mode : supportedModes) {
+                        if (mode.getPhysicalWidth() == activeMode.getPhysicalWidth() &&
+                                mode.getPhysicalHeight() == activeMode.getPhysicalHeight()) {
+                            modesResolutionCount++;
+
+                            if (normRate(mode.getRefreshRate()) >= normRate(frameRate))
+                                modesHigh.add(mode);
+
+                            if (normRate(mode.getRefreshRate()) > normRate(modeTop.getRefreshRate()))
+                                modeTop = mode;
+                        }
                     }
-                    float bestRate = FrameRatePolicy.bestRate(
-                            activeMode.getRefreshRate(), frameRate, rates);
-                    Display.Mode bestMode = null;
-                    for (Display.Mode mode : sameResolution) {
-                        if (Math.abs(mode.getRefreshRate() - bestRate) >= 0.001f) continue;
-                        bestMode = mode;
-                        if (mode.getModeId() == activeMode.getModeId()) break;
-                    }
-                    if (bestMode != null && bestMode.getModeId() != activeMode.getModeId()) {
+
+                    if (modesResolutionCount > 1) {
+                        Display.Mode modeBest = null;
+
+                        for (Display.Mode mode : modesHigh) {
+                            // A whole multiple of the content rate, judged on the *relative* error. The
+                            // centi-Hz remainder this replaces could not match 23.976 at all, since
+                            // normRate truncates it to 2397, which divides neither 4795 (47.952 Hz) nor
+                            // 11988 (119.88 Hz). But the tolerance has to stay under the 1/1001 that
+                            // separates an NTSC rate from its integer neighbour, or 120 Hz also "matches"
+                            // 23.976 content and, being the higher rate, beats the 119.88 mode that is the
+                            // exact one. 2e-4 sits between the float noise on these values (~5e-6) and
+                            // that 1e-3 gap.
+                            final float ratio = mode.getRefreshRate() / frameRate;
+                            final int multiple = Math.round(ratio);
+                            if (multiple >= 1 && Math.abs(ratio - multiple) < multiple * 0.0002f) {
+                                if (modeBest == null || normRate(mode.getRefreshRate()) > normRate(modeBest.getRefreshRate())) {
+                                    modeBest = mode;
+                                }
+                            }
+                        }
+
                         Window window = activity.getWindow();
                         WindowManager.LayoutParams layoutParams = window.getAttributes();
-                        layoutParams.preferredDisplayModeId = bestMode.getModeId();
-                        window.setAttributes(layoutParams);
-                        switchingModes = true;
+
+                        if (modeBest == null)
+                            modeBest = modeTop;
+
+                        switchingModes = !(modeBest.getModeId() == activeMode.getModeId());
+                        if (switchingModes) {
+                            layoutParams.preferredDisplayModeId = modeBest.getModeId();
+                            window.setAttributes(layoutParams);
+                        }
                     }
                 }
             }
-        } catch (RuntimeException error) {
-            error.printStackTrace();
-        }
-        if (!switchingModes) activity.frameRateSettled();
-        return switchingModes;
+
+            if (!switchingModes) {
+                activity.frameRateSettled();
+            }
+        });
     }
+
 
     public static boolean alternativeChooser(PlayerActivity activity, Uri initialUri, boolean video) {
         String startPath;
@@ -658,7 +882,12 @@ class Utils {
                         activity.releasePlayer();
                         Uri uri = DocumentFile.fromFile(pathFile).getUri();
                         if (video) {
-                            activity.mPrefs.setPersistent(true);
+                            // Picking a file ends whatever session was running — the same thing the SAF
+                            // chooser does in onActivityResult. This one is a dialog, so that callback
+                            // never runs, and without this the launcher's return_result stayed armed
+                            // while persistent mode came back on: finish() then reported this file
+                            // against the launcher's episode, with a position of -1.
+                            activity.resetApiAccess();
                             activity.mPrefs.updateMedia(activity, uri, null);
                             activity.searchSubtitles();
                         } else {
@@ -709,53 +938,81 @@ class Utils {
         return convertInputStreamToUTF(context, subtitleUri, inputStream, null);
     }
 
-    /** Converts subtitles to UTF-8 and keeps remote files locally for later player rebuilds. */
-    public static Uri convertInputStreamToUTF(Context context, Uri subtitleUri,
-                                               InputStream inputStream, String preferredName) {
-        if (inputStream == null || subtitleUri == null) return null;
+    /**
+     * @param preferredName what to call the cached copy, or null to take the name from the URI. A
+     *                      subtitle found online has no useful name in its URL — often none at all,
+     *                      just an id — while the caller knows the language, and the name is where
+     *                      both the language and the label are read back from.
+     */
+    public static Uri convertInputStreamToUTF(Context context, Uri subtitleUri, InputStream inputStream,
+                                              String preferredName) {
         try {
             DecodedInputStreamReader decodedInputStreamReader = Chardet.decode(inputStream, StandardCharsets.UTF_8);
             Charset charset = decodedInputStreamReader.charset();
-            boolean remote = isSupportedNetworkUri(subtitleUri);
+            // A subtitle pulled off the network is copied even when it needs no re-encoding. The URI is
+            // remembered (Prefs.subtitleUri) and re-read whenever the player is rebuilt — returning from
+            // the settings screen does exactly that — and by then a temporary download link may be gone.
+            // fileExists() settles it anyway: it answers false for any http URI, so a remembered network
+            // subtitle was simply dropped and the track vanished. A local copy is a real file to both.
+            final boolean remote = isSupportedNetworkUri(subtitleUri);
             if (!StandardCharsets.UTF_8.equals(charset) || remote) {
                 String filename = preferredName;
-                if (filename == null || filename.trim().isEmpty()) {
-                    filename = subtitleUri.getLastPathSegment();
+                if (filename == null) {
+                    filename = subtitleUri.getPath();
+                    filename = filename.substring(filename.lastIndexOf("/") + 1);
                 }
-                if (filename == null || filename.trim().isEmpty()) filename = "subtitle";
-                if (filename.toLowerCase(Locale.US).endsWith(".gz")) {
+                // The name carries the format and often the language, which is how both are recovered
+                // later. The copy is unpacked and re-encoded, so the wrapper extension has to go, and
+                // proxied URLs end in an opaque id instead — give those something to parse.
+                if (filename.endsWith(".gz")) {
                     filename = filename.substring(0, filename.length() - 3);
                 }
-                filename = new File(filename).getName();
-                if (filename.isEmpty() || ".".equals(filename) || "..".equals(filename)) {
-                    filename = "subtitle";
+                if (!filename.contains(".")) {
+                    filename = (filename.isEmpty() ? "subtitle" : filename) + ".srt";
                 }
-                if (!filename.contains(".")) filename += ".srt";
-                final File file = new File(context.getCacheDir(), filename);
+                File file = null;
                 boolean success = true;
-                try (BufferedReader reader = new BufferedReader(decodedInputStreamReader);
-                     BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
-                    char[] buffer = new char[512];
-                    int total = 0;
-                    int count;
-                    while ((count = reader.read(buffer)) != -1) {
-                        total += count;
-                        if (total > 2_000_000) {
+                try {
+                    final BufferedReader bufferedReader = new BufferedReader(decodedInputStreamReader);
+                    final char[] buffer = new char[512];
+                    // The head decides the name. An index is free to hand over ASS or WebVTT under a
+                    // name the caller invented, and since the format is read back off that name, a
+                    // mislabelled copy goes to the wrong parser and shows nothing at all — which reads
+                    // as a subtitle that was found, switched on, and simply is not there.
+                    int num = fill(bufferedReader, buffer);
+                    final String head = new String(buffer, 0, num);
+                    file = new File(context.getCacheDir(), nameByFormat(filename, head));
+                    final BufferedWriter bufferedWriter = new BufferedWriter(new FileWriter(file));
+                    int pass = 0;
+                    while (num > 0) {
+                        bufferedWriter.write(buffer, 0, num);
+                        pass++;
+                        if (pass * buffer.length > 2_000_000) {
                             success = false;
                             break;
                         }
-                        writer.write(buffer, 0, count);
+                        num = fill(bufferedReader, buffer);
                     }
+                    bufferedWriter.close();
+                    bufferedReader.close();
+                } catch (IOException e) {
+                    // Out of space, most likely. Half a subtitle is worse than none: delete it and
+                    // hand back the URL it came from, which still plays for as long as this player
+                    // instance lives.
+                    success = false;
+                    e.printStackTrace();
                 }
-                if (success) {
+                if (success && file != null) {
                     trimSubtitleCache(context.getCacheDir());
                     subtitleUri = Uri.fromFile(file);
                 } else {
-                    file.delete();
-                    if (!remote) subtitleUri = null;
+                    if (file != null) {
+                        file.delete();
+                    }
+                    if (!remote) {
+                        subtitleUri = null;
+                    }
                 }
-            } else {
-                decodedInputStreamReader.close();
             }
         } catch (IOException e) {
             e.printStackTrace();
@@ -763,16 +1020,69 @@ class Utils {
         return subtitleUri;
     }
 
+    /**
+     * Reads until {@code buffer} is full or the stream ends, and answers how much of it is filled —
+     * 0 at the end. {@link java.io.Reader#read(char[])} may hand back fewer characters than asked for
+     * and over a decoded network stream routinely hands back one, which is too little to recognise a
+     * format header by and makes a count of reads a useless stand-in for a count of characters.
+     */
+    private static int fill(final BufferedReader reader, final char[] buffer) throws IOException {
+        int total = 0;
+        while (total < buffer.length) {
+            final int read = reader.read(buffer, total, buffer.length - total);
+            if (read == -1) {
+                break;
+            }
+            total += read;
+        }
+        return total;
+    }
+
+    /**
+     * The extension the content asks for, replacing whatever the name arrived with. Left alone when
+     * the head says nothing recognisable: SubRip has no header to go by, so an unremarkable file is
+     * taken at its name.
+     */
+    private static String nameByFormat(final String filename, final String head) {
+        final String extension;
+        if (head.contains("[Script Info]")) {
+            extension = ".ass";
+        } else if (head.contains("WEBVTT")) {
+            extension = ".vtt";
+        } else if (head.contains("<tt ") || head.contains("<tt\n") || head.contains("<?xml")) {
+            extension = ".ttml";
+        } else {
+            return filename;
+        }
+        if (filename.endsWith(extension)) {
+            return filename;
+        }
+        final int dot = filename.lastIndexOf('.');
+        return (dot > 0 ? filename.substring(0, dot) : filename) + extension;
+    }
+
+    /** How many downloaded subtitles are kept. Roughly a season at 30-60 KB each. */
     private static final int SUBTITLE_CACHE_KEEP = 20;
 
+    /**
+     * Keeps the downloaded-subtitle copies to a fixed number, oldest deleted first.
+     *
+     * Nothing else bounds them: they are named per title and language, so re-watching overwrites, but
+     * every new episode leaves another file behind and nothing ever expires. The system does clear an
+     * app's cache under storage pressure, and {@link SubtitleUtils#clearCache} empties it on several
+     * unrelated occasions — neither is a plan, and neither runs before the disk is already tight.
+     */
     private static void trimSubtitleCache(File cacheDir) {
-        File[] files = cacheDir.listFiles((dir, name) ->
-                name.startsWith("subs.") && name.endsWith(".srt"));
-        if (files == null || files.length <= SUBTITLE_CACHE_KEEP) return;
-        java.util.Arrays.sort(files, (left, right) ->
-                Long.compare(left.lastModified(), right.lastModified()));
-        for (int index = 0; index < files.length - SUBTITLE_CACHE_KEEP; index++) {
-            files[index].delete();
+        // Every extension, not only .srt: the copy is named after what it turned out to be, and one
+        // the trim does not recognise would sit in the cache for good.
+        final File[] files = cacheDir.listFiles((dir, name) ->
+                name.startsWith("subs.") && SubtitleUtils.hasSubtitleExtension(name));
+        if (files == null || files.length <= SUBTITLE_CACHE_KEEP) {
+            return;
+        }
+        java.util.Arrays.sort(files, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+        for (int i = 0; i < files.length - SUBTITLE_CACHE_KEEP; i++) {
+            files[i].delete();
         }
     }
 
@@ -813,18 +1123,92 @@ class Utils {
         if (Build.VERSION.SDK_INT >= 24) {
             final LocaleList localeList = Resources.getSystem().getConfiguration().getLocales();
             for (int i = 0; i < localeList.size(); i++) {
-                addDeviceLanguage(locales, localeList.get(i));
+                addLanguage(locales, localeList.get(i));
             }
         } else {
-            final Locale locale = Resources.getSystem().getConfiguration().locale;
-            addDeviceLanguage(locales, locale);
+            addLanguage(locales, Resources.getSystem().getConfiguration().locale);
         }
         return locales.toArray(new String[0]);
     }
 
-    private static void addDeviceLanguage(List<String> languages, Locale locale) {
-        String language = AudioLanguagePriority.normalize(locale == null ? null : locale.toLanguageTag());
-        if (language != null && !languages.contains(language)) languages.add(language);
+    // The system list often names the same language twice (uk-UA, uk-Cyrl); the audio priority list
+    // this seeds must not show it twice.
+    private static void addLanguage(final List<String> languages, final Locale locale) {
+        final String language = toIso3Language(locale.getLanguage());
+        if (language != null && !languages.contains(language)) {
+            languages.add(language);
+        }
+    }
+
+    /**
+     * Folds whatever a container declared ("en", "eng", "en-US") onto the ISO-639-2/T code the audio
+     * priority list is keyed by, so a stored preference and a track's language can be compared at all.
+     * Returns null when there is no usable language.
+     *
+     * Media3 normalizes first because Locale alone cannot: getISO3Language returns any 3-letter input
+     * unchanged, and Matroska muxers routinely tag the bibliographic form ("ger", "fre", "cze"), which
+     * would then never match the terminological code ("deu", "fra", "ces") everything else produces.
+     */
+    @OptIn(markerClass = UnstableApi.class)
+    public static String toIso3Language(final String language) {
+        if (language == null || language.isEmpty() || "und".equals(language)) {
+            return null;
+        }
+        try {
+            // Not new Locale(language): that treats the whole string as the language, so "en-US" would
+            // have no 3-letter form at all.
+            final String iso3 = Locale.forLanguageTag(
+                    Util.normalizeLanguageCode(language.replace('_', '-'))).getISO3Language();
+            return iso3.isEmpty() ? null : iso3;
+        } catch (MissingResourceException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Every language that can be preferred, code to label ("Ukrainian [ukr]"), collated by label.
+     *
+     * <p>Walks a few hundred locales, so it is worth calling once per screen rather than per row —
+     * both the settings priority lists and the manual subtitle search ask for the same map.
+     */
+    public static LinkedHashMap<String, String> allLanguages() {
+        final LinkedHashMap<String, String> languages = new LinkedHashMap<>();
+        for (final Locale locale : Locale.getAvailableLocales()) {
+            try {
+                // MissingResourceException: Couldn't find 3-letter language code for zz
+                final String key = locale.getISO3Language();
+                if (languages.containsKey(key)) {
+                    // Hundreds of locales collapse onto the same language here, and the display name
+                    // never depends on region or script — resolving it again only burns main-thread
+                    // time while the screen opens.
+                    continue;
+                }
+                String language = locale.getDisplayLanguage();
+                final int length = language.offsetByCodePoints(0, 1);
+                if (!language.isEmpty()) {
+                    language = language.substring(0, length).toUpperCase(locale) + language.substring(length);
+                }
+                languages.put(key, language + " [" + key + "]");
+            } catch (MissingResourceException e) {
+                e.printStackTrace();
+            }
+        }
+        final Collator collator = Collator.getInstance();
+        collator.setStrength(Collator.PRIMARY);
+        orderByValue(languages, collator::compare);
+        return languages;
+    }
+
+    /** The stored audio priority list ("ukr,eng") as a mutable list, blanks dropped. */
+    public static List<String> splitLanguages(final String languages) {
+        final List<String> list = new ArrayList<>();
+        for (String language : languages.split(",")) {
+            language = language.trim();
+            if (!language.isEmpty() && !list.contains(language)) {
+                list.add(language);
+            }
+        }
+        return list;
     }
 
     /**
@@ -857,72 +1241,6 @@ class Utils {
             }
         }
         return best < wanted.size() ? wanted.get(best) : null;
-    }
-
-    public static String toIso3Language(final String language) {
-        return AudioLanguagePriority.normalize(language);
-    }
-
-    public static List<String> splitLanguages(final String languages) {
-        final List<String> values = new ArrayList<>();
-        if (languages == null) return values;
-        for (String value : languages.split(",")) {
-            value = value.trim();
-            if (!value.isEmpty() && !values.contains(value)) values.add(value);
-        }
-        return values;
-    }
-
-    /** Every ISO-3 language available to the priority pickers, ordered by display label. */
-    public static LinkedHashMap<String, String> allLanguages() {
-        final LinkedHashMap<String, String> languages = new LinkedHashMap<>();
-        for (final Locale locale : Locale.getAvailableLocales()) {
-            try {
-                final String key = locale.getISO3Language();
-                if (key.isEmpty() || languages.containsKey(key)) continue;
-                String language = locale.getDisplayLanguage();
-                if (language.isEmpty()) continue;
-                final int firstCodePoint = language.offsetByCodePoints(0, 1);
-                language = language.substring(0, firstCodePoint).toUpperCase(locale)
-                        + language.substring(firstCodePoint);
-                languages.put(key, language + " [" + key + "]");
-            } catch (MissingResourceException ignored) {
-                // Older Android locale tables contain a few incomplete entries.
-            }
-        }
-        final Collator collator = Collator.getInstance();
-        collator.setStrength(Collator.PRIMARY);
-        orderByValue(languages, collator::compare);
-        return languages;
-    }
-
-    /** Apply stable status/navigation-bar and TV-overscan padding to a picker body. */
-    public static void padForPickerInsets(final Activity activity, final UiMetrics ui,
-                                          final View insetSource, final View target,
-                                          final int horizontalPad, final int extraTopPx,
-                                          final int extraBottomPx) {
-        final boolean landscape = activity.getResources().getConfiguration().orientation
-                == Configuration.ORIENTATION_LANDSCAPE;
-        int top = landscape ? ui.pickerTopPadLand() : ui.dp(24);
-        int bottom = ui.overscanV();
-        final WindowInsets rootInsets = insetSource.getRootWindowInsets();
-        if (rootInsets != null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                if (!landscape) {
-                    top = Math.max(top, rootInsets.getInsetsIgnoringVisibility(
-                            WindowInsets.Type.statusBars()
-                                    | WindowInsets.Type.displayCutout()).top);
-                }
-                bottom = rootInsets.getInsetsIgnoringVisibility(
-                        WindowInsets.Type.navigationBars()).bottom + ui.overscanV();
-            } else {
-                if (!landscape) top = Math.max(top, rootInsets.getSystemWindowInsetTop());
-                bottom = Math.max(bottom,
-                        rootInsets.getSystemWindowInsetBottom() + ui.overscanV());
-            }
-        }
-        target.setPadding(horizontalPad, top + extraTopPx,
-                horizontalPad, bottom + extraBottomPx);
     }
 
     public static ComponentName getSystemComponent(Context context, Intent intent) {
@@ -1032,6 +1350,36 @@ class Utils {
         return frameRate;
     }
 
+    /**
+     * A QR code for one short piece of text, or null if it cannot be drawn. Opaque black on white
+     * whatever the theme: a code drawn in the dialog's own colours, or on nothing at all, is one no
+     * camera will read.
+     *
+     * @param size the side in pixels; the encoder rounds it down to a whole number of modules
+     */
+    static android.graphics.Bitmap qrBitmap(final String text, final int size) {
+        try {
+            final com.google.zxing.common.BitMatrix matrix = new com.google.zxing.qrcode.QRCodeWriter()
+                    .encode(text, com.google.zxing.BarcodeFormat.QR_CODE, size, size,
+                            Collections.singletonMap(com.google.zxing.EncodeHintType.MARGIN, 2));
+            final int width = matrix.getWidth();
+            final int height = matrix.getHeight();
+            final int[] pixels = new int[width * height];
+            for (int y = 0; y < height; y++) {
+                final int row = y * width;
+                for (int x = 0; x < width; x++) {
+                    pixels[row + x] = matrix.get(x, y) ? 0xFF000000 : 0xFFFFFFFF;
+                }
+            }
+            final android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(
+                    width, height, android.graphics.Bitmap.Config.ARGB_8888);
+            bitmap.setPixels(pixels, 0, width, 0, 0, width, height);
+            return bitmap;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     public static boolean switchFrameRate(final PlayerActivity activity, final Uri uri) {
         // preferredDisplayModeId only available on SDK 23+
         // ExoPlayer already uses Surface.setFrameRate() on Android 11+
@@ -1039,21 +1387,13 @@ class Utils {
             if (activity.frameRateSwitchThread != null) {
                 activity.frameRateSwitchThread.interrupt();
             }
-            Thread worker = new Thread(() -> {
-                Thread self = Thread.currentThread();
+            activity.frameRateSwitchThread = new Thread(() -> {
                 float frameRate = getFrameRate(activity, uri);
-                if (self.isInterrupted()) return;
-                activity.runOnUiThread(() -> {
-                    if (activity.frameRateSwitchThread != self || self.isInterrupted()) return;
-                    Utils.handleFrameRate(activity, frameRate);
-                    activity.frameRateSwitchThread = null;
-                });
+                Utils.handleFrameRate(activity, frameRate);
             });
-            activity.frameRateSwitchThread = worker;
-            worker.start();
+            activity.frameRateSwitchThread.start();
             return true;
         } else {
-            activity.frameRateSettled();
             return false;
         }
     }

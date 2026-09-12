@@ -1,81 +1,53 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
 
     <style name="BaseTheme.Player" parent="Theme.AppCompat.NoActionBar">
-        <item name="android:windowFullscreen">true</item>
-        <item name="android:statusBarColor">@color/ui_controls_background</item>
+        <!-- Transparent so the OS-toggled status bar doesn't paint its own @color/ui_controls_background strip,
+             which desyncs from the controller fade. The controller-synced exo_top scrim (given a height on all
+             SDKs in PlayerActivity's insets listener) provides the darkening behind the status-bar icons. -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@color/ui_controls_background</item>
         <item name="android:windowBackground">@color/black</item>
         <item name="android:windowLayoutInDisplayCutoutMode" tools:ignore="NewApi">shortEdges</item>
         <item name="android:forceDarkAllowed" tools:targetApi="29">false</item>
-        <item name="colorAccent">@color/ua_gold</item>
-        <item name="colorControlNormal">@color/white</item>
-        <item name="colorControlActivated">@color/ua_gold</item>
-        <item name="colorControlHighlight">@color/ua_blue</item>
-        <item name="android:colorAccent">@color/ua_gold</item>
-        <item name="android:colorControlNormal">@color/white</item>
-        <item name="android:colorControlActivated">@color/ua_gold</item>
-        <item name="android:colorControlHighlight">@color/ua_blue</item>
-        <item name="alertDialogTheme">@style/ThemeOverlay.Player.Dialog</item>
-        <item name="android:alertDialogTheme">@style/ThemeOverlay.Player.Dialog</item>
+        <item name="colorAccent">@color/brand</item>
+        <item name="android:colorControlActivated">@color/brand</item>
     </style>
 
     <style name="Theme.Player" parent="BaseTheme.Player">
     </style>
 
-    <style name="Theme.Player.Settings" parent="Theme.AppCompat.DayNight.NoActionBar">
-        <item name="android:windowBackground">@color/ua_navy</item>
-        <item name="android:statusBarColor">@color/ua_navy</item>
-        <item name="android:navigationBarColor">@color/ua_navy</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:textColorPrimary">@color/white</item>
-        <item name="android:textColorSecondary">@color/ua_secondary</item>
-        <item name="colorAccent">@color/ua_gold</item>
-        <item name="colorControlNormal">@color/white</item>
-        <item name="colorControlActivated">@color/ua_gold</item>
-        <item name="colorControlHighlight">@color/ua_blue</item>
-        <item name="alertDialogTheme">@style/ThemeOverlay.Player.Dialog</item>
-        <item name="android:alertDialogTheme">@style/ThemeOverlay.Player.Dialog</item>
+    <!-- Player-style icon action button: transparent, borderless ripple, tinted glyph. -->
+    <style name="ErrorActionButton">
+        <item name="android:layout_width">54dp</item>
+        <item name="android:layout_height">54dp</item>
+        <item name="android:padding">14dp</item>
+        <item name="android:scaleType">fitCenter</item>
+        <item name="android:background">?android:attr/selectableItemBackgroundBorderless</item>
+        <item name="android:tint">@color/white</item>
+        <item name="android:focusable">true</item>
     </style>
 
-    <style name="ThemeOverlay.Player.Dialog" parent="ThemeOverlay.AppCompat.Dialog.Alert">
-        <item name="android:windowBackground">@drawable/ua_dialog_background</item>
-        <item name="android:textColorPrimary">@color/white</item>
-        <item name="android:textColorSecondary">@color/ua_secondary</item>
-        <item name="textColorAlertDialogListItem">@color/white</item>
-        <item name="android:textColorAlertDialogListItem">@color/white</item>
-        <item name="colorAccent">@color/ua_gold</item>
-        <item name="android:colorAccent">@color/ua_gold</item>
+    <style name="Theme.Error" parent="Theme.AppCompat.NoActionBar">
+        <!-- The wash is the window background, not the layout's, so the one gradient covers the
+             system bars too — a bar painted in a flat colour would cut a seam across it. -->
+        <item name="android:windowBackground">@drawable/bg_brand_wash</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:forceDarkAllowed" tools:targetApi="29">false</item>
+        <item name="colorAccent">@color/brand</item>
+        <item name="android:colorControlActivated">@color/brand</item>
+    </style>
+
+    <style name="Theme.Settings" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="colorAccent">@color/brand</item>
+        <item name="colorControlActivated">@color/brand</item>
+        <item name="android:colorControlActivated">@color/brand</item>
     </style>
 
     <style name="ExoStyledControls.Button.Center.Secondary" parent="ExoStyledControls.Button.Center">
         <item name="android:layout_width">60dp</item>
         <item name="android:layout_height">60dp</item>
         <item name="android:visibility">gone</item>
-    </style>
-
-    <style name="UaEmptyStateAction">
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:minHeight">48dp</item>
-        <item name="android:clickable">true</item>
-        <item name="android:focusable">true</item>
-        <item name="android:gravity">center_vertical</item>
-        <item name="android:paddingStart">18dp</item>
-        <item name="android:paddingEnd">20dp</item>
-        <item name="android:drawablePadding">10dp</item>
-        <item name="android:textColor">@color/white</item>
-        <item name="android:textSize">16sp</item>
-        <item name="android:textStyle">bold</item>
-        <item name="android:stateListAnimator">@animator/ua_tv_control_focus</item>
-    </style>
-
-    <style name="UaEmptyStateAction.Primary" parent="UaEmptyStateAction">
-        <item name="android:background">@drawable/ua_empty_state_primary_background</item>
-    </style>
-
-    <style name="UaEmptyStateAction.Secondary" parent="UaEmptyStateAction">
-        <item name="android:background">@drawable/ua_empty_state_secondary_background</item>
-        <item name="android:textStyle">normal</item>
     </style>
 
     <style name="Transparent" parent="@android:style/Theme.Material.NoActionBar">

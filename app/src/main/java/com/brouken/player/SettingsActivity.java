@@ -1,37 +1,34 @@
 package com.brouken.player;
 
-import android.app.Dialog;
+import android.content.Context;
 import android.content.res.Configuration;
-import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.net.Uri;
-import android.os.Build;
-import android.os.Bundle;
-import android.text.InputType;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
-import android.text.TextUtils;
 import android.text.style.ImageSpan;
+import android.os.Build;
+import android.os.Bundle;
+import android.text.TextUtils;
 import android.view.View;
 import android.widget.LinearLayout;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import android.app.Activity;
+import android.widget.Toast;
+
 import androidx.appcompat.app.ActionBar;
-import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.OneShotPreDrawListener;
-import androidx.preference.EditTextPreference;
+import androidx.appcompat.app.AppCompatActivity;
 import androidx.preference.ListPreference;
-import androidx.preference.ListPreferenceDialogFragmentCompat;
 import androidx.preference.Preference;
+import androidx.preference.PreferenceCategory;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceGroup;
-import androidx.preference.PreferenceManager;
 import androidx.preference.PreferenceScreen;
 import androidx.preference.SwitchPreferenceCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -40,8 +37,8 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.brouken.player.together.AliasGenerator;
 import com.brouken.player.together.Relay;
 import com.brouken.player.together.Room;
-import com.brouken.player.update.UpdateUi;
 import com.brouken.player.update.Updater;
+import com.brouken.player.update.UpdateUi;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -51,7 +48,11 @@ import java.util.List;
 
 public class SettingsActivity extends AppCompatActivity
         implements PreferenceFragmentCompat.OnPreferenceStartScreenCallback {
+
+    /** ISO-639-2/T codes of the audio tracks in the clip the player has open, if any. */
     public static final String EXTRA_MEDIA_LANGUAGES = "mediaLanguages";
+
+    /** Key of the preference to open on: the screen scrolls to it instead of starting at the top. */
     public static final String EXTRA_SCROLL_TO = "scrollTo";
 
     static RecyclerView recyclerView;
@@ -92,6 +93,7 @@ public class SettingsActivity extends AppCompatActivity
         if (actionBar != null) {
             actionBar.setDisplayHomeAsUpEnabled(true);
         }
+
         final CharSequence rootTitle = getTitle();
         getSupportFragmentManager().addOnBackStackChangedListener(() -> {
             if (getSupportFragmentManager().getBackStackEntryCount() == 0) {
@@ -115,56 +117,48 @@ public class SettingsActivity extends AppCompatActivity
         }
     }
 
-    @Override
-    public boolean onPreferenceStartScreen(@NonNull final PreferenceFragmentCompat caller,
-                                           @NonNull final PreferenceScreen preferenceScreen) {
-        final SettingsFragment fragment = new SettingsFragment();
-        final Bundle arguments = new Bundle();
-        arguments.putString(PreferenceFragmentCompat.ARG_PREFERENCE_ROOT,
-                preferenceScreen.getKey());
-        fragment.setArguments(arguments);
-        openedScreenKey = preferenceScreen.getKey();
-        getSupportFragmentManager().beginTransaction()
-                .replace(R.id.settings, fragment)
-                .addToBackStack(preferenceScreen.getKey())
-                .commit();
-        setTitle(preferenceScreen.getTitle());
-        return true;
-    }
-
+    /** Up from a sub-screen goes back one level, not out of the settings altogether. */
     @Override
     public boolean onSupportNavigateUp() {
-        if (getSupportFragmentManager().getBackStackEntryCount() > 0) {
-            getSupportFragmentManager().popBackStack();
-        } else {
-            finish();
-        }
+        return getSupportFragmentManager().popBackStackImmediate() || super.onSupportNavigateUp();
+    }
+
+    /**
+     * A nested <PreferenceScreen> opens as the same fragment rooted at its key, which is how the
+     * subtitle look stays one button instead of six rows on an already long screen.
+     */
+    @Override
+    public boolean onPreferenceStartScreen(@NonNull PreferenceFragmentCompat caller,
+                                           @NonNull PreferenceScreen screen) {
+        final SettingsFragment fragment = new SettingsFragment();
+        final Bundle arguments = new Bundle();
+        arguments.putString(PreferenceFragmentCompat.ARG_PREFERENCE_ROOT, screen.getKey());
+        fragment.setArguments(arguments);
+        openedScreenKey = screen.getKey();
+        getSupportFragmentManager()
+                .beginTransaction()
+                .replace(R.id.settings, fragment)
+                .addToBackStack(null)
+                .commit();
+        setTitle(screen.getTitle());
         return true;
     }
 
-    public static class SettingsFragment extends PreferenceFragmentCompat
-            implements SharedPreferences.OnSharedPreferenceChangeListener {
-        @Override
-        public RecyclerView.LayoutManager onCreateLayoutManager() {
-            return new LinearLayoutManager(getContext()) {
-                @Override
-                protected void calculateExtraLayoutSpace(@NonNull RecyclerView.State state,
-                                                         @NonNull int[] extraLayoutSpace) {
-                    extraLayoutSpace[0] = extraLayoutSpace[1] = getHeight() * 2;
-                }
-            };
-        }
-
+    public static class SettingsFragment extends PreferenceFragmentCompat {
         @Override
         public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
+            // Inflation materializes switch defaults, so record whether the key was already
+            // persisted before that happens.
             boolean hadAllowSystemFrameRateKey =
                     androidx.preference.PreferenceManager.getDefaultSharedPreferences(getContext())
                             .contains("allowSystemFrameRate");
 
+            // Before inflation: the preferences below read these keys, and either value may still be
+            // living in the shape it was stored in two versions ago.
             Prefs.getHoldSpeedMode(requireContext());
-            Prefs.getDisableVolumeBrightnessGestures(requireContext());
             Prefs.getSubtitleSearchMode(requireContext());
             Prefs.getSubtitleTranslate(requireContext());
+
             setPreferencesFromResource(R.xml.root_preferences, rootKey);
 
             Preference preferenceAutoPiP = findPreference("autoPiP");
@@ -177,118 +171,89 @@ public class SettingsActivity extends AppCompatActivity
             }
             SwitchPreferenceCompat preferenceAllowSystemFrameRate = findPreference("allowSystemFrameRate");
             if (preferenceAllowSystemFrameRate != null) {
+                // Surface.setFrameRate() only exists on API 30+; below that this toggle is a no-op.
                 preferenceAllowSystemFrameRate.setEnabled(Build.VERSION.SDK_INT >= 30);
                 if (!hadAllowSystemFrameRateKey) {
+                    // Device-specific default: off on TV (avoids the Hz-switch flicker), on elsewhere.
                     preferenceAllowSystemFrameRate.setChecked(!Utils.isTvBox(getContext()));
                 }
             }
-            Preference preferenceHoldSpeed = findPreference("holdSpeedMode");
-            if (preferenceHoldSpeed != null && Utils.isTvBox(getContext())) {
-                preferenceHoldSpeed.setVisible(false);
-            }
-            boolean tvBox = Utils.isTvBox(getContext());
-            Preference preferenceSystemVolume = findPreference("systemVolume");
-            Preference preferenceDisableGestures =
-                    findPreference("disableVolumeBrightnessGestures");
-            if (preferenceSystemVolume != null) preferenceSystemVolume.setVisible(!tvBox);
-            if (preferenceDisableGestures != null) preferenceDisableGestures.setVisible(!tvBox);
-            Preference preferenceSingleBack = findPreference("tvSingleBack");
-            Preference preferenceKeepAwake = findPreference("keepAwakeOnPause");
-            if (preferenceSingleBack != null) preferenceSingleBack.setVisible(tvBox);
-            if (preferenceKeepAwake != null) preferenceKeepAwake.setVisible(tvBox);
-            final EditTextPreference preferenceNick = findPreference("togetherNick");
+            // The display name is generated on first use, so the field is never empty — but the
+            // regenerate button is worth having: it is how you get a different one without inventing
+            // it yourself, and it is what LocalSend offers beside the same field.
+            final androidx.preference.EditTextPreference preferenceNick = findPreference("togetherNick");
             final Preference preferenceNickRandom = findPreference("togetherNickRandom");
-            if (preferenceNick != null) {
-                if (TextUtils.isEmpty(preferenceNick.getText())) {
-                    preferenceNick.setText(AliasGenerator.random());
-                }
-                preferenceNick.setOnPreferenceChangeListener((preference, value) -> {
-                    if (value == null || value.toString().trim().isEmpty()) {
-                        preferenceNick.setText(AliasGenerator.random());
-                        return false;
-                    }
-                    return true;
-                });
-            }
             if (preferenceNick != null && preferenceNickRandom != null) {
                 preferenceNickRandom.setOnPreferenceClickListener(preference -> {
                     preferenceNick.setText(AliasGenerator.random());
                     return true;
                 });
             }
-
-            final EditTextPreference preferencePassword = findPreference("togetherPassword");
-            final SwitchPreferenceCompat preferencePublic = findPreference("togetherPublic");
+            final androidx.preference.EditTextPreference preferencePassword =
+                    findPreference("togetherPassword");
             if (preferencePassword != null) {
-                preferencePassword.setOnBindEditTextListener(editText ->
-                        editText.setInputType(InputType.TYPE_CLASS_TEXT
-                                | InputType.TYPE_TEXT_VARIATION_PASSWORD));
+                // Shown as dots rather than as itself: a settings list is read over shoulders, and
+                // the password is what keeps a room from being walked into.
                 preferencePassword.setSummaryProvider(preference -> {
                     final String value = preferencePassword.getText();
-                    return TextUtils.isEmpty(value)
-                            ? getString(R.string.pref_together_password_none) : "••••••";
-                });
-                preferencePassword.setOnPreferenceChangeListener((preference, value) -> {
-                    if ((value == null || value.toString().isEmpty())
-                            && preferencePublic != null && preferencePublic.isChecked()) {
-                        preferencePublic.setChecked(false);
-                    }
-                    return true;
-                });
-            }
-            if (preferencePublic != null) {
-                if (preferencePublic.isChecked() && (preferencePassword == null
-                        || TextUtils.isEmpty(preferencePassword.getText()))) {
-                    preferencePublic.setChecked(false);
-                }
-                preferencePublic.setOnPreferenceChangeListener((preference, value) -> {
-                    if (Boolean.TRUE.equals(value) && (preferencePassword == null
-                            || TextUtils.isEmpty(preferencePassword.getText()))) {
-                        Toast.makeText(requireContext(), R.string.together_public_needs_password,
-                                Toast.LENGTH_SHORT).show();
-                        return false;
-                    }
-                    return true;
+                    return value == null || value.isEmpty()
+                            ? getString(R.string.pref_together_password_none)
+                            : "••••••";
                 });
             }
 
-            final EditTextPreference preferenceRelay = findPreference("togetherRelay");
+            // Both fields hold an override; empty means the built-in address, which is also how one is put
+            // back. The summary therefore shows what is actually in effect rather than echoing an empty
+            // field back — and it is where the default is read, so nothing else has to offer it.
+            final androidx.preference.EditTextPreference preferenceRelay = findPreference("togetherRelay");
             if (preferenceRelay != null) {
                 preferenceRelay.setSummaryProvider(preference -> {
                     final String value = preferenceRelay.getText();
-                    return TextUtils.isEmpty(value == null ? null : value.trim())
+                    return value == null || value.trim().isEmpty()
                             ? getString(R.string.pref_together_relay_default, Relay.DEFAULT_BASE)
                             : value.trim();
                 });
-                preferenceRelay.setOnPreferenceChangeListener((preference, value) -> {
-                    final String address = value == null ? "" : value.toString().trim();
-                    if (!validAddress(address, "ws", "wss")) {
-                        showAddressError("ws://, wss://");
-                        return false;
-                    }
-                    Relay.setBase(address);
-                    return true;
-                });
             }
 
-            final EditTextPreference preferenceInvite = findPreference("togetherInvitePage");
+            // The page an invite link points at, on the same terms. Only links written here follow it — an
+            // invite that arrives is read by its room parameter whatever page sent it.
+            final androidx.preference.EditTextPreference preferenceInvite =
+                    findPreference("togetherInvitePage");
             if (preferenceInvite != null) {
                 preferenceInvite.setSummaryProvider(preference -> {
                     final String value = preferenceInvite.getText();
-                    return TextUtils.isEmpty(value == null ? null : value.trim())
-                            ? getString(R.string.pref_together_relay_default,
-                                    Room.DEFAULT_INVITE_PAGE)
+                    return value == null || value.trim().isEmpty()
+                            ? getString(R.string.pref_together_relay_default, Room.DEFAULT_INVITE_PAGE)
                             : value.trim();
                 });
-                preferenceInvite.setOnPreferenceChangeListener((preference, value) -> {
-                    final String address = value == null ? "" : value.toString().trim();
-                    if (!validAddress(address, "http", "https")) {
-                        showAddressError("http://, https://");
-                        return false;
-                    }
-                    Room.setInvitePage(address);
-                    return true;
-                });
+            }
+
+            Preference preferenceSystemVolume = findPreference("systemVolume");
+            if (preferenceSystemVolume != null && Utils.isTvBox(getContext())) {
+                // TV remotes route volume to the panel or receiver over CEC, where only the system
+                // stream responds — an isolated player volume would look broken there.
+                preferenceSystemVolume.setVisible(false);
+            }
+            Preference preferenceDisableGestures = findPreference("disableVolumeBrightnessGestures");
+            if (preferenceDisableGestures != null && Utils.isTvBox(getContext())) {
+                // A remote has no swipes to give up, so there is nothing here to turn off.
+                preferenceDisableGestures.setVisible(false);
+            }
+            Preference preferenceHoldSpeed = findPreference("holdSpeedMode");
+            if (preferenceHoldSpeed != null && Utils.isTvBox(getContext())) {
+                // Same reason: there is no finger to hold on the picture.
+                preferenceHoldSpeed.setVisible(false);
+            }
+            Preference preferenceSingleBack = findPreference("tvSingleBack");
+            if (preferenceSingleBack != null && !Utils.isTvBox(getContext())) {
+                // Only the remote gets asked for a second Back; touch already leaves on the first one.
+                preferenceSingleBack.setVisible(false);
+            }
+            Preference preferenceKeepAwake = findPreference("keepAwakeOnPause");
+            if (preferenceKeepAwake != null && !Utils.isTvBox(getContext())) {
+                // Holding a phone awake through a pause drains it for no one's benefit: the complaint is
+                // the TV's screensaver, which takes the audio output and the process down with it.
+                preferenceKeepAwake.setVisible(false);
             }
             ListPreference listPreferenceFileAccess = findPreference("fileAccess");
             if (listPreferenceFileAccess != null) {
@@ -308,6 +273,8 @@ public class SettingsActivity extends AppCompatActivity
                 listPreferenceFileAccess.setEntryValues(values.toArray(new String[0]));
             }
 
+            // Three ordered language lists, one shape. Several hundred locales, resolved and sorted
+            // once for all of them.
             final LinkedHashMap<String, String> languages = Utils.allLanguages();
             bindLanguageRow("languageAudio", languages, R.string.pref_language_audio,
                     R.string.pref_language_audio_none,
@@ -321,44 +288,57 @@ public class SettingsActivity extends AppCompatActivity
                     Prefs.getLanguageSubtitleSecondary(requireContext()),
                     Prefs::setLanguageSubtitleSecondary);
 
+            // The second line lives behind its own row, and Off there means the whole feature rather
+            // than just the line — so the rows that would configure one are greyed out rather than left
+            // live and inert.
             final ListPreference secondaryMode = findPreference("subtitleSecondaryMode");
             if (secondaryMode != null) {
                 applySecondaryMode(secondaryMode, secondaryMode.getValue());
                 secondaryMode.setOnPreferenceChangeListener((preference, value) -> {
-                    applySecondaryMode(secondaryMode, String.valueOf(value));
+                    applySecondaryMode(secondaryMode, (String) value);
                     return true;
                 });
             }
 
+            // The search lives behind its own row, so its state has to read from the outside: without
+            // this the row says nothing and the whole feature is a tap away from being discovered.
             final ListPreference searchMode = findPreference("subtitleSearchMode");
             final SwitchPreferenceCompat translate = findPreference("subtitleTranslateOn");
             if (searchMode != null) {
                 applySearchMode(searchMode, searchMode.getValue(), translate);
                 searchMode.setOnPreferenceChangeListener((preference, value) -> {
-                    applySearchMode(searchMode, String.valueOf(value), translate);
-                    Prefs.setSubtitleSearchMode(requireContext(), String.valueOf(value));
-                    SubtitleUtils.clearTranslatedCache(requireContext());
+                    applySearchMode(searchMode, (String) value, translate);
                     return true;
                 });
             }
             if (translate != null) {
                 translate.setOnPreferenceChangeListener((preference, value) -> {
                     enableTranslateBackends(searchMode == null
-                                    || SubtitleSettingsPolicy.translationEnabled(
-                                            searchMode.getValue()),
-                            Boolean.TRUE.equals(value));
+                            || !Prefs.SEARCH_OFF.equals(searchMode.getValue()), (Boolean) value);
+                    // A translation cached under the previous choice would keep being served for
+                    // everything watched recently, so the new choice would look like it did nothing.
                     SubtitleUtils.clearTranslatedCache(requireContext());
                     return true;
                 });
             }
-            updateSubtitleParentSummaries();
 
-            final Preference sources = findPreference("subtitleSourcesCategory");
+            // Both of these exist to take a source out of the picture while a result is being
+            // chased down, and neither is anybody's setting: which index answered and which endpoint
+            // translated are not decisions a viewer has any way to judge. So they are shown in a debug
+            // build and are not in a release one — where Prefs also stops reading what they wrote.
+            if (!BuildConfig.DEBUG) {
+                final Preference sources = findPreference("subtitleSourcesCategory");
+                if (sources != null) {
+                    sources.setVisible(false);
+                }
+                final Preference endpoints = findPreference("subtitleTranslateBackends");
+                if (endpoints != null) {
+                    endpoints.setVisible(false);
+                }
+            }
+
             final Preference translateBackends = findPreference("subtitleTranslateBackends");
-            if (sources != null) sources.setVisible(BuildConfig.DEBUG);
             if (translateBackends != null) {
-                translateBackends.setVisible(SubtitleSettingsPolicy.translationBackendsVisible(
-                        BuildConfig.DEBUG, translate == null || translate.isChecked()));
                 final LinkedHashMap<String, String> services = SubtitleTranslate.backends();
                 updateLanguageSummary(translateBackends, services,
                         Prefs.getSubtitleTranslateBackends(requireContext()),
@@ -368,227 +348,193 @@ public class SettingsActivity extends AppCompatActivity
                             getString(R.string.pref_subtitle_translate_backends),
                             R.string.pref_subtitle_translate_backends_none,
                             R.string.pref_subtitle_translate_backends_add,
-                            Utils.splitLanguages(Prefs.getSubtitleTranslateBackends(
-                                    requireContext())), services, Collections.emptyList(), picked -> {
-                                String stored = TextUtils.join(",", picked);
+                            Utils.splitLanguages(Prefs.getSubtitleTranslateBackends(requireContext())),
+                            services, Collections.emptyList(), picked -> {
+                                final String stored = TextUtils.join(",", picked);
                                 Prefs.setSubtitleTranslateBackends(requireContext(), stored);
                                 updateLanguageSummary(preference, services, stored,
                                         R.string.pref_subtitle_translate_backends_none);
+                                // The endpoints changed, so what they produced is no longer what this
+                                // setting says would be produced.
                                 SubtitleUtils.clearTranslatedCache(requireContext());
                             });
                     return true;
                 });
             }
 
+            // Both subtitle lines, each with its own pair. The second line reuses the same two lists,
+            // so it gets the chips and the clash check for nothing.
+            bindColorPair("subtitleTextColor", "subtitleBackground");
+            bindColorPair("subtitleSecondaryTextColor", "subtitleSecondaryBackground");
+
             Preference resetAudioWorkarounds = findPreference("resetRevokedAudioMimes");
             if (resetAudioWorkarounds != null) {
                 resetAudioWorkarounds.setOnPreferenceClickListener(preference -> {
                     Prefs.resetRevokedAudioMimes(requireContext());
-                    Toast.makeText(requireContext(),
-                            R.string.pref_reset_audio_workarounds_done,
-                            Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getContext(), R.string.pref_reset_audio_workarounds_done, Toast.LENGTH_SHORT).show();
                     return true;
                 });
             }
 
-            ListPreference textColor = findPreference("subtitleTextColor");
-            ListPreference background = findPreference("subtitleBackground");
-            if (textColor != null && background != null) {
-                showColorChips(textColor);
-                showColorChips(background);
-                textColor.setOnPreferenceChangeListener((preference, value) ->
-                        allowColor(String.valueOf(value), background.getValue()));
-                background.setOnPreferenceChangeListener((preference, value) ->
-                        allowColor(textColor.getValue(), String.valueOf(value)));
-            }
-            ListPreference secondaryTextColor = findPreference("subtitleSecondaryTextColor");
-            ListPreference secondaryBackground = findPreference("subtitleSecondaryBackground");
-            if (secondaryTextColor != null && secondaryBackground != null) {
-                showColorChips(secondaryTextColor);
-                showColorChips(secondaryBackground);
-                secondaryTextColor.setOnPreferenceChangeListener((preference, value) ->
-                        allowColor(String.valueOf(value), secondaryBackground.getValue()));
-                secondaryBackground.setOnPreferenceChangeListener((preference, value) ->
-                        allowColor(secondaryTextColor.getValue(), String.valueOf(value)));
+            PreferenceCategory privacyCategory = findPreference("privacyCategory");
+            if (privacyCategory != null && !BuildConfig.ENABLE_CRASH_REPORTING) {
+                privacyCategory.setVisible(false);
             }
 
-            Preference currentVersion = findPreference("currentVersion");
-            if (currentVersion != null) {
-                currentVersion.setSummary(BuildConfig.VERSION_NAME);
-            }
-            Preference checkUpdate = findPreference("checkUpdateNow");
-            if (checkUpdate != null) {
-                checkUpdate.setOnPreferenceClickListener(preference -> {
-                    if (getActivity() != null) {
-                        Toast.makeText(getActivity(), R.string.update_checking, Toast.LENGTH_SHORT).show();
-                        Updater.find(getActivity(), true, info -> getActivity().runOnUiThread(() -> {
-                            if (info == null) {
-                                Toast.makeText(getActivity(), R.string.update_none, Toast.LENGTH_SHORT).show();
+            PreferenceCategory updateCategory = findPreference("updateCategory");
+            if (!BuildConfig.ENABLE_UPDATE) {
+                if (updateCategory != null) {
+                    updateCategory.setVisible(false);
+                }
+            } else {
+                Preference currentVersion = findPreference("currentVersion");
+                if (currentVersion != null) {
+                    currentVersion.setSummary(BuildConfig.VERSION_NAME);
+                }
+                Preference checkUpdate = findPreference("checkUpdateNow");
+                if (checkUpdate != null) {
+                    checkUpdate.setOnPreferenceClickListener(preference -> {
+                        final Activity activity = getActivity();
+                        if (activity == null) {
+                            return true;
+                        }
+                        Toast.makeText(activity, R.string.update_checking, Toast.LENGTH_SHORT).show();
+                        Updater.find(info -> activity.runOnUiThread(() -> {
+                            if (activity.isFinishing()) {
+                                return;
+                            }
+                            if (info != null) {
+                                UpdateUi.showAvailableDialog(activity, info, null, false);
                             } else {
-                                UpdateUi.showAvailableDialog(getActivity(), info,
-                                        () -> Updater.skip(getActivity(), info), false);
+                                Toast.makeText(activity, R.string.update_none, Toast.LENGTH_SHORT).show();
                             }
                         }));
-                    }
-                    return true;
-                });
+                        return true;
+                    });
+                }
             }
         }
 
+        // A D-pad can only reach a row that is laid out, and when focus search fails
+        // LinearLayoutManager extends the layout by a third of a screen and looks again — which is
+        // not past a run of unfocusable rows: the group a switched-off "dependency" disables, or the
+        // warning text in "Dangerous". Lay out two screens extra so the next focusable row is there.
         @Override
-        public void onDisplayPreferenceDialog(@NonNull Preference preference) {
-            if (!(preference instanceof ListPreference)) {
-                super.onDisplayPreferenceDialog(preference);
-                return;
-            }
-            String tag = UaListPreferenceDialogFragment.class.getName();
-            if (getParentFragmentManager().findFragmentByTag(tag) != null) return;
-            UaListPreferenceDialogFragment dialog =
-                    UaListPreferenceDialogFragment.newInstance(preference.getKey());
-            dialog.setTargetFragment(this, 0);
-            dialog.show(getParentFragmentManager(), tag);
+        public RecyclerView.LayoutManager onCreateLayoutManager() {
+            return new LinearLayoutManager(getContext()) {
+                @Override
+                protected void calculateExtraLayoutSpace(@NonNull RecyclerView.State state,
+                                                         @NonNull int[] extraLayoutSpace) {
+                    extraLayoutSpace[0] = extraLayoutSpace[1] = getHeight() * 2;
+                }
+            };
         }
 
         @Override
         public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
             super.onViewCreated(view, savedInstanceState);
-            recyclerView = getListView();
-            recyclerView.setBackgroundColor(getResources().getColor(R.color.ua_navy));
-            int side = (int) (18 * getResources().getDisplayMetrics().density + 0.5f);
-            int vertical = (int) (6 * getResources().getDisplayMetrics().density + 0.5f);
-            recyclerView.setPadding(side, vertical, side, vertical);
-            recyclerView.setClipToPadding(false);
-            recyclerView.addOnChildAttachStateChangeListener(
-                    new RecyclerView.OnChildAttachStateChangeListener() {
-                        @Override
-                        public void onChildViewAttachedToWindow(@NonNull View child) {
-                            if (child.isFocusable()) {
-                                child.setBackgroundResource(R.drawable.ua_preference_item_background);
-                            }
-                        }
-
-                        @Override
-                        public void onChildViewDetachedFromWindow(@NonNull View child) { }
-                    });
+            if (Build.VERSION.SDK_INT >= 29) {
+                recyclerView = getListView();
+            }
             if (getArguments() != null) {
-                if (savedInstanceState == null) openAtPosition(0, 3);
+                // A sub-screen is a replaced fragment, and a replaced fragment starts with nothing
+                // focused: the first D-pad press then goes wherever the view root guesses instead
+                // of into the list. Hand it the first row.
+                if (savedInstanceState == null) {
+                    openAtPosition(0, 3);
+                }
                 return;
             }
-            SettingsActivity activity = (SettingsActivity) requireActivity();
-            String returning = activity.openedScreenKey;
+            final SettingsActivity activity = (SettingsActivity) requireActivity();
+            final String returning = activity.openedScreenKey;
             activity.openedScreenKey = null;
             if (returning != null) {
+                // Back from a sub-screen rebuilt this list from scratch, so it would open at the
+                // top with no row focused. Put it back on the row the sub-screen was opened from.
                 openAtPreference(returning, 3);
             } else if (savedInstanceState == null) {
-                String key = activity.getIntent().getStringExtra(EXTRA_SCROLL_TO);
-                if (key != null) openAtPreference(key, 3);
+                // Long-pressing a player button lands on the section that button is about, the way
+                // a quick-settings tile opens its own page.
+                final String key = activity.getIntent().getStringExtra(EXTRA_SCROLL_TO);
+                if (key != null) {
+                    openAtPreference(key, 3);
+                }
             }
         }
 
-        @Override
-        public void onStart() {
-            super.onStart();
-            PreferenceManager.getDefaultSharedPreferences(requireContext())
-                    .registerOnSharedPreferenceChangeListener(this);
-            refreshSubtitlePreview();
-        }
-
-        @Override
-        public void onStop() {
-            PreferenceManager.getDefaultSharedPreferences(requireContext())
-                    .unregisterOnSharedPreferenceChangeListener(this);
-            super.onStop();
-        }
-
-        @Override
-        public void onSharedPreferenceChanged(SharedPreferences preferences, String key) {
-            if ("subtitleStyleEmbedded".equals(key)
-                    || "subtitleScale".equals(key)
-                    || "subtitleTextColor".equals(key)
-                    || "subtitleBackground".equals(key)
-                    || "subtitleEdge".equals(key)
-                    || "subtitleStyleBold".equals(key)) {
-                refreshSubtitlePreview();
+        /**
+         * Opens the list on one row: scrolled so the section header above it is still on screen, and
+         * with the row itself focused. scrollToPreference alone scrolls the row barely into view — at
+         * the bottom edge, inside a TV's overscan — and leaves a remote's focus on the first row, so
+         * the first D-pad press yanks the list straight back to the top.
+         *
+         * The holder can be missing on the first pre-draw, hence the few attempts. On a phone the
+         * focus request is a no-op: a preference row is not focusable in touch mode.
+         */
+        private void openAtPreference(final String key, final int attemptsLeft) {
+            final RecyclerView list = getListView();
+            final RecyclerView.Adapter<?> adapter = list == null ? null : list.getAdapter();
+            if (!(adapter instanceof PreferenceGroup.PreferencePositionCallback)) {
+                return;
             }
-            if ("subtitleSecondaryScale".equals(key)
-                    || "subtitleSecondaryTextColor".equals(key)
-                    || "subtitleSecondaryBackground".equals(key)) {
-                refreshSubtitlePreview();
-            }
+            openAtPosition(((PreferenceGroup.PreferencePositionCallback) adapter)
+                    .getPreferenceAdapterPosition(key), attemptsLeft);
         }
 
-        private void refreshSubtitlePreview() {
-            Preference preference = findPreference("subtitleStylePreview");
-            if (preference instanceof SubtitlePreviewPreference) {
-                ((SubtitlePreviewPreference) preference).refresh();
-            }
-        }
-
-        private void openAtPreference(String key, int attemptsLeft) {
-            RecyclerView list = getListView();
-            RecyclerView.Adapter<?> adapter = list == null ? null : list.getAdapter();
-            if (!(adapter instanceof PreferenceGroup.PreferencePositionCallback)) return;
-            int position = ((PreferenceGroup.PreferencePositionCallback) adapter)
-                    .getPreferenceAdapterPosition(key);
-            openAtPosition(position, attemptsLeft);
-        }
-
-        private void openAtPosition(int position, int attemptsLeft) {
-            RecyclerView list = getListView();
+        /** Same, for a row known by its place in the list rather than by a key. */
+        private void openAtPosition(final int position, final int attemptsLeft) {
+            final RecyclerView list = getListView();
             if (attemptsLeft <= 0 || position == RecyclerView.NO_POSITION || list == null
-                    || !(list.getLayoutManager() instanceof LinearLayoutManager)) return;
-            LinearLayoutManager manager = (LinearLayoutManager) list.getLayoutManager();
+                    || !(list.getLayoutManager() instanceof LinearLayoutManager)) {
+                return;
+            }
+            final LinearLayoutManager manager = (LinearLayoutManager) list.getLayoutManager();
             manager.scrollToPositionWithOffset(Math.max(0, position - 1), 0);
             OneShotPreDrawListener.add(list, () -> {
-                RecyclerView.ViewHolder holder = list.findViewHolderForAdapterPosition(position);
+                final RecyclerView.ViewHolder holder = list.findViewHolderForAdapterPosition(position);
                 if (holder == null) {
                     openAtPosition(position, attemptsLeft - 1);
                     return;
                 }
                 holder.itemView.requestFocus();
-                list.post(() -> manager.scrollToPositionWithOffset(
-                        Math.max(0, position - 1), 0));
+                // Taking the focus makes RecyclerView scroll the row just barely into view, which
+                // parks it against the bottom edge — inside a TV's overscan. Put the list back where
+                // it belongs afterwards: one row before the target, so its category header shows.
+                list.post(() -> manager.scrollToPositionWithOffset(Math.max(0, position - 1), 0));
             });
         }
 
-        private void showColorChips(ListPreference preference) {
-            CharSequence[] entries = preference.getEntries();
-            CharSequence[] values = preference.getEntryValues();
-            if (entries == null || values == null || entries.length != values.length) return;
-            CharSequence[] chipped = new CharSequence[entries.length];
+        /**
+         * Puts a chip of the actual colour in front of every label, in the list and in the summary —
+         * a colour is recognised, a colour name is recalled. Outlined, or white would be a blank gap
+         * on a light row and the transparent entry would show nothing at all.
+         */
+        private void showColorChips(final ListPreference preference) {
+            final CharSequence[] entries = preference.getEntries();
+            final CharSequence[] values = preference.getEntryValues();
+            final CharSequence[] chipped = new CharSequence[entries.length];
             for (int i = 0; i < entries.length; i++) {
-                GradientDrawable chip = new GradientDrawable();
+                final GradientDrawable chip = new GradientDrawable();
                 chip.setShape(GradientDrawable.OVAL);
                 chip.setColor(Color.parseColor(values[i].toString()));
                 chip.setStroke(Math.max(1, Utils.dpToPx(1)), 0x80808080);
-                SpannableStringBuilder label =
-                        new SpannableStringBuilder("  ").append(entries[i]);
-                label.setSpan(new ColorChipSpan(chip), 0, 1,
-                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                // The span replaces its one character with the chip's own width, so the space after it
+                // is the whole gap — no guessing how wide two blanks come out in the current font.
+                final SpannableStringBuilder label =
+                        new SpannableStringBuilder("   ").append(entries[i]);
+                label.setSpan(new ChipSpan(chip), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 chipped[i] = label;
             }
             preference.setEntries(chipped);
         }
 
-        private boolean allowColor(String textColor, String backgroundColor) {
-            if (textColor == null || backgroundColor == null
-                    || Color.parseColor(textColor) != Color.parseColor(backgroundColor)) {
-                return true;
-            }
-            Toast.makeText(requireContext(), R.string.pref_subtitle_color_clash,
-                    Toast.LENGTH_SHORT).show();
-            return false;
-        }
-
-        private static final class ColorChipSpan extends ImageSpan {
-            ColorChipSpan(Drawable drawable) {
+        /**
+         * Sits the chip on the optical middle of the text. ImageSpan's own alignments are baseline and
+         * line-bottom, both of which hang a round chip visibly low, and ALIGN_CENTER is API 29+.
+         */
+        private static class ChipSpan extends ImageSpan {
+            ChipSpan(final Drawable drawable) {
                 super(drawable);
-            }
-
-            private void resize(Paint paint) {
-                int size = Math.round(paint.getTextSize() * 0.7f);
-                Drawable chip = getDrawable();
-                if (chip.getBounds().height() != size) chip.setBounds(0, 0, size, size);
             }
 
             @Override
@@ -598,13 +544,26 @@ public class SettingsActivity extends AppCompatActivity
                 return super.getSize(paint, text, start, end, fontMetrics);
             }
 
+            /**
+             * The chip is sized off the text beside it rather than a fixed dp, so it holds its
+             * proportion on a TV row (larger type than a phone's) and at any system font size.
+             */
+            private void resize(final Paint paint) {
+                final int size = Math.round(paint.getTextSize() * 0.7f);
+                final Drawable chip = getDrawable();
+                if (chip.getBounds().height() != size) {
+                    chip.setBounds(0, 0, size, size);
+                }
+            }
+
             @Override
-            public void draw(@NonNull Canvas canvas, CharSequence text, int start, int end,
-                             float x, int top, int y, int bottom, @NonNull Paint paint) {
+            public void draw(@NonNull Canvas canvas, CharSequence text, int start, int end, float x,
+                             int top, int y, int bottom, @NonNull Paint paint) {
                 resize(paint);
-                Drawable chip = getDrawable();
-                Paint.FontMetricsInt metrics = paint.getFontMetricsInt();
-                float middle = y + (metrics.ascent + metrics.descent) / 2f;
+                final Drawable chip = getDrawable();
+                final Paint.FontMetricsInt metrics = paint.getFontMetricsInt();
+                // y is the baseline; ascent is negative, so this lands mid-glyph rather than mid-line.
+                final float middle = y + (metrics.ascent + metrics.descent) / 2f;
                 canvas.save();
                 canvas.translate(x, middle - chip.getBounds().height() / 2f);
                 chip.draw(canvas);
@@ -612,47 +571,32 @@ public class SettingsActivity extends AppCompatActivity
             }
         }
 
-        public static final class UaListPreferenceDialogFragment
-                extends ListPreferenceDialogFragmentCompat {
-            public static UaListPreferenceDialogFragment newInstance(String key) {
-                UaListPreferenceDialogFragment fragment =
-                        new UaListPreferenceDialogFragment();
-                Bundle arguments = new Bundle(1);
-                arguments.putString("key", key);
-                fragment.setArguments(arguments);
-                return fragment;
-            }
-
-            @Override
-            public void onStart() {
-                super.onStart();
-                Dialog rawDialog = getDialog();
-                Preference preference = getPreference();
-                if (!(rawDialog instanceof androidx.appcompat.app.AlertDialog)
-                        || !(preference instanceof ListPreference)) return;
-                ListPreference listPreference = (ListPreference) preference;
-                UaDialogStyler.style(requireContext(),
-                        (androidx.appcompat.app.AlertDialog) rawDialog,
-                        UaDialogStyler.FocusTarget.LIST,
-                        listPreference.findIndexOfValue(listPreference.getValue()));
-            }
-        }
-
+        /** Where an edited language list is written back to. */
         private interface LanguageWriter {
-            void write(android.content.Context context, String languages);
+            void write(Context context, String languages);
         }
 
-        private void bindLanguageRow(String key, LinkedHashMap<String, String> languages,
-                                     int titleRes, int noneRes, String stored,
-                                     LanguageWriter writer) {
-            Preference row = findPreference(key);
-            if (row == null) return;
+        /**
+         * One ordered language list: the chosen languages as the summary, and the same picker behind
+         * the row. Three of these — audio, subtitles, second subtitles — and nothing about them differs
+         * but the key, the title and where the result is stored.
+         */
+        private void bindLanguageRow(final String key, final LinkedHashMap<String, String> languages,
+                                     final int titleRes, final int noneRes, final String stored,
+                                     final LanguageWriter writer) {
+            final Preference row = findPreference(key);
+            if (row == null) {
+                return;
+            }
+            // Held rather than re-read: the row can be opened again without leaving the screen, and the
+            // picker has to start from what the last edit left, not from what was stored at bind time.
             final String[] current = {stored};
             updateLanguageSummary(row, languages, current[0], noneRes);
             row.setOnPreferenceClickListener(preference -> {
-                LanguagePriorityDialog.show(requireContext(), getString(titleRes), noneRes,
-                        R.string.pref_language_audio_add,
-                        Utils.splitLanguages(current[0]), languages, pinnedLanguages(), picked -> {
+                LanguagePriorityDialog.show(requireContext(), getString(titleRes),
+                        noneRes, R.string.pref_language_audio_add,
+                        Utils.splitLanguages(current[0]),
+                        languages, pinnedLanguages(), picked -> {
                             current[0] = TextUtils.join(",", picked);
                             writer.write(requireContext(), current[0]);
                             updateLanguageSummary(preference, languages, current[0], noneRes);
@@ -661,117 +605,134 @@ public class SettingsActivity extends AppCompatActivity
             });
         }
 
+        /** One text/background pair: colour chips on both lists, and neither allowed to match the other. */
+        private void bindColorPair(final String textColorKey, final String backgroundKey) {
+            final ListPreference textColor = findPreference(textColorKey);
+            final ListPreference background = findPreference(backgroundKey);
+            if (textColor == null || background == null) {
+                return;
+            }
+            showColorChips(textColor);
+            showColorChips(background);
+            // Text in the colour of its own box is invisible subtitles, and the two lists are far
+            // enough apart that nobody would connect the cause. Refuse the pick instead.
+            textColor.setOnPreferenceChangeListener((preference, value) ->
+                    allowColor((String) value, background.getValue()));
+            background.setOnPreferenceChangeListener((preference, value) ->
+                    allowColor(textColor.getValue(), (String) value));
+        }
+
+        /** @return false to reject the pick, which is what a preference change listener does. */
+        private boolean allowColor(final String textColor, final String backgroundColor) {
+            if (textColor == null || backgroundColor == null
+                    || Color.parseColor(textColor) != Color.parseColor(backgroundColor)) {
+                return true;
+            }
+            Toast.makeText(getContext(), R.string.pref_subtitle_color_clash, Toast.LENGTH_SHORT).show();
+            return false;
+        }
+
+        /** The chosen languages, in order, or a note that nothing is preferred. */
+        /** Everything the second line's screen holds besides the mode itself. */
         private static final String[] SECONDARY_DEPENDENTS = {
-                "languageSubtitleSecondary", "subtitleSecondaryScale",
-                "subtitleSecondaryTextColor", "subtitleSecondaryBackground"
+                "languageSubtitleSecondary", "subtitleSecondaryScale", "subtitleSecondaryTextColor",
+                "subtitleSecondaryBackground",
         };
 
+        /**
+         * Reflects the chosen mode, the same way {@link #applySearchMode} does for the search: the row
+         * that leads here reports it, and with the second line off the rows that dress one are greyed
+         * out. By hand for the same reason — app:dependency watches a parent's enablement, not its value.
+         */
+        private void applySecondaryMode(final ListPreference secondaryMode, final String mode) {
+            final boolean enabled = !Prefs.SECONDARY_OFF.equals(mode);
+            for (final String key : SECONDARY_DEPENDENTS) {
+                final Preference dependent = findPreference(key);
+                if (dependent != null) {
+                    dependent.setEnabled(enabled);
+                }
+            }
+            // Null while the fragment is rooted at the second line's screen: the row lives one level up.
+            final Preference screen = findPreference("subtitleSecondaryScreen");
+            final int index = secondaryMode.findIndexOfValue(mode);
+            if (screen != null && index >= 0) {
+                screen.setSummary(secondaryMode.getEntries()[index]);
+            }
+        }
+
+        /** Everything the search screen holds besides the mode itself. */
         private static final String[] SEARCH_DEPENDENTS = {
-                "subtitleTranslateOn", "subtitleSearchLanguage",
-                "subtitleSourceOpenSubtitles", "subtitleSourceRest",
-                "subtitleSourceStremio", "subtitleSourceShegu"
+                "subtitleTranslateOn", "subtitleTranslateBackends", "subtitleSearchLanguage",
+                "subtitleSourceRest", "subtitleSourceStremio", "subtitleSourceShegu",
+                "subtitleSourceOpenSubtitles",
         };
 
-        private void applySecondaryMode(ListPreference secondaryMode, String mode) {
-            boolean enabled = SubtitleSettingsPolicy.secondaryLanguagesEnabled(mode);
-            for (String key : SECONDARY_DEPENDENTS) {
-                Preference dependent = findPreference(key);
-                if (dependent != null) dependent.setEnabled(enabled);
+        /**
+         * Reflects the chosen mode: the row that leads here reports it, and with no search running the
+         * rows that configure one are greyed out rather than left live and inert. This is by hand
+         * because app:dependency watches a parent's enablement, not its value.
+         */
+        private void applySearchMode(final ListPreference searchMode, final String mode,
+                                     final SwitchPreferenceCompat translate) {
+            final boolean searching = !Prefs.SEARCH_OFF.equals(mode);
+            for (final String key : SEARCH_DEPENDENTS) {
+                final Preference dependent = findPreference(key);
+                if (dependent != null) {
+                    dependent.setEnabled(searching);
+                }
             }
-            updateParentSummary("subtitleSecondaryScreen", secondaryMode, mode);
-        }
-
-        private void applySearchMode(ListPreference searchMode, String mode,
-                                     SwitchPreferenceCompat translate) {
-            boolean searching = SubtitleSettingsPolicy.translationEnabled(mode);
-            for (String key : SEARCH_DEPENDENTS) {
-                Preference dependent = findPreference(key);
-                if (dependent != null) dependent.setEnabled(searching);
-            }
+            // The endpoint list answers to both: no search means no translation either, and the list is
+            // meaningless while translation itself is off.
             enableTranslateBackends(searching, translate == null || translate.isChecked());
-            updateParentSummary("subtitleSearchScreen", searchMode, mode);
-        }
-
-        private void enableTranslateBackends(boolean searching, boolean translating) {
-            Preference backends = findPreference("subtitleTranslateBackends");
-            if (backends != null) backends.setEnabled(searching && translating);
-        }
-
-        private void updateSubtitleParentSummaries() {
-            ListPreference secondary = findPreference("subtitleSecondaryMode");
-            if (secondary != null) {
-                updateParentSummary("subtitleSecondaryScreen", secondary, secondary.getValue());
-            }
-            ListPreference search = findPreference("subtitleSearchMode");
-            if (search != null) {
-                updateParentSummary("subtitleSearchScreen", search, search.getValue());
+            // Null while the fragment is rooted at the search screen: the row lives one level up.
+            final Preference screen = findPreference("subtitleSearchScreen");
+            final int index = searchMode.findIndexOfValue(mode);
+            if (screen != null && index >= 0) {
+                screen.setSummary(searchMode.getEntries()[index]);
             }
         }
 
-        private void updateParentSummary(String parentKey, ListPreference mode,
-                                         String value) {
-            Preference parent = findPreference(parentKey);
-            int index = mode.findIndexOfValue(value);
-            if (parent != null && index >= 0 && mode.getEntries() != null
-                    && index < mode.getEntries().length) {
-                parent.setSummary(mode.getEntries()[index]);
+        /**
+         * The endpoint list is live only while a search runs and translation is on. By hand rather than
+         * app:dependency, which answers to one parent and this answers to two.
+         */
+        private void enableTranslateBackends(final boolean searching, final boolean translating) {
+            final Preference backends = findPreference("subtitleTranslateBackends");
+            if (backends != null) {
+                backends.setEnabled(searching && translating);
             }
         }
 
-        private void updateLanguageSummary(Preference preference,
-                                           LinkedHashMap<String, String> languages,
-                                           String stored, int emptyRes) {
-            List<String> selected = Utils.splitLanguages(stored);
-            if (selected.isEmpty()) {
+        private void updateLanguageSummary(final Preference preference,
+                                           final LinkedHashMap<String, String> languages,
+                                           final String stored, final int emptyRes) {
+            final List<String> chosen = Utils.splitLanguages(stored);
+            if (chosen.isEmpty()) {
                 preference.setSummary(emptyRes);
                 return;
             }
-            List<String> labels = new ArrayList<>();
-            for (String code : selected) {
-                String label = languages.get(code);
-                labels.add(label == null ? code : label);
+            final List<String> labels = new ArrayList<>();
+            for (final String code : chosen) {
+                final String label = languages.get(code);
+                labels.add(label != null ? label : code);
             }
             preference.setSummary(TextUtils.join(", ", labels));
         }
 
-        private boolean validAddress(final String value, final String... schemes) {
-            if (value.isEmpty()) {
-                return true;
-            }
-            try {
-                final Uri uri = Uri.parse(value);
-                if (TextUtils.isEmpty(uri.getHost())) {
-                    return false;
-                }
-                for (String scheme : schemes) {
-                    if (scheme.equalsIgnoreCase(uri.getScheme())) {
-                        return true;
-                    }
-                }
-            } catch (RuntimeException ignored) {
-                // The preference stays unchanged when parsing fails.
-            }
-            return false;
-        }
-
-        private void showAddressError(final String schemes) {
-            Toast.makeText(requireContext(),
-                    getString(R.string.pref_together_address_invalid, schemes),
-                    Toast.LENGTH_SHORT).show();
-        }
-
+        /** Offered at the top of the picker: what the device speaks, and what the open media carries. */
         private List<String> pinnedLanguages() {
-            List<String> pinned = new ArrayList<>(Arrays.asList(Utils.getDeviceLanguages()));
-            String[] media = requireActivity().getIntent()
+            final List<String> pinned = new ArrayList<>(Arrays.asList(Utils.getDeviceLanguages()));
+            final String[] media = requireActivity().getIntent()
                     .getStringArrayExtra(EXTRA_MEDIA_LANGUAGES);
             if (media != null) {
-                for (String value : media) {
-                    String language = AudioLanguagePriority.normalize(value);
-                    if (language != null && !pinned.contains(language)) pinned.add(language);
+                for (final String language : media) {
+                    if (!pinned.contains(language)) {
+                        pinned.add(language);
+                    }
                 }
             }
             return pinned;
         }
 
-    }
+        }
 }

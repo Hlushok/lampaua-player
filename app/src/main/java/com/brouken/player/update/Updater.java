@@ -2,11 +2,9 @@ package com.brouken.player.update;
 
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.net.Uri;
 
 import androidx.core.content.FileProvider;
-import android.preference.PreferenceManager;
 
 import com.brouken.player.BuildConfig;
 
@@ -27,13 +25,13 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 
 /**
- * In-app self-updater. Checks the fork's GitHub releases, downloads the universal APK and hands it
- * to the system installer. Mirrors the network/threading style of {@code skip/SegmentFinder}: a
+ * In-app self-updater. Checks UA Player releases, downloads the universal APK and hands it
+ * to the system installer. It uses the same network/threading style as the playback services: a
  * static {@link OkHttpClient}, work on interruptible daemon threads, {@code org.json} parsing, and
- * silent failure (any error/timeout yields "no update" вЂ” playback is never affected).
+ * silent failure (any error/timeout yields "no update" — playback is never affected).
  *
- * <p>Version comparison is by numeric {@code versionCode} (same formula the build uses:
- * {@code major*1_000_000 + minor*1_000 + patch}); only a strictly higher code is offered, so
+ * <p>Version comparison uses the numeric semantic version represented by the release tag and the
+ * installed {@code versionName}; only a strictly higher version is offered, so
  * downgrades and {@code draft}/{@code prerelease} builds are never proposed.
  */
 public final class Updater {
@@ -56,12 +54,8 @@ public final class Updater {
     private Updater() {}
 
     private static final String RELEASES_URL =
-            "https://api.github.com/repos/Hlushok/lampaua-player/releases/latest";
-    private static final String STATE_PREFS = "ua_player_update_state";
-    private static final String LAST_CHECK = "last_check";
-    private static final String SKIPPED_CODE = "skipped_code";
-    private static final String PENDING = "pending";
-    private static final long CHECK_INTERVAL_MS = TimeUnit.HOURS.toMillis(24);
+            "https://api.github.com/repos/Hlushok/lampaua-player/releases";
+    private static final String APK_FILE_NAME = "ua-player-update.apk";
     private static final Pattern VERSION_PATTERN = Pattern.compile("(\\d+)\\.(\\d+)\\.(\\d+)");
 
     private static final OkHttpClient CLIENT = new OkHttpClient.Builder()
@@ -84,51 +78,6 @@ public final class Updater {
         return thread;
     }
 
-    public static Thread find(Context context, boolean manual, Callback callback) {
-        Context app = context.getApplicationContext();
-        SharedPreferences state = app.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE);
-        if (BuildConfig.DEBUG) {
-            callback.onResult(null);
-            return null;
-        }
-        if (!manual && !PreferenceManager.getDefaultSharedPreferences(app)
-                .getBoolean("autoUpdate", true)) {
-            callback.onResult(pending(app));
-            return null;
-        }
-        long now = System.currentTimeMillis();
-        if (!manual && now - state.getLong(LAST_CHECK, 0) < CHECK_INTERVAL_MS) {
-            callback.onResult(pending(app));
-            return null;
-        }
-        state.edit().putLong(LAST_CHECK, now).apply();
-        return find(info -> {
-            int skipped = state.getInt(SKIPPED_CODE, 0);
-            int current = UpdatePolicy.versionCode(BuildConfig.VERSION_NAME);
-            UpdateInfo eligible = UpdatePolicy.shouldOffer(current, info, skipped, false)
-                    ? info : null;
-            if (eligible != null) {
-                state.edit().putString(PENDING, eligible.toJson()).apply();
-            } else if (info != null && info.versionCode <= current) {
-                state.edit().remove(PENDING).apply();
-            }
-            callback.onResult(eligible);
-        });
-    }
-
-    public static UpdateInfo pending(Context context) {
-        SharedPreferences state = context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE);
-        UpdateInfo info = UpdateInfo.fromJson(state.getString(PENDING, null));
-        return UpdatePolicy.shouldOffer(UpdatePolicy.versionCode(BuildConfig.VERSION_NAME), info,
-                state.getInt(SKIPPED_CODE, 0), BuildConfig.DEBUG) ? info : null;
-    }
-
-    public static void skip(Context context, UpdateInfo info) {
-        if (info == null) return;
-        context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE).edit()
-                .putInt(SKIPPED_CODE, info.versionCode).remove(PENDING).apply();
-    }
-
     /** Synchronous check (call on a background thread). Returns the newest eligible release, or {@code null}. */
     public static UpdateInfo check() {
         final String body = get(RELEASES_URL);
@@ -136,18 +85,29 @@ public final class Updater {
             return null;
         }
         try {
-            final JSONObject release = new JSONObject(body);
-            if (release.optBoolean("draft") || release.optBoolean("prerelease")) return null;
-            final String tag = release.optString("tag_name", "");
-            final int remoteCode = UpdatePolicy.versionCode(tag);
-            final JSONObject apk = firstApkAsset(release.optJSONArray("assets"));
-            if (apk == null) return null;
-            final UpdateInfo info = new UpdateInfo(
-                    remoteCode, tag, tag.startsWith("v") ? tag.substring(1) : tag,
-                    release.optString("body", ""),
-                    apk.optString("browser_download_url", ""), apk.optLong("size", 0));
-            if (UpdatePolicy.shouldOffer(UpdatePolicy.versionCode(BuildConfig.VERSION_NAME),
-                    info, 0, false)) return info;
+            final JSONArray releases = new JSONArray(body);
+            for (int i = 0; i < releases.length(); i++) {
+                final JSONObject release = releases.optJSONObject(i);
+                if (release == null || release.optBoolean("draft") || release.optBoolean("prerelease")) {
+                    continue;
+                }
+                final String tag = release.optString("tag_name", "");
+                final int remoteCode = parseVersionCode(tag);
+                if (remoteCode <= parseVersionCode(BuildConfig.VERSION_NAME)) {
+                    continue;
+                }
+                final JSONObject apk = firstApkAsset(release.optJSONArray("assets"));
+                if (apk == null) {
+                    continue;
+                }
+                return new UpdateInfo(
+                        remoteCode,
+                        tag,
+                        tag.startsWith("v") ? tag.substring(1) : tag,
+                        release.optString("body", ""),
+                        apk.optString("browser_download_url", ""),
+                        apk.optLong("size", 0));
+            }
         } catch (Exception e) {
             return null;
         }
@@ -165,7 +125,7 @@ public final class Updater {
             }
             final String name = asset.optString("name", "").toLowerCase(Locale.ROOT);
             final String url = asset.optString("browser_download_url", "");
-            if (name.endsWith(".apk") && name.contains("player") && name.contains("ua")
+            if (name.endsWith(".apk") && name.contains("ua") && name.contains("player")
                     && !name.contains("legacy") && url.startsWith("https://")) {
                 return asset;
             }
@@ -175,7 +135,20 @@ public final class Updater {
 
     /** Parses {@code major*1_000_000 + minor*1_000 + patch} out of a tag like {@code v1.2.3}. Returns 0 if unparseable. */
     static int parseVersionCode(String tag) {
-        return UpdatePolicy.versionCode(tag);
+        if (tag == null) {
+            return 0;
+        }
+        final Matcher matcher = VERSION_PATTERN.matcher(tag);
+        if (!matcher.find()) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(matcher.group(1)) * 1_000_000
+                    + Integer.parseInt(matcher.group(2)) * 1_000
+                    + Integer.parseInt(matcher.group(3));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     // ---- Download ------------------------------------------------------------------------------
@@ -196,13 +169,11 @@ public final class Updater {
 
     /** Downloads the APK into the external files dir. Call on a background thread. Returns the file or {@code null}. */
     public static File downloadApk(Context context, UpdateInfo info, ProgressListener listener) {
-        final File file = new File(context.getCacheDir(),
-                "ua-player-" + info.versionName.replaceAll("[^0-9A-Za-z._-]", "_") + ".apk");
+        final File file = new File(context.getExternalFilesDir(null), APK_FILE_NAME);
         if (file.exists()) {
             file.delete();
         }
         final Request request = new Request.Builder().url(info.apkUrl).build();
-        boolean complete = false;
         try (Response response = CLIENT.newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 return null;
@@ -212,10 +183,10 @@ public final class Updater {
                 return null;
             }
             final long total = responseBody.contentLength();
-            long downloaded = 0;
             try (InputStream in = responseBody.byteStream();
                  FileOutputStream out = new FileOutputStream(file)) {
                 final byte[] buffer = new byte[64 * 1024];
+                long downloaded = 0;
                 int lastPercent = -1;
                 int read;
                 while ((read = in.read(buffer)) != -1) {
@@ -234,13 +205,9 @@ public final class Updater {
                 }
                 out.flush();
             }
-            if (downloaded <= 0 || (total > 0 && downloaded != total)) return null;
-            complete = true;
             return file;
         } catch (Exception e) {
             return null;
-        } finally {
-            if (!complete && file.exists()) file.delete();
         }
     }
 
@@ -272,7 +239,7 @@ public final class Updater {
             final ResponseBody body = response.body();
             return body != null ? body.string() : null;
         } catch (Exception e) {
-            // Timeout / offline / rate-limited вЂ” silently yield nothing.
+            // Timeout / offline / rate-limited — silently yield nothing.
             return null;
         }
     }

@@ -8,12 +8,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Minimal EBML/Matroska parser that walks {@code Segment в†’ Tracks в†’ TrackEntry} to recover each
- * track's number, {@code Name}, {@code Language} and type. Reads a forward-only stream fed by the
- * player's own reads.
+ * Minimal EBML/Matroska parser that walks {@code Segment → Tracks → TrackEntry} to recover each
+ * track's number, {@code Name}, {@code Language}, type and frame rate ({@code DefaultDuration}).
+ * Reads a forward-only stream fed by the player's own reads.
  */
 final class MatroskaMetadataReader {
-    private static final int MAX_STRING_BYTES = 64 * 1024;
 
     private MatroskaMetadataReader() {}
 
@@ -45,6 +44,8 @@ final class MatroskaMetadataReader {
     }
 
     private static void parseSegment(EbmlReader reader, List<TrackMetadata> tracks) {
+        // No cap of its own: the caller hands over a bounded header, and readId consumes at least one byte
+        // per turn, so running out of it is what ends this loop.
         try {
             while (true) {
                 final long id = reader.readId();
@@ -67,8 +68,13 @@ final class MatroskaMetadataReader {
                 final long id = reader.readId();
                 final long s = reader.readSize();
                 if (id == 0xAEL) { // TrackEntry
-                    TrackMetadata entry = parseTrackEntry(reader, s);
+                    final TrackMetadata entry = parseTrackEntry(reader, s);
                     if (entry == null) {
+                        // Cut short inside an entry. Publishing the ones before it would answer the
+                        // caller for good — isMetadataParsed() goes by whether anything was returned —
+                        // so a video entry missing its DefaultDuration would read as "this file states
+                        // no frame rate" for the rest of the session. Say nothing and let a later read
+                        // try again.
                         out.clear();
                         return;
                     }
@@ -83,6 +89,7 @@ final class MatroskaMetadataReader {
         }
     }
 
+    /** The entry, or null if the stream ended inside it. */
     private static TrackMetadata parseTrackEntry(EbmlReader reader, long size) {
         int number = 0;
         String name = null;
@@ -105,8 +112,10 @@ final class MatroskaMetadataReader {
                 } else if (id == 0x22B59CL) { // Language
                     lang = reader.readString(s);
                 } else if (id == 0x23E383L) { // DefaultDuration, nanoseconds per frame
-                    long durationNs = reader.readUInt(s);
-                    if (durationNs > 0) frameRate = 1_000_000_000f / durationNs;
+                    final long durationNs = reader.readUInt(s);
+                    if (durationNs > 0) {
+                        frameRate = 1_000_000_000f / durationNs;
+                    }
                 } else if (id == 0x83L) { // TrackType
                     final int mkvType = (int) reader.readUInt(s);
                     switch (mkvType) {
@@ -124,6 +133,9 @@ final class MatroskaMetadataReader {
         }
         return new TrackMetadata(number, name, lang, type, frameRate);
     }
+
+    /** Ceiling for a string element, so a corrupt size cannot turn into a huge allocation. */
+    private static final int MAX_STRING_BYTES = 64 * 1024;
 
     private static final class EbmlReader {
         private final InputStream input;
@@ -158,6 +170,11 @@ final class MatroskaMetadataReader {
             return value;
         }
 
+        /**
+         * An element ID as it is written on disk, marker bits included — that is how the spec quotes
+         * them (and how the constants above read). Sizes drop the marker; IDs must not, or nothing
+         * ever matches.
+         */
         long readId() throws IOException {
             final int first = readByte();
             if (first == -1) throw new EOFException();
@@ -168,11 +185,11 @@ final class MatroskaMetadataReader {
                 length++;
                 if (length > 4) throw new IOException("Invalid EBML id");
             }
-            long value = first & 0xffL;
+            long value = first & 0xFFL;
             for (int i = 1; i < length; i++) {
                 final int b = readByte();
                 if (b == -1) throw new EOFException();
-                value = (value << 8) | (b & 0xffL);
+                value = (value << 8) | (b & 0xFFL);
             }
             return value;
         }
@@ -198,14 +215,18 @@ final class MatroskaMetadataReader {
             totalBytesRead += skipped;
         }
 
+        /**
+         * Throws rather than return a value cut short — as does {@link #readUInt}. Truncating in silence
+         * published a first-byte-only DefaultDuration as half a billion frames per second.
+         */
         String readString(long size) throws IOException {
-            if (size < 0 || size > MAX_STRING_BYTES) {
-                throw new IOException("Invalid EBML string size");
-            }
+            // A name or a language code is short; anything this long is a corrupt size vint, and
+            // allocating on its word would be an OutOfMemoryError on the player's load thread.
+            if (size < 0 || size > MAX_STRING_BYTES) throw new IOException("Bad string size " + size);
             final byte[] bytes = new byte[(int) size];
             int read = 0;
             while (read < size) {
-                final int r = input.read(bytes, read, (int) size - read);
+                final int r = input.read(bytes, read, (int) (size - read));
                 if (r == -1) break;
                 read += r;
             }
@@ -215,7 +236,6 @@ final class MatroskaMetadataReader {
         }
 
         long readUInt(long size) throws IOException {
-            if (size < 0 || size > 8) throw new IOException("Invalid EBML integer size");
             long value = 0L;
             for (int i = 0; i < size; i++) {
                 final int b = readByte();

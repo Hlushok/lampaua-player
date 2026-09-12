@@ -2,7 +2,6 @@ package com.brouken.player;
 
 import android.animation.ValueAnimator;
 import android.content.Context;
-import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.text.TextUtils;
 import android.view.Gravity;
@@ -11,102 +10,151 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
 
-final class SwipeToUnlockView extends FrameLayout {
-    private final ImageView icon;
-    private final TextView text;
+import androidx.core.content.ContextCompat;
+
+// Swipe-to-unlock bar shown while the screen is locked, ported from VLC's SwipeToUnlockView. A lock icon
+// pinned to the left is dragged to the right edge to unlock. Touch only (the lock feature is not offered on
+// TV). It is the only affordance for leaving the locked state.
+public class SwipeToUnlockView extends FrameLayout {
+
+    private static final long ANIMATE_BACK_MS = 250;
+
+    private final ImageView swipeIcon;
+    private final TextView swipeText;
+
+    private boolean unlocking;
+
+    // Callbacks: fired while dragging starts/stops (to hold/release the overlay auto-hide) and on unlock.
     private Runnable onStartTouching;
     private Runnable onStopTouching;
     private Runnable onUnlock;
-    private boolean unlocking;
 
-    SwipeToUnlockView(Context context) {
+    public SwipeToUnlockView(Context context) {
         super(context);
-        GradientDrawable background = new GradientDrawable();
-        background.setColor(Color.argb(235, 4, 18, 40));
-        background.setStroke(Utils.dpToPx(1), Color.rgb(240, 183, 38));
-        background.setCornerRadius(Utils.dpToPx(24));
-        setBackground(background);
-        setPadding(Utils.dpToPx(10), Utils.dpToPx(8), Utils.dpToPx(10), Utils.dpToPx(8));
 
-        int iconSize = Utils.dpToPx(28);
-        text = new TextView(context);
-        text.setText(R.string.swipe_unlock);
-        text.setTextColor(Color.WHITE);
-        text.setTextSize(13);
-        text.setSingleLine(true);
-        text.setEllipsize(TextUtils.TruncateAt.END);
-        text.setGravity(Gravity.CENTER);
-        LayoutParams textParams = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
-        textParams.gravity = Gravity.CENTER;
-        textParams.leftMargin = textParams.rightMargin = iconSize + Utils.dpToPx(6);
-        addView(text, textParams);
+        final GradientDrawable pill = new GradientDrawable();
+        pill.setColor(ContextCompat.getColor(context, R.color.ui_controls_background));
+        pill.setCornerRadius(Utils.dpToPx(24));
+        setBackground(pill);
+        setClipToOutline(true);
+        final int padH = Utils.dpToPx(10);
+        final int padV = Utils.dpToPx(8);
+        setPadding(padH, padV, padH, padV);
 
-        icon = new ImageView(context);
-        icon.setImageResource(R.drawable.ic_lock_24dp);
-        icon.setColorFilter(Color.WHITE);
-        LayoutParams iconParams = new LayoutParams(iconSize, iconSize);
-        iconParams.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
-        addView(icon, iconParams);
+        final int iconSize = Utils.dpToPx(28);
+
+        // Single line, centered, and inset on both sides so it clears the resting icon and never wraps.
+        swipeText = new TextView(context);
+        swipeText.setTextColor(0xFFFFFFFF);
+        swipeText.setTextSize(13);
+        swipeText.setSingleLine(true);
+        swipeText.setMaxLines(1);
+        swipeText.setEllipsize(TextUtils.TruncateAt.END);
+        swipeText.setGravity(Gravity.CENTER);
+        swipeText.setText(R.string.swipe_unlock);
+        final int textInset = iconSize + Utils.dpToPx(6);
+        final LayoutParams textLp = new LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+        textLp.gravity = Gravity.CENTER;
+        textLp.leftMargin = textInset;
+        textLp.rightMargin = textInset;
+        addView(swipeText, textLp);
+
+        swipeIcon = new ImageView(context);
+        swipeIcon.setImageResource(R.drawable.ic_lock_24dp);
+        swipeIcon.setImageTintList(ContextCompat.getColorStateList(context, R.color.control_icon_tint));
+        final LayoutParams iconLp = new LayoutParams(iconSize, iconSize);
+        iconLp.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
+        addView(swipeIcon, iconLp);
     }
 
-    void setOnUnlockListener(Runnable listener) {
-        onUnlock = listener;
+    public void setOnStartTouchingListener(Runnable r) {
+        onStartTouching = r;
     }
 
-    void setOnStartTouchingListener(Runnable listener) {
-        onStartTouching = listener;
+    public void setOnStopTouchingListener(Runnable r) {
+        onStopTouching = r;
     }
 
-    void setOnStopTouchingListener(Runnable listener) {
-        onStopTouching = listener;
+    public void setOnUnlockListener(Runnable r) {
+        onUnlock = r;
     }
 
-    private float maxTranslation() {
-        return Math.max(0, getWidth() - getPaddingLeft() - getPaddingRight() - icon.getWidth());
+    // Distance the icon can travel from its left resting spot to the right inner edge.
+    private float getMaxTranslation() {
+        final float span = getWidth() - getPaddingLeft() - getPaddingRight() - swipeIcon.getWidth();
+        return span > 0 ? span : 0;
     }
 
-    private void render(float translation) {
-        icon.setTranslationX(translation);
-        float max = maxTranslation();
-        text.setAlpha(max > 0 ? 1f - translation / max : 1f);
+    private void playStep(float tx) {
+        final float max = getMaxTranslation();
+        swipeIcon.setTranslationX(tx);
+        swipeText.setAlpha(max > 0 ? 1f - tx / max : 1f);
     }
 
-    @Override public boolean onTouchEvent(MotionEvent event) {
-        if (unlocking) return true;
-        float max = maxTranslation();
-        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
-            if (onStartTouching != null) onStartTouching.run();
-            return true;
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (unlocking) {
+            return false;
         }
-        if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
-            float translation = Math.max(0, Math.min(max,
-                    event.getX() - getPaddingLeft() - icon.getWidth() / 2f));
-            if (max > 0 && translation >= max - Utils.dpToPx(2)) {
-                unlocking = true;
-                if (onUnlock != null) onUnlock.run();
-                setVisibility(GONE);
-            } else {
-                render(translation);
+        final float max = getMaxTranslation();
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                if (onStartTouching != null) {
+                    onStartTouching.run();
+                }
+                return true;
+            case MotionEvent.ACTION_MOVE: {
+                float tx = event.getX() - getPaddingLeft() - swipeIcon.getWidth() / 2f;
+                if (tx < 0) {
+                    tx = 0;
+                } else if (tx > max) {
+                    tx = max;
+                }
+                if (max > 0 && tx >= max - Utils.dpToPx(2)) {
+                    unlock();
+                } else {
+                    playStep(tx);
+                }
+                return true;
             }
-            return true;
-        }
-        if (event.getActionMasked() == MotionEvent.ACTION_UP
-                || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
-            ValueAnimator animator = ValueAnimator.ofFloat(icon.getTranslationX(), 0f);
-            animator.setDuration(250);
-            animator.addUpdateListener(value -> render((float) value.getAnimatedValue()));
-            animator.start();
-            if (onStopTouching != null) onStopTouching.run();
-            return true;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                animateBack();
+                if (onStopTouching != null) {
+                    onStopTouching.run();
+                }
+                return true;
         }
         return super.onTouchEvent(event);
     }
 
-    @Override public void setVisibility(int visibility) {
+    private void animateBack() {
+        final float from = swipeIcon.getTranslationX();
+        if (from <= 0) {
+            playStep(0);
+            return;
+        }
+        final ValueAnimator animator = ValueAnimator.ofFloat(from, 0);
+        animator.setDuration(ANIMATE_BACK_MS);
+        animator.addUpdateListener(a -> playStep((float) a.getAnimatedValue()));
+        animator.start();
+    }
+
+    private void unlock() {
+        unlocking = true;
+        if (onUnlock != null) {
+            onUnlock.run();
+        }
+        setVisibility(GONE);
+    }
+
+    @Override
+    public void setVisibility(int visibility) {
         super.setVisibility(visibility);
         if (visibility == VISIBLE) {
             unlocking = false;
-            render(0f);
+            playStep(0);
         }
     }
 }

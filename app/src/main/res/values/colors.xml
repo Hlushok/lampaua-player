@@ -2,15 +2,35 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    <color name="green">#3DDC84</color>
     <color name="ua_navy">#FF041228</color>
-    <color name="ua_blue">#FF0A274C</color>
+    <color name="ua_blue">#FF0A74E8</color>
     <color name="ua_gold">#FFF0B726</color>
     <color name="ua_secondary">#FF91B2DB</color>
+    <color name="brand">@color/ua_gold</color>
+    <color name="brand_ramp_start">@color/ua_blue</color>
+    <color name="brand_ramp_end">@color/ua_gold</color>
     <color name="shortcut_background">#F5F5F5</color>
 
-    <color name="controls_scrim">#66041228</color>
-    <color name="ui_controls_background">#98000000</color>
+    <!-- Error screen (ErrorActivity): a calm dark surface, not an alarming full-red state. -->
+    <color name="error_surface">@color/ua_navy</color>
+    <color name="error_stroke">#26FFFFFF</color>
+    <color name="error_ink_muted">#FFC4C4CE</color>
+    <color name="brand_halo">#330A74E8</color>
+
+    <!-- Full-frame dim behind the controls; fades with the controller via @id/exo_controls_background. -->
+    <color name="controls_scrim">#66000000</color>
+
+    <!-- Progress bar: the played run and its scrubber, over a solid dark rail ahead of the playhead
+         (not a wash of the frame behind it). The played colour is the midpoint of the Play hero's ramp
+         (brand_ramp_start..end), so the bar reads as the same tone as the button it sits under. -->
+    <color name="timebar_played">@color/ua_gold</color>
+    <color name="timebar_track">#FF38393C</color>
+
+    <!-- Volume/brightness OSD bar (LevelBar); the boost segment is everything above 100%. -->
+    <color name="level_bar_track">#4DFFFFFF</color>
+    <color name="volume_boost">#FFF57C00</color>
+
+    <color name="ui_controls_background">#C0041228</color>
     <color name="exo_bottom_bar_background" tools:keep="@color/exo_bottom_bar_background">@color/ui_controls_background</color>
     <color name="exo_black_opacity_70" tools:keep="@color/exo_black_opacity_70">@color/ui_controls_background</color>
     <color name="exo_styled_error_message_background" tools:keep="@color/exo_styled_error_message_background">@color/ui_controls_background</color>

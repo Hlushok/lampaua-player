@@ -9,7 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Hand-written MP4/ISO-BMFF box parser that walks {@code moov в†’ trak в†’ tkhd / mdia(mdhd,hdlr) / udta(name)}
+ * Hand-written MP4/ISO-BMFF box parser that walks {@code moov → trak → tkhd / mdia(mdhd,hdlr) / udta(name)}
  * to recover each track's id, container name, language and type.
  *
  * <p>The input is a sequential, non-seekable stream (fed from the player's own reads), so this only
@@ -17,9 +17,11 @@ import java.util.List;
  * {@code moov} sits at the end of the file, out of reach here, and parsing bails.
  */
 final class Mp4MetadataReader {
-    private static final int MAX_NAME_BYTES = 64 * 1024;
 
     private Mp4MetadataReader() {}
+
+    /** Ceiling for a track name, so a corrupt box size cannot turn into a huge allocation. */
+    private static final int MAX_NAME_BYTES = 64 * 1024;
 
     static List<TrackMetadata> parse(InputStream inputStream) {
         final List<TrackMetadata> tracks = new ArrayList<>();
@@ -36,13 +38,12 @@ final class Mp4MetadataReader {
                 } else {
                     bodySize = size - 8;
                 }
-                if (bodySize < 0) break;
 
                 if ("moov".equals(type)) {
                     parseMoov(stream, bodySize, tracks);
                     break;
                 } else if ("mdat".equals(type)) {
-                    // moov lives after mdat (not faststart) вЂ” unreachable from a forward-only stream.
+                    // moov lives after mdat (not faststart) — unreachable from a forward-only stream.
                     break;
                 } else {
                     if (bodySize > 0 && bodySize != Long.MAX_VALUE) {
@@ -53,9 +54,9 @@ final class Mp4MetadataReader {
                 }
             }
         } catch (EOFException e) {
-            // Stream ended (or the tap was cut off) before moov was fully read вЂ” return what we have.
+            // The header ended before moov was fully read — return what we have.
         } catch (IOException e) {
-            // The bounded header ended before the full box was available.
+            // Malformed box layout — return what we have.
         }
         return tracks;
     }
@@ -68,7 +69,7 @@ final class Mp4MetadataReader {
             final long bodySize = boxSize == 1L ? stream.readLong() - 16 : boxSize - 8;
             final long actualBoxSize = boxSize == 1L ? bodySize + 16 : boxSize;
 
-            if (bodySize < 0 || actualBoxSize > remaining) break;
+            if (actualBoxSize > remaining) break;
 
             if ("trak".equals(type)) {
                 final TrackMetadata track = parseTrak(stream, bodySize);
@@ -93,7 +94,7 @@ final class Mp4MetadataReader {
             final long bodySize = boxSize == 1L ? stream.readLong() - 16 : boxSize - 8;
             final long actualBoxSize = boxSize == 1L ? bodySize + 16 : boxSize;
 
-            if (bodySize < 0 || actualBoxSize > remaining) break;
+            if (actualBoxSize > remaining) break;
 
             switch (typeStr) {
                 case "tkhd":
@@ -116,8 +117,8 @@ final class Mp4MetadataReader {
             }
             remaining -= actualBoxSize;
         }
-        return trackId != -1 ? new TrackMetadata(
-                trackId, trackName, language, type, 0f) : null;
+        // No frame rate: Media3 already fills it in from MP4 (stts), so there is nothing to recover.
+        return trackId != -1 ? new TrackMetadata(trackId, trackName, language, type, 0f) : null;
     }
 
     private static TrackMetadata.Type handlerToType(String hdlrType) {
@@ -154,7 +155,7 @@ final class Mp4MetadataReader {
             final long bodySize = boxSize == 1L ? stream.readLong() - 16 : boxSize - 8;
             final long actualBoxSize = boxSize == 1L ? bodySize + 16 : boxSize;
 
-            if (bodySize < 0 || actualBoxSize > remaining) break;
+            if (actualBoxSize > remaining) break;
 
             switch (type) {
                 case "mdhd":
@@ -210,14 +211,12 @@ final class Mp4MetadataReader {
             final long bodySize = boxSize == 1L ? stream.readLong() - 16 : boxSize - 8;
             final long actualBoxSize = boxSize == 1L ? bodySize + 16 : boxSize;
 
-            if (bodySize < 0 || actualBoxSize > remaining) break;
+            if (actualBoxSize > remaining) break;
 
             if ("name".equals(type)) {
-                if (bodySize > MAX_NAME_BYTES) {
-                    skipFully(stream, bodySize);
-                    remaining -= actualBoxSize;
-                    continue;
-                }
+                // A track name is short; a larger size is a corrupt box, and allocating on its word
+                // would be an OutOfMemoryError on the player's load thread.
+                if (bodySize < 0 || bodySize > MAX_NAME_BYTES) throw new IOException("Bad name size " + bodySize);
                 final byte[] buffer = new byte[(int) bodySize];
                 stream.readFully(buffer);
 
@@ -259,14 +258,13 @@ final class Mp4MetadataReader {
 
     /** Skips exactly {@code n} bytes, blocking until they are available or throwing on EOF. */
     private static void skipFully(DataInputStream stream, long n) throws IOException {
-        if (n < 0) throw new IOException("Negative MP4 box size");
         long remaining = n;
         while (remaining > 0) {
             final long skipped = stream.skip(remaining);
             if (skipped > 0) {
                 remaining -= skipped;
             } else {
-                // skip() made no progress, so force the bounded stream forward by one byte.
+                // skip() made no progress — read a byte to move on.
                 if (stream.read() < 0) throw new EOFException();
                 remaining--;
             }

@@ -2,7 +2,6 @@ package com.brouken.player;
 
 import android.content.Context;
 import android.graphics.Canvas;
-import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.util.AttributeSet;
@@ -23,10 +22,13 @@ class CustomDefaultTimeBar extends DefaultTimeBar {
     private boolean scrubbingNow;
     private int playheadLeft;
     private int playheadRight;
-    private final Paint skipSegmentPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    private final Paint skipPaint = new Paint();
+    private long[] skipStartsMs;
+    private long[] skipEndsMs;
+    private int[] skipColors;
+    private int[] skipFillColors;
     private long skipDurationMs;
-    private long[] skipStartsMs = new long[0];
-    private long[] skipEndsMs = new long[0];
 
     public CustomDefaultTimeBar(Context context) {
         this(context, null);
@@ -56,78 +58,128 @@ class CustomDefaultTimeBar extends DefaultTimeBar {
         } catch (NoSuchFieldException | IllegalAccessException e) {
             e.printStackTrace();
         }
-        skipSegmentPaint.setColor(Color.rgb(30, 142, 214));
+        // The scrubber grows while the bar is being dragged (DefaultTimeBar.drawPlayhead), and the base
+        // class keeps that flag private — this listener spans exactly the same window.
         addListener(new OnScrubListener() {
-            @Override public void onScrubStart(TimeBar timeBar, long position) {
+            @Override
+            public void onScrubStart(TimeBar timeBar, long position) {
                 scrubbingNow = true;
             }
 
-            @Override public void onScrubMove(TimeBar timeBar, long position) { }
+            @Override
+            public void onScrubMove(TimeBar timeBar, long position) {
+            }
 
-            @Override public void onScrubStop(TimeBar timeBar, long position, boolean canceled) {
+            @Override
+            public void onScrubStop(TimeBar timeBar, long position, boolean canceled) {
                 scrubbingNow = false;
             }
         });
     }
 
-    void setSkipSegments(long durationMs, long[] startsMs, long[] endsMs) {
-        skipDurationMs = durationMs;
-        skipStartsMs = startsMs == null ? new long[0] : startsMs.clone();
-        skipEndsMs = endsMs == null ? new long[0] : endsMs.clone();
+    /**
+     * Highlight skip/ad segment ranges on the progress bar so the user sees them in advance.
+     * Arrays are parallel: {@code edgeColors} paints the crisp boundary hairlines, {@code fillColors}
+     * the soft band across the whole segment. Both carry per-segment (translucent) ARGB.
+     */
+    void setSkipHighlights(long[] startsMs, long[] endsMs, int[] edgeColors, int[] fillColors, long durationMs) {
+        this.skipStartsMs = startsMs;
+        this.skipEndsMs = endsMs;
+        this.skipColors = edgeColors;
+        this.skipFillColors = fillColors;
+        this.skipDurationMs = durationMs;
+        invalidate();
+    }
+
+    void clearSkipHighlights() {
+        this.skipStartsMs = null;
+        this.skipEndsMs = null;
+        this.skipColors = null;
+        this.skipFillColors = null;
+        this.skipDurationMs = 0;
         invalidate();
     }
 
     @Override
     public void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        if (progressBar == null || skipDurationMs <= 0 || skipStartsMs.length == 0) return;
 
-        int count = Math.min(skipStartsMs.length, skipEndsMs.length);
-        float width = progressBar.width();
-        int minimumWidth = Utils.dpToPx(3);
-        if (scrubberBar == null) {
-            playheadLeft = playheadRight = 0;
-        } else {
-            int radius = playheadRadius();
-            int playheadX = Math.min(Math.max(scrubberBar.right, progressBar.left),
-                    progressBar.right);
+        if (skipStartsMs == null || skipDurationMs <= 0 || progressBar == null) {
+            return;
+        }
+        final int barLeft = progressBar.left;
+        final int barWidth = progressBar.width();
+        if (barWidth <= 0) {
+            return;
+        }
+        // Media3 paints the playhead inside super.onDraw above, so everything below lands on top of it —
+        // and the fill is opaque, which swallowed the coral dot whole while it sat inside a segment. Keep
+        // the dot's own patch clear instead, so it stays the frontmost mark on the bar: it is what the
+        // viewer is tracking. Bounds as in DefaultTimeBar.drawPlayhead.
+        if (scrubberBar != null) {
+            final int radius = playheadRadius();
+            final int playheadX = Math.min(Math.max(scrubberBar.right, scrubberBar.left), progressBar.right);
             playheadLeft = playheadX - radius;
             playheadRight = playheadX + radius;
+        } else {
+            playheadLeft = 0;
+            playheadRight = 0;
         }
-        for (int index = 0; index < count; index++) {
-            long start = Math.max(0, Math.min(skipDurationMs, skipStartsMs[index]));
-            long end = Math.max(start, Math.min(skipDurationMs, skipEndsMs[index]));
-            if (end <= start) continue;
-            int left = Math.round(progressBar.left + width * start / skipDurationMs);
-            int right = Math.round(progressBar.left + width * end / skipDurationMs);
-            if (right - left < minimumWidth) right = Math.min(progressBar.right, left + minimumWidth);
-            drawBand(canvas, left, right);
+        // Each segment gets a soft fill band across its whole width, plus ~1.5dp crisp hairlines on the
+        // boundaries (chapter-divider style). The band demarcates the region while the edges frame it,
+        // both staying lighter in weight than the coral scrubber.
+        final int hairWidth = Math.max(2, Utils.dpToPx(3) / 2);
+        for (int i = 0; i < skipStartsMs.length; i++) {
+            float startFraction = clamp((float) skipStartsMs[i] / skipDurationMs);
+            float endFraction = clamp((float) skipEndsMs[i] / skipDurationMs);
+            int left = barLeft + Math.round(barWidth * startFraction);
+            int right = barLeft + Math.round(barWidth * endFraction);
+            if (right < left) {
+                right = left;
+            }
+            if (skipFillColors != null && right > left) {
+                skipPaint.setColor(skipFillColors[i]);
+                drawBand(canvas, left, right);
+            }
+            skipPaint.setColor(skipColors[i]);
+            drawBand(canvas, left, left + hairWidth);
+            // Second hairline at the segment end, only when there's room for it to read as a separate edge.
+            if (right - left > hairWidth * 2) {
+                drawBand(canvas, right - hairWidth, right);
+            }
         }
     }
 
+    /** Paints a bar-height band, leaving the playhead's patch clear so the scrubber stays in front of it. */
     private void drawBand(Canvas canvas, int left, int right) {
-        if (right <= left) return;
-        float top = progressBar.centerY() - Math.max(Utils.dpToPx(2), progressBar.height() / 2f);
-        float bottom = progressBar.centerY() + Math.max(Utils.dpToPx(2), progressBar.height() / 2f);
+        if (right <= left) {
+            return;
+        }
         if (right > playheadLeft && left < playheadRight) {
             if (left < playheadLeft) {
-                canvas.drawRect(left, top, playheadLeft, bottom, skipSegmentPaint);
+                canvas.drawRect(left, progressBar.top, playheadLeft, progressBar.bottom, skipPaint);
             }
             if (right > playheadRight) {
-                canvas.drawRect(playheadRight, top, right, bottom, skipSegmentPaint);
+                canvas.drawRect(playheadRight, progressBar.top, right, progressBar.bottom, skipPaint);
             }
             return;
         }
-        canvas.drawRect(left, top, right, bottom, skipSegmentPaint);
+        canvas.drawRect(left, progressBar.top, right, progressBar.bottom, skipPaint);
     }
 
+    /** The radius Media3 is currently drawing the scrubber with — same rule as DefaultTimeBar.drawPlayhead. */
     private int playheadRadius() {
         if (scrubbingNow || isFocused()) {
-            return getResources().getDimensionPixelSize(
-                    R.dimen.exo_styled_progress_dragged_thumb_size) / 2;
+            return getResources().getDimensionPixelSize(R.dimen.exo_styled_progress_dragged_thumb_size) / 2;
         }
-        return isEnabled() ? getResources().getDimensionPixelSize(
-                R.dimen.exo_styled_progress_enabled_thumb_size) / 2 : 0;
+        // Disabled (an unseekable stream): the base class draws no dot, so nothing has to be kept clear.
+        return isEnabled()
+                ? getResources().getDimensionPixelSize(R.dimen.exo_styled_progress_enabled_thumb_size) / 2
+                : 0;
+    }
+
+    private static float clamp(float value) {
+        return value < 0 ? 0 : (value > 1 ? 1 : value);
     }
 
     @Override
@@ -141,12 +193,13 @@ class CustomDefaultTimeBar extends DefaultTimeBar {
             else
                 scrubbing = true;
         }
+        // The DOWN was swallowed above, so the base class is not scrubbing. Start it now, either
+        // because the finger has moved far enough to be a deliberate drag, or because the finger
+        // was lifted without moving at all — a tap, which seeks to the touched point.
         if (!scrubbing && scrubberBar != null
-                && (event.getAction() == MotionEvent.ACTION_MOVE
-                || event.getAction() == MotionEvent.ACTION_UP)) {
+                && (event.getAction() == MotionEvent.ACTION_MOVE || event.getAction() == MotionEvent.ACTION_UP)) {
             final int distanceFromStart = Math.abs(((int)event.getX()) - scrubbingStartX);
-            if (event.getAction() == MotionEvent.ACTION_MOVE
-                    && distanceFromStart <= Utils.dpToPx(6)) {
+            if (event.getAction() == MotionEvent.ACTION_MOVE && distanceFromStart <= Utils.dpToPx(6)) {
                 return true;
             }
             scrubbing = true;
@@ -155,11 +208,16 @@ class CustomDefaultTimeBar extends DefaultTimeBar {
         return super.onTouchEvent(event);
     }
 
+    /**
+     * Hands the base class the ACTION_DOWN it never received, so it positions the scrubber itself.
+     * The press is clamped onto the bar because the finger may already have left it — dragging off
+     * the bar is how fine scrubbing is started — and a press outside the bar would be ignored.
+     */
     private void startScrubbingAt(MotionEvent event) {
-        MotionEvent down = MotionEvent.obtainNoHistory(event);
+        final MotionEvent down = MotionEvent.obtainNoHistory(event);
         down.setAction(MotionEvent.ACTION_DOWN);
         if (progressBar != null) {
-            float x = Math.min(Math.max(event.getX(), progressBar.left), progressBar.right - 1);
+            final float x = Math.min(Math.max(event.getX(), progressBar.left), progressBar.right - 1);
             down.setLocation(x, progressBar.centerY());
         }
         super.onTouchEvent(down);

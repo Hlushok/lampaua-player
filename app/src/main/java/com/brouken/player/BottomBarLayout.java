@@ -5,12 +5,17 @@ import android.util.AttributeSet;
 import android.widget.FrameLayout;
 
 /**
- * Bottom control bar that travels by its actual laid-out height.
+ * The bottom control bar, with one thing added: it travels as far as it is tall.
  *
- * <p>Media3 builds its hide animation from {@code exo_styled_bottom_bar_height}. The bar is
- * later extended by the navigation-bar or TV overscan inset, so the original translation would
- * stop short and leave part of the controls over the picture. Scaling that translation keeps the
- * visible and parked endpoints exact.</p>
+ * <p>Media3 parks the bar off screen by translating it down by {@code exo_styled_bottom_bar_height} —
+ * a resource value read once and baked into PlayerControlViewLayoutManager's animators, so it never
+ * learns that the bar has since been resized. The bar is grown by the bottom inset (the navigation bar,
+ * or synthesized TV overscan) so its scrim keeps reaching the screen edge, which leaves it taller than
+ * that constant by exactly the inset: the park stopped short by the same amount and left the top of the
+ * bar — the top of the button row with it — sitting over the picture while only the seek bar was up.
+ *
+ * <p>Scaling every translation by how much taller the bar is restores the two ends the animators mean:
+ * flush at rest, fully parked when hidden, and no seam in between.
  */
 public class BottomBarLayout extends FrameLayout {
 
@@ -21,7 +26,7 @@ public class BottomBarLayout extends FrameLayout {
         super(context, attrs);
     }
 
-    /** Laid-out height divided by the resource height Media3 uses for its animation. */
+    /** Bar height as laid out, over the {@code exo_styled_bottom_bar_height} Media3 parks it by. */
     void setTravelScale(float scale) {
         if (scale != travelScale) {
             travelScale = scale;

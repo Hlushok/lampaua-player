@@ -3,7 +3,7 @@
 Open-source Android video player for Lampa and LampaUA, based on [Just Player](https://github.com/moneytoo/Player).
 
 - Android application ID: `com.lampaua.player`
-- Current version: `2.0.2` (`versionCode 22`)
+- Current version: `2.0.3` (`versionCode 23`)
 - Android 6.0+ and Android TV
 - Media3/ExoPlayer playback engine
 - Website: [hlushok.github.io/lampaua-player](https://hlushok.github.io/lampaua-player/)
@@ -134,4 +134,4 @@ This repository contains only the UA Player Android application. Lampac modules,
 
 UA Player is derived from [moneytoo/Player](https://github.com/moneytoo/Player). The project retains the upstream [Unlicense](LICENSE). Third-party AndroidX Media/decoder components keep their respective licenses.
 
-The player core is synchronized through stable Just+ `v1.4.7` after reviewing [just-plus-player/just-plus-player](https://github.com/just-plus-player/just-plus-player) by Oleksandr Zhyzhchenko. UA Player retains its own identity and LAMPA/LampaUA integration layer, and does not include Just+ branding, Sentry or remote diagnostic uploads. Anonymous room aliases are adapted from [LocalSend](https://github.com/localsend/localsend) under Apache-2.0; attribution is retained in the source.
+UA Player also acknowledges the open-source [Just+](https://github.com/just-plus-player/just-plus-player) project. UA Player retains its own identity and LAMPA/LampaUA integration layer and does not send remote diagnostic uploads. Anonymous room aliases are adapted from [LocalSend](https://github.com/localsend/localsend) under Apache-2.0; attribution is retained in the source.

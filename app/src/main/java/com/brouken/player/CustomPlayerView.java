@@ -1,23 +1,22 @@
 package com.brouken.player;
 
 import android.content.Context;
-import android.graphics.Color;
 import android.graphics.Rect;
 import android.media.AudioManager;
 import android.os.Build;
 import android.os.SystemClock;
 import android.util.AttributeSet;
 import android.view.GestureDetector;
+import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
+import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.TextView;
 
 import androidx.core.view.GestureDetectorCompat;
 import androidx.media3.common.C;
-import androidx.media3.common.Player;
-import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.SeekParameters;
 import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.PlayerView;
@@ -37,8 +36,11 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
     private long seekMax;
     private long seekLastPosition;
     public boolean seekProgress;
-    private boolean canBoostVolume = false;
+    private boolean boostAllowed = false;
     private boolean canSetAutoBrightness = false;
+    // Volume in percent (0-200, above 100 = boost) tracked as a float so the absolute gesture keeps
+    // sub-step precision between events.
+    private float gestureVolume = 0f;
 
     private final float IGNORE_BORDER = Utils.dpToPx(24);
     private final float SCROLL_STEP = Utils.dpToPx(16);
@@ -52,31 +54,45 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
     private boolean restorePlayState;
     private boolean canScale = true;
     private boolean isHandledLongPress = false;
-    private static final float SPEED_BOOST = 2f;
+    public long keySeekStart = -1;
+    public int volumeUpsInRow = 0;
+
+    private final ScaleGestureDetector mScaleDetector;
+    private float mScaleFactor = 1.f;
+    private float mScaleFactorFit;
+
+    // Hold-to-speed: a long press during playback jumps to 2x, and dragging sideways without letting go
+    // moves along one axis - right for more speed, left down to 1x and then on into rewind. The previous
+    // speed is restored on release. The drag is what the "fixed" mode drops: there the hold is a plain 2x.
+    private static final float SPEED_BOOST = 2.f;
+    private static final float SPEED_MAX = 4.f;
+    private static final float SPEED_REWIND_MIN = 2.f;
+    private static final float SPEED_STEP_DP = 40.f;
     private static final long REWIND_TICK_MS = 100;
-    private boolean speedBoostActive;
-    private float speedBeforeBoost = 1f;
+    private boolean speedBoostActive = false;
+    private float speedBeforeBoost = 1.f;
     private float boostAnchorX;
     private float holdSpeed = SPEED_BOOST;
     private boolean rewinding;
     private long rewindPosition;
     private long rewindLastTime;
     private final Runnable rewindRunnable = this::rewindTick;
-    private boolean seekGestureActive;
-    public long keySeekStart = -1;
-    public int volumeUpsInRow = 0;
 
+    /** True while the hold-to-speed-up gesture is running. A watch-together room does not follow it:
+     *  it is a preview held under a finger, not a choice, and the speed goes back on release. */
     boolean isSpeedBoosting() {
         return speedBoostActive;
     }
 
+    private boolean seekGestureActive;
+
+    /** True while a finger is dragging the picture sideways to seek. A room stops sampling for the
+     *  duration and hears only where the drag settles, exactly as it does for the time bar: this gesture
+     *  seeks once per scroll step, and each step sampled on its own reaches everybody else as a separate
+     *  command — a jump apiece, and a notice apiece, for one drag of one thumb. */
     boolean isSeekGesture() {
         return seekGestureActive;
     }
-
-    private final ScaleGestureDetector mScaleDetector;
-    private float mScaleFactor = 1.f;
-    private float mScaleFactorFit;
     Rect systemGestureExclusionRect = new Rect();
 
     public final Runnable textClearRunnable = () -> {
@@ -118,6 +134,7 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
 
     private final TextView exoErrorMessage;
     private final View exoProgress;
+    private final LevelBar levelBar;
 
     public CustomPlayerView(Context context) {
         this(context, null);
@@ -135,23 +152,14 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
 
         exoErrorMessage = findViewById(R.id.exo_error_message);
         exoProgress = findViewById(R.id.exo_progress);
+        levelBar = findViewById(R.id.level_bar);
 
         mScaleDetector = new ScaleGestureDetector(context, this);
-
-        if (!Utils.isTvBox(getContext())) {
-            exoErrorMessage.setOnClickListener(v -> {
-                if (PlayerActivity.locked) {
-                    PlayerActivity.locked = false;
-                    Utils.showText(CustomPlayerView.this, "", MESSAGE_TIMEOUT_LONG);
-                    setIconLock(false);
-                }
-            });
-        }
     }
 
     public void clearIcon() {
         exoErrorMessage.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0);
-        setHighlight(false);
+        levelBar.setVisibility(GONE);
     }
 
     @Override
@@ -176,17 +184,29 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
                 break;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
+                // Cleared before anything else can return early: a gesture flag left standing would keep
+                // a room from ever sampling this player again.
                 seekGestureActive = false;
                 if (speedBoostActive) {
-                    finishSpeedBoost();
+                    speedBoostActive = false;
+                    removeCallbacks(rewindRunnable);
+                    if (PlayerActivity.player != null) {
+                        // A rewind tick is skipped while the previous seek is still in flight, so the
+                        // player can sit behind what the pill promised. Land on the promise.
+                        if (rewinding)
+                            PlayerActivity.player.seekTo(rewindPosition);
+                        PlayerActivity.player.setPlaybackSpeed(speedBeforeBoost);
+                    }
+                    rewinding = false;
+                    if (getContext() instanceof PlayerActivity)
+                        ((PlayerActivity) getContext()).setSpeedBoostIndicatorVisible(false);
                 }
                 if (handleTouch) {
                     if (gestureOrientation == Orientation.HORIZONTAL) {
-                        ExoPlayer player = PlayerActivity.player;
-                        if (PlayerActivity.haveMedia && player != null) {
-                            player.setSeekParameters(SeekParameters.DEFAULT);
-                            player.seekTo(seekStart + seekChange);
-                        }
+                        // The drag itself only seeks when the previous seek has landed, so the last steps
+                        // of a fast swipe are usually skipped. Land on what the label promised.
+                        if (PlayerActivity.haveMedia && PlayerActivity.player != null)
+                            PlayerActivity.player.seekTo(seekStart + seekChange);
                         setCustomErrorMessage(null);
                     } else {
                         postDelayed(textClearRunnable, isHandledLongPress ? MESSAGE_TIMEOUT_LONG : MESSAGE_TIMEOUT_TOUCH);
@@ -206,6 +226,8 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
                 }
         }
 
+        // GestureDetector drops every move once it has fired a long press, so the drag of a hold is read
+        // straight from here - which also keeps it clear of the seek and volume/brightness scrolls.
         if (speedBoostActive && ev.getActionMasked() == MotionEvent.ACTION_MOVE) {
             if (Prefs.HOLD_SPEED_ADJUST.equals(holdSpeedMode()))
                 updateHoldSpeed(ev.getX());
@@ -251,33 +273,49 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
         if (!PlayerActivity.controllerVisibleFully) {
             showController();
             return true;
-        } else if (PlayerActivity.haveMedia && PlayerActivity.player != null && PlayerActivity.player.isPlaying()) {
+        } else if (PlayerActivity.haveMedia) {
+            // Hide on tap even while paused, so the interface can be cleared for a clean screenshot —
+            // and after a failure, so the message left on screen can be read without the controls.
             hideController();
             return true;
         }
         return false;
     }
 
-    private void seekGesture(final long position) {
-        if (!(getContext() instanceof PlayerActivity)) return;
-        ((PlayerActivity) getContext()).seekIfLanded(position);
+    // True when the viewer has turned the volume/brightness swipes off in the settings.
+    private boolean volumeBrightnessGesturesOff() {
+        if (!(getContext() instanceof PlayerActivity)) {
+            return false;
+        }
+        final Prefs prefs = ((PlayerActivity) getContext()).mPrefs;
+        return prefs != null && prefs.disableVolumeBrightnessGestures;
     }
 
+    // What the viewer picked for the hold gesture: off, a fixed 2x, or 2x the finger can drag.
     private String holdSpeedMode() {
-        if (!(getContext() instanceof PlayerActivity)) return Prefs.HOLD_SPEED_ADJUST;
-        Prefs prefs = ((PlayerActivity) getContext()).mPrefs;
+        if (!(getContext() instanceof PlayerActivity)) {
+            return Prefs.HOLD_SPEED_ADJUST;
+        }
+        final Prefs prefs = ((PlayerActivity) getContext()).mPrefs;
         return prefs == null ? Prefs.HOLD_SPEED_ADJUST : prefs.holdSpeedMode;
     }
 
-    private boolean volumeBrightnessGesturesOff() {
-        if (!(getContext() instanceof PlayerActivity)) return false;
-        Prefs prefs = ((PlayerActivity) getContext()).mPrefs;
-        return prefs != null && prefs.disableVolumeBrightnessGestures;
+    // One seek in flight at a time, the same gate the time bar scrubs behind. A swipe fires a seek every
+    // 8dp, and a backward one cannot be served from the buffer already read past — it reopens the source
+    // and refills — so unthrottled they pile up on the playback thread and the position lurches along
+    // behind the finger instead of following it. Forward seeks land in buffered data, which is why only
+    // rewinding looked broken. The release in onTouchEvent seeks to wherever the drag actually ended.
+    private void seekGesture(final long position) {
+        if (getContext() instanceof PlayerActivity)
+            ((PlayerActivity) getContext()).seekIfLanded(position);
     }
 
     @Override
     public boolean onScroll(MotionEvent motionEvent, MotionEvent motionEvent1, float distanceX, float distanceY) {
-        if (mScaleDetector.isInProgress() || PlayerActivity.player == null || PlayerActivity.locked)
+        // No player check here: brightness and volume must stay reachable even when playback has died
+        // (a failed stream releases the player, and brightness has no other control at all). Seeking is
+        // gated on its own branch below, where the player is actually needed.
+        if (mScaleDetector.isInProgress() || PlayerActivity.locked)
             return false;
 
         // Exclude edge areas
@@ -291,7 +329,8 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
             return false;
         }
 
-        if (gestureOrientation == Orientation.HORIZONTAL || gestureOrientation == Orientation.UNKNOWN) {
+        if (PlayerActivity.player != null
+                && (gestureOrientation == Orientation.HORIZONTAL || gestureOrientation == Orientation.UNKNOWN)) {
             gestureScrollX += distanceX;
             if (Math.abs(gestureScrollX) > SCROLL_STEP || (gestureOrientation == Orientation.HORIZONTAL && Math.abs(gestureScrollX) > SCROLL_STEP_SEEK)) {
                 // Do not show controller if not already visible
@@ -346,24 +385,35 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
         }
 
         // LEFT = Brightness  |  RIGHT = Volume
+        // Guarding the branch as a whole, rather than the two changeBrightness/setVolumePercent calls inside
+        // it, is what makes the setting a real off switch: gestureOrientation never becomes VERTICAL, so no
+        // level bar, no boost zone and no indicator ever appear either. The horizontal branch above has
+        // already had its turn, so seeking is untouched.
         if (!volumeBrightnessGesturesOff()
-                && (gestureOrientation == Orientation.VERTICAL
-                || gestureOrientation == Orientation.UNKNOWN)) {
+                && (gestureOrientation == Orientation.VERTICAL || gestureOrientation == Orientation.UNKNOWN)) {
             gestureScrollY += distanceY;
-            if (Math.abs(gestureScrollY) > SCROLL_STEP) {
-                if (gestureOrientation == Orientation.UNKNOWN) {
-                    canBoostVolume = Utils.isVolumeMax(mAudioManager);
-                    canSetAutoBrightness = brightnessControl.currentBrightnessLevel <= 0;
-                }
+            if (gestureOrientation == Orientation.UNKNOWN) {
+                if (Math.abs(gestureScrollY) <= SCROLL_STEP)
+                    return true;
+                // Entering the boost zone requires the volume to be maxed out already, so a single swipe
+                // can never run past 100% into boost by accident.
+                gestureVolume = Utils.getVolumePercent(getContext(), mAudioManager);
+                boostAllowed = gestureVolume >= 100 && Utils.canBoostVolume();
+                canSetAutoBrightness = brightnessControl.percent <= 0;
                 gestureOrientation = Orientation.VERTICAL;
+                // Apply the distance accumulated up to the activation threshold as the first delta
+                distanceY = gestureScrollY;
+            }
 
-                if (motionEvent.getX() < (float)(getWidth() / 2)) {
-                    brightnessControl.changeBrightness(this, gestureScrollY > 0, canSetAutoBrightness);
-                } else {
-                    Utils.adjustVolume(getContext(), mAudioManager, this, gestureScrollY > 0, canBoostVolume, false);
-                }
+            // A full swipe over the screen height covers 1.25x the range, as in VLC.
+            // distanceY is positive when the finger moves up, which is the "increase" direction.
+            final float delta = distanceY / getHeight() * 100f * 1.25f;
 
-                gestureScrollY = 0.0001f;
+            if (motionEvent.getX() < (float)(getWidth() / 2)) {
+                brightnessControl.changeBrightness(this, delta, canSetAutoBrightness);
+            } else {
+                gestureVolume = Math.max(0f, Math.min(boostAllowed ? 200f : 100f, gestureVolume + delta));
+                Utils.setVolumePercent(getContext(), mAudioManager, this, gestureVolume);
             }
         }
 
@@ -372,65 +422,67 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
 
     @Override
     public void onLongPress(MotionEvent motionEvent) {
-        if (PlayerActivity.locked || mScaleDetector.isInProgress()
-                || gestureOrientation != Orientation.UNKNOWN) return;
-        if (!PlayerActivity.haveMedia || getPlayer() == null || !getPlayer().isPlaying()
-                || Prefs.HOLD_SPEED_OFF.equals(holdSpeedMode())
-                || Utils.isTvBox(getContext())) return;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
-                && getContext() instanceof PlayerActivity
-                && ((PlayerActivity) getContext()).isInPictureInPictureMode()) return;
-        speedBeforeBoost = getPlayer().getPlaybackParameters().speed;
+        if (PlayerActivity.locked || mScaleDetector.isInProgress() || gestureOrientation != Orientation.UNKNOWN)
+            return;
+        if (!PlayerActivity.haveMedia || PlayerActivity.player == null || !PlayerActivity.player.isPlaying())
+            return;
+        if (Prefs.HOLD_SPEED_OFF.equals(holdSpeedMode()))
+            return;
+        speedBeforeBoost = PlayerActivity.player.getPlaybackParameters().speed;
         speedBoostActive = true;
         isHandledLongPress = true;
         boostAnchorX = motionEvent.getX();
         holdSpeed = SPEED_BOOST;
         rewinding = false;
-        getPlayer().setPlaybackSpeed(SPEED_BOOST);
+        PlayerActivity.player.setPlaybackSpeed(SPEED_BOOST);
         hideController();
-        clearIcon();
-        setCustomErrorMessage(null);
         showHoldSpeed();
     }
 
-    private void updateHoldSpeed(float x) {
-        Player player = PlayerActivity.player;
-        if (player == null) return;
-        HoldSpeedPolicy.State state = HoldSpeedPolicy.evaluate(
-                Utils.pxToDp(x - boostAnchorX), rewinding);
-        boolean rewind = state.direction == HoldSpeedPolicy.Direction.REWIND;
-        if (rewind == rewinding && state.speed == holdSpeed) return;
-
-        holdSpeed = state.speed;
+    // The hold axis: where the press landed is 2x, and every SPEED_STEP_DP to the right adds 1x. To the
+    // left it counts down to 1x and then flips into rewind, which starts at 2x and grows the same way.
+    // The flip has a little hysteresis, so a finger resting on the boundary cannot thrash the player
+    // between paused rewind and playback.
+    private void updateHoldSpeed(final float x) {
+        if (PlayerActivity.player == null)
+            return;
+        final float value = SPEED_BOOST + Utils.pxToDp(x - boostAnchorX) / SPEED_STEP_DP;
+        final boolean rewind = rewinding ? value < 1.1f : value < 1.f;
+        final float speed = Math.min(SPEED_MAX,
+                rewind ? SPEED_REWIND_MIN + (1.f - value) : Math.max(1.f, value));
+        // A tenth is what the pill shows; anything finer would only churn the player.
+        final float rounded = Math.round(speed * 10.f) / 10.f;
+        if (rewind == rewinding && rounded == holdSpeed)
+            return;
+        holdSpeed = rounded;
         if (rewind != rewinding) {
             rewinding = rewind;
-            if (rewind) {
+            if (rewind)
                 startRewind();
-            } else {
+            else
                 stopRewind();
-            }
         }
-        if (!rewinding) player.setPlaybackSpeed(holdSpeed);
+        if (!rewinding)
+            PlayerActivity.player.setPlaybackSpeed(holdSpeed);
         showHoldSpeed();
     }
 
     private void showHoldSpeed() {
-        if (getContext() instanceof PlayerActivity) {
+        if (getContext() instanceof PlayerActivity)
             ((PlayerActivity) getContext()).setSpeedBoostIndicator(holdSpeed, rewinding);
-        }
     }
 
+    // Nothing decodes backwards, so rewind is the swipe-seek gesture on a timer: the player is paused and
+    // walked back at the held rate, one seek at a time behind the same in-flight gate.
     private void startRewind() {
-        ExoPlayer player = PlayerActivity.player;
-        if (player == null) return;
         seekGestureActive = true;
-        if (player.isPlaying()) {
+        if (PlayerActivity.player.isPlaying()) {
             restorePlayState = true;
-            player.pause();
+            PlayerActivity.player.pause();
         }
-        player.setPlaybackSpeed(speedBeforeBoost);
-        player.setSeekParameters(SeekParameters.PREVIOUS_SYNC);
-        rewindPosition = player.getCurrentPosition();
+        PlayerActivity.player.setPlaybackSpeed(speedBeforeBoost);
+        PlayerActivity.player.setSeekParameters(SeekParameters.PREVIOUS_SYNC);
+        rewindPosition = PlayerActivity.player.getCurrentPosition();
         rewindLastTime = SystemClock.uptimeMillis();
         showSeekProgress();
         post(rewindRunnable);
@@ -438,57 +490,32 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
 
     private void stopRewind() {
         removeCallbacks(rewindRunnable);
-        ExoPlayer player = PlayerActivity.player;
-        if (player == null) return;
-        player.setSeekParameters(SeekParameters.DEFAULT);
-        player.seekTo(rewindPosition);
+        PlayerActivity.player.seekTo(rewindPosition);
         if (restorePlayState) {
             restorePlayState = false;
-            player.play();
+            PlayerActivity.player.play();
         }
     }
 
     private void rewindTick() {
-        if (!speedBoostActive || !rewinding || PlayerActivity.player == null) return;
-        long now = SystemClock.uptimeMillis();
-        rewindPosition = Math.max(0L,
-                rewindPosition - (long) ((now - rewindLastTime) * holdSpeed));
+        if (!speedBoostActive || !rewinding || PlayerActivity.player == null)
+            return;
+        final long now = SystemClock.uptimeMillis();
+        rewindPosition = Math.max(0, rewindPosition - (long) ((now - rewindLastTime) * holdSpeed));
         rewindLastTime = now;
         seekGesture(rewindPosition);
         postDelayed(rewindRunnable, REWIND_TICK_MS);
     }
 
-    void cancelHoldSpeed() {
-        if (speedBoostActive) finishSpeedBoost();
-    }
-
-    private void finishSpeedBoost() {
-        speedBoostActive = false;
-        seekGestureActive = false;
-        removeCallbacks(rewindRunnable);
-        ExoPlayer player = PlayerActivity.player;
-        if (player != null) {
-            player.setSeekParameters(SeekParameters.DEFAULT);
-            if (rewinding) player.seekTo(rewindPosition);
-            player.setPlaybackSpeed(speedBeforeBoost);
-            if (restorePlayState) player.play();
-        }
-        restorePlayState = false;
-        rewinding = false;
-        setCustomErrorMessage(null);
-        if (seekProgress) {
-            seekProgress = false;
-            hideControllerImmediately();
-        }
-        setControllerAutoShow(true);
-        if (getContext() instanceof PlayerActivity) {
-            ((PlayerActivity) getContext()).setSpeedBoostIndicatorVisible(false);
-        }
-    }
-
+    // Toggles the touch lock (triggered by the lock button). While locked the controller stays hidden
+    // and gestures are ignored; a tap re-shows the swipe-to-unlock bar, which unlocks when swiped.
     public void toggleLock() {
         PlayerActivity.locked = !PlayerActivity.locked;
-        if (PlayerActivity.locked && PlayerActivity.controllerVisible) hideController();
+        isHandledLongPress = true;
+        if (PlayerActivity.locked && PlayerActivity.controllerVisible) {
+            hideController();
+        }
+        // onLockChanged shows/hides the floating lock (at the button's spot) as visual feedback.
         if (getContext() instanceof PlayerActivity) {
             ((PlayerActivity) getContext()).onLockChanged();
         }
@@ -570,47 +597,58 @@ public class CustomPlayerView extends PlayerView implements GestureDetector.OnGe
                 (float)getWidth() / (float)getVideoSurfaceView().getWidth());
     }
 
+    // Applies a resize mode plus an optional forced display aspect ratio (>0). A forced ratio is set
+    // on the content frame directly; ratio 0 restores the video's natural AR (Media3 only recomputes
+    // that on the next video-size change, so we compute it here to switch out of a forced ratio at once).
     public void applyAspectMode(int resizeMode, float forcedRatio) {
-        setScale(1f);
+        setScale(1.f);
         setResizeMode(resizeMode);
-        AspectRatioFrameLayout frame = findViewById(R.id.exo_content_frame);
-        float ratio = forcedRatio > 0 ? forcedRatio : naturalVideoAspectRatio();
-        if (frame != null && ratio > 0) frame.setAspectRatio(ratio);
+        final AspectRatioFrameLayout frame = findViewById(R.id.exo_content_frame);
+        final float ratio = forcedRatio > 0 ? forcedRatio : naturalVideoAspectRatio();
+        if (frame != null && ratio > 0)
+            frame.setAspectRatio(ratio);
     }
 
     private float naturalVideoAspectRatio() {
-        if (PlayerActivity.player == null) return 0f;
-        androidx.media3.common.Format format = PlayerActivity.player.getVideoFormat();
-        if (format == null || format.width <= 0 || format.height <= 0) return 0f;
-        float pixelRatio = format.pixelWidthHeightRatio > 0 ? format.pixelWidthHeightRatio : 1f;
-        return format.width * pixelRatio / format.height;
+        if (PlayerActivity.player == null)
+            return 0;
+        final androidx.media3.common.Format format = PlayerActivity.player.getVideoFormat();
+        if (format == null || format.width <= 0 || format.height <= 0)
+            return 0;
+        final float par = format.pixelWidthHeightRatio > 0 ? format.pixelWidthHeightRatio : 1f;
+        return format.width * par / format.height;
     }
 
     private enum Orientation {
         HORIZONTAL, VERTICAL, UNKNOWN
     }
 
-    public void setIconVolume(boolean volumeActive) {
-        exoErrorMessage.setCompoundDrawablesWithIntrinsicBounds(volumeActive ? R.drawable.ic_volume_up_24dp : R.drawable.ic_volume_off_24dp, 0, 0, 0);
+    /** Volume OSD: percent text plus the bar on the volume (right) side, scaled 0-200 to expose the boost zone. */
+    public void showVolume(int percent) {
+        exoErrorMessage.setCompoundDrawablesWithIntrinsicBounds(percent > 0 ? R.drawable.ic_volume_up_24dp : R.drawable.ic_volume_off_24dp, 0, 0, 0);
+        setCustomErrorMessage(" " + percent + "%");
+        showLevelBar(percent, 200f, Gravity.CENTER_VERTICAL | Gravity.END);
     }
 
-    public void setHighlight(boolean active) {
-        if (active)
-            exoErrorMessage.getBackground().setTint(Color.RED);
-        else
-            exoErrorMessage.getBackground().setTintList(null);
+    /** Brightness OSD: percent text plus the bar on the brightness (left) side; auto mode has no value. */
+    public void showBrightness(int percent, boolean auto) {
+        exoErrorMessage.setCompoundDrawablesWithIntrinsicBounds(auto ? R.drawable.ic_brightness_auto_24dp : R.drawable.ic_brightness_medium_24, 0, 0, 0);
+        setCustomErrorMessage(auto ? "" : " " + percent + "%");
+        if (auto) {
+            levelBar.setVisibility(GONE);
+        } else {
+            showLevelBar(percent, 100f, Gravity.CENTER_VERTICAL | Gravity.START);
+        }
     }
 
-    public void setIconBrightness() {
-        exoErrorMessage.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_brightness_medium_24, 0, 0, 0);
-    }
-
-    public void setIconBrightnessAuto() {
-        exoErrorMessage.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_brightness_auto_24dp, 0, 0, 0);
-    }
-
-    public void setIconLock(boolean locked) {
-        exoErrorMessage.setCompoundDrawablesWithIntrinsicBounds(locked ? R.drawable.ic_lock_24dp : R.drawable.ic_lock_open_24dp, 0, 0, 0);
+    private void showLevelBar(int value, float max, int gravity) {
+        final FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) levelBar.getLayoutParams();
+        if (lp.gravity != gravity) {
+            lp.gravity = gravity;
+            levelBar.setLayoutParams(lp);
+        }
+        levelBar.setValue(value, max);
+        levelBar.setVisibility(VISIBLE);
     }
 
     public void setScale(final float scale) {

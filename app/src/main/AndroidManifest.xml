@@ -13,7 +13,6 @@
         android:name="android.permission.WRITE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <queries>
         <intent>
@@ -27,13 +26,17 @@
         <intent>
             <action android:name="android.settings.PICTURE_IN_PICTURE_SETTINGS" />
         </intent>
+        <!-- Whether an invite can be handed to anything at all. Without this the answer is always "no"
+             from API 30 on, and a phone full of messengers would be offered the QR code meant for a TV. -->
         <intent>
             <action android:name="android.intent.action.SEND" />
+
             <data android:mimeType="text/plain" />
         </intent>
     </queries>
 
     <application
+        android:name=".App"
         android:allowBackup="false"
         android:appCategory="video"
         android:banner="@mipmap/banner"
@@ -48,6 +51,17 @@
         android:theme="@style/Theme.Player"
         tools:replace="android:allowBackup"
         tools:targetApi="n">
+
+        <!-- Sentry is initialized manually in App.onCreate(); disable the SDK's manifest auto-init. -->
+        <meta-data
+            android:name="io.sentry.auto-init"
+            android:value="false" />
+
+        <!-- autoRemoveFromRecents: a launcher (Lampa, MX-style api) starts every episode with its own data
+             URI, and leaving one finishes the activity to hand the position back. The emptied task would stay
+             in recents, and since the URI differs the system keeps it beside the next episode's task instead
+             of collapsing them — an episode-per-card pile, each card relaunching a stale link. Dropping the
+             task once its last activity is gone leaves exactly the one card of a player still running. -->
         <activity
             android:name=".PlayerActivity"
             android:autoRemoveFromRecents="true"
@@ -69,8 +83,10 @@
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
+
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+
                 <data
                     android:host="siaivo.isroot.in"
                     android:pathPrefix="/lparty/"
@@ -83,8 +99,6 @@
                 <category android:name="android.intent.category.BROWSABLE" />
 
                 <data android:scheme="rtsp" />
-                <data android:scheme="rtmp" />
-                <data android:scheme="udp" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -93,8 +107,6 @@
                 <category android:name="android.intent.category.BROWSABLE" />
 
                 <data android:scheme="rtsp" />
-                <data android:scheme="rtmp" />
-                <data android:scheme="udp" />
                 <data android:mimeType="video/*" />
             </intent-filter>
             <intent-filter>
@@ -711,6 +723,18 @@
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
+        <!-- The crash handler starts this with NEW_TASK, and taskAffinity="" then puts that instance in
+             its own task instead of leaving it parked in the player's task, where it stayed after the
+             process died and resurfaced under a freshly launched player (Back landed on a stale error).
+             excludeFromRecents keeps that crash task out of the recents list. A playback error starts
+             this without NEW_TASK, so it still opens in the player's own task, where neither attribute
+             applies. -->
+        <activity
+            android:name=".ErrorActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Error" />
         <activity
             android:name=".MediaStoreChooserActivity"
             android:configChanges="orientation"
@@ -720,18 +744,15 @@
             android:exported="true"
             android:label="@string/pref_title"
             android:parentActivityName=".PlayerActivity"
-            android:theme="@style/Theme.Player.Settings" >
+            android:screenOrientation="locked"
+            android:theme="@style/Theme.Settings" >
             <intent-filter>
                 <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
 
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
-        <activity
-            android:name=".PlaybackReportActivity"
-            android:excludeFromRecents="true"
-            android:exported="false"
-            android:theme="@style/Theme.Player.Settings" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"
@@ -739,7 +760,7 @@
             android:grantUriPermissions="true">
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/update_paths" />
+                android:resource="@xml/provider_paths" />
         </provider>
     </application>
 

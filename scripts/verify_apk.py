@@ -7,13 +7,14 @@ import argparse
 import re
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 
-PLAYER_CLASS = "com.brouken.player.PlayerActivity"
-SKIP_METHODS = (
-    "segmentButtonText(Lcom/brouken/player/skip/SkipSegment;J)Ljava/lang/String;",
-    "updateLampaSkipUi()V",
+SUBTITLE_CLASS = "com.brouken.player.SubtitleUtils"
+SUBTITLE_METHOD = (
+    "buildSubtitle(Landroid/content/Context;Landroid/net/Uri;Ljava/lang/String;"
+    "Ljava/lang/String;Z)Landroidx/media3/common/MediaItem$SubtitleConfiguration;"
 )
 
 
@@ -51,53 +52,75 @@ def resource_block(resources: str, name: str) -> str:
 
 def verify_resources(aapt2: Path, apk: Path) -> None:
     resources = run([str(aapt2), "dump", "resources", str(apk)])
-    skip_action = resource_block(resources, "skip_action")
-    countdown = resource_block(resources, "skip_available_in")
-    cancel = resource_block(resources, "skip_cancel_countdown")
-    undo = resource_block(resources, "skip_undo")
-    finish = resource_block(resources, "playback_finishes_at_compact")
+    app_name = resource_block(resources, "app_name")
+    finish = resource_block(resources, "time_ends_at_inline")
+    translation = resource_block(resources, "pref_subtitle_translate")
 
-    if "Пропустити" not in skip_action:
-        fail("string/skip_action does not contain the Ukrainian label 'Пропустити'")
-    if "Пропуск через %1$d" not in countdown:
-        fail("string/skip_available_in does not contain the Ukrainian countdown label")
-    if "Скасувати · %1$d" not in cancel:
-        fail("string/skip_cancel_countdown does not contain the Ukrainian cancel label")
-    if "Повернутися" not in undo:
-        fail("string/skip_undo does not contain the Ukrainian undo label")
+    if "UA Player" not in app_name:
+        fail("string/app_name does not contain the UA Player brand")
     if "до %1$s" not in finish:
-        fail("string/playback_finishes_at_compact does not preserve the compact Ukrainian time label")
-    if any("SideSheetBehavior" in block
-           for block in (skip_action, countdown, cancel, undo, finish)):
-        fail("a skip label resolves to Material SideSheetBehavior")
+        fail("string/time_ends_at_inline does not preserve the compact Ukrainian label")
+    if "Автопереклад українською" not in translation:
+        fail("string/pref_subtitle_translate does not state the fixed Ukrainian target")
 
 
-def verify_skip_bytecode(apkanalyzer: Path, apk: Path) -> None:
-    code = "\n".join(
-        run(
-            [
-                str(apkanalyzer),
-                "dex",
-                "code",
-                "--class",
-                PLAYER_CLASS,
-                "--method",
-                method,
-                str(apk),
-            ]
-        )
-        for method in SKIP_METHODS
+def verify_subtitle_bytecode(apkanalyzer: Path, apk: Path) -> None:
+    code = run(
+        [
+            str(apkanalyzer),
+            "dex",
+            "code",
+            "--class",
+            SUBTITLE_CLASS,
+            "--method",
+            SUBTITLE_METHOD,
+            str(apk),
+        ]
     )
+    for method in ("->setId(", "->setLanguage(", "->setMimeType("):
+        if method not in code:
+            fail(f"packaged subtitle configuration does not call {method}")
 
-    required_fields = (
-        "R$string;->skip_action:I",
-        "R$string;->skip_available_in:I",
-    )
-    for field in required_fields:
-        if field not in code:
-            fail(
-                f"player bytecode does not read {field}; a stale numeric resource id may be inlined"
-            )
+
+def verify_manifest(
+    apkanalyzer: Path,
+    apk: Path,
+    package: str | None,
+    version_name: str | None,
+    version_code: int | None,
+    release: bool,
+) -> None:
+    if package:
+        actual = run([str(apkanalyzer), "manifest", "application-id", str(apk)]).strip()
+        if actual != package:
+            fail(f"application id differs: expected {package}, got {actual}")
+    if version_name:
+        actual = run([str(apkanalyzer), "manifest", "version-name", str(apk)]).strip()
+        if actual != version_name:
+            fail(f"version name differs: expected {version_name}, got {actual}")
+    if version_code is not None:
+        actual = run([str(apkanalyzer), "manifest", "version-code", str(apk)]).strip()
+        if actual != str(version_code):
+            fail(f"version code differs: expected {version_code}, got {actual}")
+    if release:
+        debuggable = run([str(apkanalyzer), "manifest", "debuggable", str(apk)]).strip()
+        if debuggable.lower() != "false":
+            fail(f"release APK is debuggable: {debuggable}")
+
+
+def verify_abis(apk: Path, expected_abis: set[str]) -> None:
+    with zipfile.ZipFile(apk) as archive:
+        actual = {
+            name.split("/", 2)[1]
+            for name in archive.namelist()
+            if name.startswith("lib/") and name.count("/") >= 2
+        }
+    if actual != expected_abis:
+        fail(f"ABI set differs: expected {sorted(expected_abis)}, got {sorted(actual)}")
+
+
+def verify_alignment(zipalign: Path, apk: Path) -> None:
+    run([str(zipalign), "-c", "-P", "16", "-v", "4", str(apk)])
 
 
 def verify_signature(apksigner: Path, apk: Path, certificate: str | None) -> None:
@@ -130,7 +153,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--aapt2", required=True, type=Path)
     parser.add_argument("--apksigner", required=True, type=Path)
     parser.add_argument("--apkanalyzer", type=Path)
+    parser.add_argument("--zipalign", type=Path)
     parser.add_argument("--certificate")
+    parser.add_argument("--package")
+    parser.add_argument("--version-name")
+    parser.add_argument("--version-code", type=int)
+    parser.add_argument("--abi", action="append", default=[])
+    parser.add_argument("--release", action="store_true")
     return parser.parse_args()
 
 
@@ -145,10 +174,24 @@ def main() -> None:
             fail(f"{label} not found: {path}")
     if args.apkanalyzer and not args.apkanalyzer.is_file():
         fail(f"apkanalyzer not found: {args.apkanalyzer}")
+    if args.zipalign and not args.zipalign.is_file():
+        fail(f"zipalign not found: {args.zipalign}")
 
     verify_resources(args.aapt2, args.apk)
     if args.apkanalyzer:
-        verify_skip_bytecode(args.apkanalyzer, args.apk)
+        verify_subtitle_bytecode(args.apkanalyzer, args.apk)
+        verify_manifest(
+            args.apkanalyzer,
+            args.apk,
+            args.package,
+            args.version_name,
+            args.version_code,
+            args.release,
+        )
+    if args.abi:
+        verify_abis(args.apk, set(args.abi))
+    if args.zipalign:
+        verify_alignment(args.zipalign, args.apk)
     verify_signature(args.apksigner, args.apk, args.certificate)
     print(f"APK verified: {args.apk}")
 

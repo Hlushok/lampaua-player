@@ -14,7 +14,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -61,7 +60,7 @@ final class OpenSubtitles {
     private static final String KEY = "IxrxupVBKx7dhBkAAtW7QbwnhDMgOdEO";
 
     /** Must identify the app — see the class comment for what a missing one gets you. */
-    private static final String UA = "UA-Player/" + BuildConfig.VERSION_NAME;
+    private static final String UA = "UA Player v" + BuildConfig.VERSION_NAME;
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
@@ -89,10 +88,6 @@ final class OpenSubtitles {
             this.release = release;
             this.machine = machine;
         }
-
-        Candidate(String language, long fileId, int downloads, String release) {
-            this(language, fileId, downloads, release, false);
-        }
     }
 
     /**
@@ -104,10 +99,6 @@ final class OpenSubtitles {
      * @return every usable candidate, unordered; empty when nothing matched or the call failed
      */
     static List<Candidate> search(MediaId id, List<String> languages) {
-        return search(id, languages, null);
-    }
-
-    static List<Candidate> search(MediaId id, List<String> languages, AtomicBoolean answered) {
         if (id == null || id.isEmpty() || languages.isEmpty()) {
             return Collections.emptyList();
         }
@@ -135,7 +126,7 @@ final class OpenSubtitles {
             url.append(param.getKey()).append('=').append(Uri.encode(param.getValue(), ","));
         }
 
-        final String body = get(url.toString(), answered);
+        final String body = get(url.toString());
         if (body == null) {
             return Collections.emptyList();
         }
@@ -210,10 +201,6 @@ final class OpenSubtitles {
         return best;
     }
 
-    static Candidate pick(List<Candidate> candidates, List<String> languages) {
-        return pick(candidates, languages, true);
-    }
-
     private static boolean better(Candidate candidate, Candidate than, List<String> languages) {
         final int rank = languages.indexOf(candidate.language.toLowerCase(Locale.US));
         final int rankThan = languages.indexOf(than.language.toLowerCase(Locale.US));
@@ -284,11 +271,7 @@ final class OpenSubtitles {
     }
 
     private static String get(String url) {
-        return get(url, null);
-    }
-
-    private static String get(String url, AtomicBoolean answered) {
-        return execute(auth(new Request.Builder().url(url)).build(), answered);
+        return execute(auth(new Request.Builder().url(url)).build());
     }
 
     private static Request.Builder auth(Request.Builder builder) {
@@ -298,12 +281,7 @@ final class OpenSubtitles {
     }
 
     private static String execute(Request request) {
-        return execute(request, null);
-    }
-
-    private static String execute(Request request, AtomicBoolean answered) {
         try (Response response = CLIENT.newCall(request).execute()) {
-            if (answered != null) answered.set(true);
             final ResponseBody body = response.body();
             if (!response.isSuccessful() || body == null) {
                 Utils.log("OpenSubtitles: " + response.code() + " " + request.url().encodedPath());

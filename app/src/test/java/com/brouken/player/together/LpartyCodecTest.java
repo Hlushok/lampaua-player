@@ -23,7 +23,7 @@ public class LpartyCodecTest {
 
         assertEquals("act", LpartyCodec.type(frame));
         assertEquals(42_000L, LpartyCodec.positionMs(frame));
-        assertEquals(RoomAction.SEEKED, LpartyCodec.act(frame));
+        assertEquals(TogetherManager.Act.SEEKED, LpartyCodec.act(frame));
         assertEquals(7L, LpartyCodec.seq(frame));
     }
 

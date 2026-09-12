@@ -78,10 +78,6 @@ class SubtitleFetcher {
         this(activity, urls, null, C.TIME_UNSET);
     }
 
-    public SubtitleFetcher(PlayerActivity activity, List<Uri> urls, String cacheName) {
-        this(activity, urls, cacheName, C.TIME_UNSET);
-    }
-
     /**
      * @param cacheName what to call the downloaded copy; null takes the name from the URL. A subtitle
      *                  found online has no useful name in its URL — often just an id — while the caller
@@ -180,9 +176,7 @@ class SubtitleFetcher {
         if (WRONG_CUT.contains(wrongCutKey(url))) {
             return null; // downloaded once already, and it was for another cut of this film
         }
-        final Request request = new Request.Builder().url(url.toString())
-                .header("User-Agent", "UA-Player/" + BuildConfig.VERSION_NAME)
-                .build();
+        final Request request = new Request.Builder().url(url.toString()).build();
         try (Response response = client.newCall(request).execute()) {
             final ResponseBody body = response.body();
             if (!response.isSuccessful() || body == null || body.contentLength() > MAX_BYTES) {

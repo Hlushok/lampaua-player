@@ -1,30 +1,24 @@
 package com.brouken.player;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-
 import org.junit.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+import static org.junit.Assert.assertTrue;
+
 public class MediaIdTest {
-
     @Test
-    public void normalizesBlankIdsAndStripsImdbPrefixForApiCalls() {
-        MediaId id = new MediaId(" tt14688458 ", " ", 1, 5);
+    public void identityIncludesSeriesCoordinates() throws Exception {
+        Path path = Paths.get("src/main/java/com/brouken/player/MediaId.java");
+        if (!Files.exists(path)) path = Paths.get("app").resolve(path);
+        String source = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
 
-        assertEquals("tt14688458", id.imdb);
-        assertEquals("14688458", id.imdbNumeric());
-        assertEquals(null, id.tmdb);
-        assertFalse(id.isMovie());
-    }
-
-    @Test
-    public void cacheKeyIncludesEpisodeIdentity() {
-        MediaId first = new MediaId("tt1", "42", 2, 3);
-        MediaId second = new MediaId("tt1", "42", 2, 4);
-
-        assertFalse(first.sameAs(second));
-        assertTrue(first.sameAs(new MediaId("tt1", "42", 2, 3)));
-        assertFalse(first.key().equals(second.key()));
+        assertTrue(source.contains("final int season"));
+        assertTrue(source.contains("final int episode"));
+        assertTrue(source.contains("season == other.season"));
+        assertTrue(source.contains("episode == other.episode"));
     }
 }

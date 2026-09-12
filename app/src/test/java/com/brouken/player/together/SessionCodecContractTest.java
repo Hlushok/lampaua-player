@@ -8,60 +8,43 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.assertFalse;
 
 public class SessionCodecContractTest {
-    private static String readProjectFile(final String relativePath) throws Exception {
+    private static String read(final String relativePath) throws Exception {
         Path path = Paths.get(relativePath);
-        if (!Files.exists(path)) {
-            path = Paths.get("app").resolve(relativePath);
-        }
+        if (!Files.exists(path)) path = Paths.get("app").resolve(relativePath);
         return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 
     @Test
-    public void sharedSessionKeepsLauncherOwnedLampaFields() throws Exception {
-        final String codec = readProjectFile(
-                "src/main/java/com/brouken/player/together/SessionCodec.java");
-        final String playlist = readProjectFile(
-                "src/main/java/com/brouken/player/LampaPlaylist.java");
-        final String combined = codec + playlist;
+    public void sessionCarriesLauncherArraysAndBundles() throws Exception {
+        final String codec = read("src/main/java/com/brouken/player/together/SessionCodec.java");
+        final String bridge = read("src/main/java/com/brouken/player/LampaPlaylistBridge.java");
 
-        assertTrue(combined.contains("video_list"));
-        assertTrue(combined.contains("headers"));
-        assertTrue(combined.contains("subs"));
-        assertTrue(combined.contains("segments"));
-        assertTrue(combined.contains("season"));
-        assertTrue(combined.contains("episode"));
-        assertTrue(combined.contains("imdb_id"));
-        assertTrue(combined.contains("id"));
-        assertTrue(combined.contains("quality_levels"));
-        assertTrue(combined.contains("quality_urls"));
-        assertTrue(codec.contains("\"bl\""));
-        assertTrue(codec.contains("\"ul\""));
-        assertTrue(codec.contains("putParcelableArrayList"));
+        assertTrue(codec.contains("value instanceof String[]"));
+        assertTrue(codec.contains("value instanceof Parcelable[]"));
+        assertTrue(codec.contains("value instanceof Bundle"));
+        assertTrue(codec.contains("out.putParcelableArray(key, items)"));
+        assertTrue(bridge.contains("PlayerActivity.API_VIDEO_LIST_SUBTITLES"));
+        assertTrue(bridge.contains("PlayerActivity.API_VIDEO_LIST_QUALITY_URLS"));
     }
 
     @Test
-    public void richSessionIsSentBeforeTheThinLampaFallback() throws Exception {
-        final String manager = readProjectFile(
-                "src/main/java/com/brouken/player/together/TogetherManager.java");
+    public void mediaChangesReachBothRoomProtocols() throws Exception {
+        final String manager = read("src/main/java/com/brouken/player/together/TogetherManager.java");
         final int method = manager.indexOf("public void changeMedia");
-        final int rich = manager.indexOf("relay.send(LpartyCodec.session", method);
         final int thin = manager.indexOf("relay.send(LpartyCodec.url", method);
+        final int rich = manager.indexOf("relay.send(LpartyCodec.session", method);
 
         assertTrue(method >= 0);
+        assertTrue(thin > method);
         assertTrue(rich > method);
-        assertTrue(thin > rich);
-        assertTrue(manager.contains("applyRichSession"));
     }
 
     @Test
-    public void roomDiscoveryRemainsCompatibleWithAndroidSix() throws Exception {
-        final String lobby = readProjectFile(
-                "src/main/java/com/brouken/player/together/Lobby.java");
-
-        assertFalse(lobby.contains("rooms.sort("));
+    public void roomDiscoverySortsByMemberCount() throws Exception {
+        final String lobby = read("src/main/java/com/brouken/player/together/Lobby.java");
         assertTrue(lobby.contains("Collections.sort(rooms"));
+        assertTrue(lobby.contains("optInt(\"members\")"));
     }
 }

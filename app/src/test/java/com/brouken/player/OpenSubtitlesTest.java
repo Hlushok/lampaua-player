@@ -12,12 +12,12 @@ public class OpenSubtitlesTest {
     @Test
     public void preferredLanguageBeatsDownloadCount() {
         List<OpenSubtitles.Candidate> candidates = Arrays.asList(
-                new OpenSubtitles.Candidate("en", 1, 50_000, "popular"),
-                new OpenSubtitles.Candidate("uk", 2, 10, "wanted"),
-                new OpenSubtitles.Candidate("uk", 3, 20, "better wanted"));
+                new OpenSubtitles.Candidate("en", 1, 50_000, "popular", false),
+                new OpenSubtitles.Candidate("uk", 2, 10, "wanted", false),
+                new OpenSubtitles.Candidate("uk", 3, 20, "better wanted", false));
 
         assertEquals(3, OpenSubtitles.pick(candidates,
-                Arrays.asList("uk", "en")).fileId);
+                Arrays.asList("uk", "en"), true).fileId);
     }
 
     @Test

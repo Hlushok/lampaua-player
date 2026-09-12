@@ -134,13 +134,7 @@ class SubtitleUtils {
     }
 
     public static String getSubtitleLanguage(Uri uri) {
-        return uri == null ? null : getSubtitleLanguageFromPath(uri.getPath());
-    }
-
-    static String getSubtitleLanguageFromPath(String rawPath) {
-        if (rawPath == null) return null;
-        final String path = rawPath.toLowerCase(java.util.Locale.US);
-        if (path.contains(".auto-ukr.") && path.endsWith(".srt")) return "ukr";
+        final String path = uri.getPath().toLowerCase();
 
         // Any subtitle extension, not only .srt: a downloaded copy is named after what it turned out
         // to be, and the language sits in the same place whatever that was.
@@ -400,8 +394,15 @@ class SubtitleUtils {
     }
 
     public static MediaItem.SubtitleConfiguration buildSubtitle(Context context, Uri uri, String subtitleName, boolean selected) {
+        return buildSubtitle(context, uri, subtitleName, null, selected);
+    }
+
+    public static MediaItem.SubtitleConfiguration buildSubtitle(Context context, Uri uri, String subtitleName,
+                                                                 String declaredLanguage, boolean selected) {
         final String subtitleMime = SubtitleUtils.getSubtitleMime(uri);
-        final String subtitleLanguage = SubtitleUtils.getSubtitleLanguage(uri);
+        final String normalizedLanguage = Utils.toIso3Language(declaredLanguage);
+        final String subtitleLanguage = normalizedLanguage != null
+                ? normalizedLanguage : SubtitleUtils.getSubtitleLanguage(uri);
         if (subtitleLanguage == null && subtitleName == null)
             subtitleName = Utils.getFileName(context, uri);
         // A name that is nothing but digits is not a name: it is what is left of a content:// URI whose
@@ -411,6 +412,10 @@ class SubtitleUtils {
             subtitleName = null;
 
         MediaItem.SubtitleConfiguration.Builder subtitleConfigurationBuilder = new MediaItem.SubtitleConfiguration.Builder(uri)
+                // Becomes the track's Format.id, which is how a selected subtitle is remembered and
+                // restored across a player rebuild. Without it every external subtitle carries a null id
+                // and the restore matches the first text track instead of the chosen one.
+                .setId(uri.toString())
                 .setMimeType(subtitleMime)
                 .setLanguage(subtitleLanguage)
                 .setRoleFlags(C.ROLE_FLAG_SUBTITLE)

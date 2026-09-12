@@ -12,6 +12,7 @@ import androidx.media3.datasource.TeeDataSource;
 import androidx.media3.datasource.TransferListener;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
@@ -20,48 +21,76 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Wraps an upstream {@link DataSource} and, on the first read of a media item (offset 0), tees the
- * bytes the player reads into a background parser ({@link ContainerMetadataReader}) that recovers
- * per-track container names. Uses only public Media3 API ({@link TeeDataSource} + {@link DataSink}),
- * so it works against the locally-built ExoPlayer AAR without touching its internals.
+ * bytes the player reads into a buffer that {@link ContainerMetadataReader} then parses for per-track
+ * container names and the frame rate. Uses only public Media3 API ({@link TeeDataSource} +
+ * {@link DataSink}), so it works against the locally-built ExoPlayer AAR without touching its
+ * internals.
  *
  * <p>Because it only tees the read that starts at offset 0, it captures metadata that the player
  * reads from the front of the stream (faststart MP4, Matroska headers). A {@code moov} at the end of
- * the file is fetched by the player via a separate seek/reopen and is therefore not seen here вЂ” the
+ * the file is fetched by the player via a separate seek/reopen and is therefore not seen here — the
  * caller degrades to the language name in that case.
+ *
+ * <p>The header is held and parsed once rather than streamed to a reader running alongside. The
+ * player has to read a file's header past this tee before it can prepare it, so the bytes do arrive —
+ * what used to lose them was the teardown: the reader ran on its own thread behind a pipe that
+ * {@code close()} shut while it was still walking. Holding the bytes instead means the parse happens
+ * when the collecting stops rather than racing it. For Matroska that close is the normal path, not an
+ * edge case: its extractor seeks away to read the cues as soon as it has the tracks.
  */
 final class TrackNameParsingDataSource implements DataSource {
 
     /**
      * Total bytes pulled through the media data sources. The UI samples the delta to show a real
      * transfer rate while buffering: Media3's own BandwidthMeter only updates on completed transfers,
-     * so it keeps reporting the last estimate when a stream goes silent вЂ” which is the very case the
+     * so it keeps reporting the last estimate when a stream goes silent — which is the very case the
      * rate has to expose. Monotonic; readers compare successive samples.
      */
     static final AtomicLong bytesRead = new AtomicLong();
 
-    /** URI whose own leading bytes announced a Matroska container. */
+    /**
+     * The media URI whose own first bytes announced a Matroska container, or null. Written on a load
+     * thread the moment the signature is read — the tee sits upstream of the extractor, so this is set
+     * before a single track exists and therefore before anything asks which decoder should take the
+     * audio. The URI a stream is served from often says nothing about what it holds (a resolver hands
+     * out a hashed path with no extension and no mime), and that is exactly where the container has to
+     * be read rather than guessed. One slot, not a map: only the item being opened is ever asked about,
+     * and a URI that does not match simply answers no.
+     */
     private static volatile String matroskaUri;
 
+    /** Whether {@code uri}'s own bytes announced Matroska. */
     static boolean isMatroska(Uri uri) {
         return uri != null && uri.toString().equals(matroskaUri);
     }
 
-    /** Receives parsed track metadata on the load thread and reports whether it already has it. */
+    /** Receives parsed track metadata (on a load thread) and reports whether it already has it. */
     interface Listener {
+        /**
+         * Called with the tracks read from {@code originalUri}'s header. Keyed by URI because the player
+         * opens the next item of a playlist while the current one is still playing: metadata that is
+         * merely "the most recent" belongs to whichever item won that race.
+         */
         void onMetadataParsed(Uri originalUri, List<TrackMetadata> tracks);
         boolean isMetadataParsed(Uri originalUri);
+
+        /**
+         * Called (on a load thread) with the length the upstream reported for a whole media item, keyed
+         * by the URI that was requested (matches the MediaItem URI). Matroska and AVI state no bitrate
+         * anywhere, so length over duration is the only figure available for them.
+         */
         void onContentLength(Uri originalUri, long length);
 
         /**
          * Called (on a load thread) when the real HTTP response for a media item reveals a streaming
-         * manifest type вЂ” HLS/DASH/SmoothStreaming вЂ” that the extensionless request URL did not
+         * manifest type — HLS/DASH/SmoothStreaming — that the extensionless request URL did not
          * advertise. {@code originalUri} is the URI the player asked for (matches the MediaItem URI).
          */
         void onMediaTypeResolved(Uri originalUri, String mimeType);
 
         /**
          * Called (on a load thread) when a media request came back as a Lampac stream-resolver control
-         * response ({@code Content-Type: application/json}, e.g. the {@code {"rch":вЂ¦}} handshake)
+         * response ({@code Content-Type: application/json}, e.g. the {@code {"rch":…}} handshake)
          * instead of real media. Lampac resolves the real stream URL by running client-side code over
          * its WebSocket; this player does not speak that protocol, so the resolver stays not-ready and
          * answers with the control JSON. Reported from the response headers (see {@link #open}) so the
@@ -96,16 +125,14 @@ final class TrackNameParsingDataSource implements DataSource {
         // extensionless resolver that returns HLS), report it so the player can re-prepare as HLS.
         if (dataSpec.position == 0 && dataSpec.uri != null) {
             reportResolvedMediaType(dataSpec.uri);
+            // An unbounded read from the start answers with the whole thing: the stats panel turns that
+            // into an average bitrate for the containers that state none (see Listener#onContentLength).
             if (dataSpec.length == C.LENGTH_UNSET && length > 0) {
-                try {
-                    listener.onContentLength(dataSpec.uri, length);
-                } catch (Exception ignored) {
-                    // Metadata must never disturb playback.
-                }
+                listener.onContentLength(dataSpec.uri, length);
             }
             // A media request answered with a JSON body is a stream-resolver control response (the
             // Lampac "not ready" handshake), never playable media. The resolver sends these headers
-            // immediately but then long-polls the body until a read timeout вЂ” so fail now, from the
+            // immediately but then long-polls the body until a read timeout — so fail now, from the
             // headers, instead of blocking ~8s on a body we already know is not media.
             if (isJsonResponse(upstream.getResponseHeaders())) {
                 try {
@@ -239,6 +266,8 @@ final class TrackNameParsingDataSource implements DataSource {
                 upstream.close();
             }
         } finally {
+            // TeeDataSource.close() already closed the sink; this covers the no-tee branch and frees the
+            // buffered header either way. Idempotent — the second call finds nothing left to parse.
             headerSink.close();
             teeDataSource = null;
         }
@@ -254,48 +283,110 @@ final class TrackNameParsingDataSource implements DataSource {
         return upstream.getResponseHeaders();
     }
 
+    /**
+     * Collects the front of the stream as the player reads it and parses it exactly once.
+     *
+     * <p>Every method here runs on an ExoPlayer load thread, inside {@link DataSource#read} and
+     * {@link DataSource#close}. Anything thrown from there becomes a playback error, and an
+     * {@link Error} — an unbounded allocation from a corrupt header, say — takes the process with it.
+     * Recovering a track name is never worth a failed playback, so both entry points swallow
+     * everything and simply stop collecting. The parser this replaced had the same property by
+     * accident, being on a thread of its own.
+     */
     private final class HeaderSink implements DataSink {
-        private ContainerHeaderBuffer buffer;
-        private Uri originalUri;
+        private final byte[] signature = new byte[ContainerMetadataReader.SIGNATURE_BYTES];
+        private int signatureLength;
+        /** The bytes collected so far, or null while there is nothing worth collecting. */
+        private ByteArrayOutputStream header;
+        /** Bytes worth collecting for this container; 0 until the signature has been read. */
+        private int budget;
+        private boolean done;
+        private Uri uri;
 
         @Override
         public void open(DataSpec dataSpec) {
-            originalUri = dataSpec.uri;
-            buffer = dataSpec.position == 0 && !listener.isMetadataParsed(originalUri)
-                    ? new ContainerHeaderBuffer() : null;
+            // open() already gated on position 0; the sink is unreachable otherwise.
+            uri = dataSpec.uri;
+            signatureLength = 0;
+            header = null;
+            budget = 0;
+            done = listener.isMetadataParsed(uri);
         }
 
         @Override
-        public void write(byte[] bytes, int offset, int length) {
-            if (buffer == null) return;
+        public void write(byte[] buffer, int offset, int length) {
             try {
-                buffer.append(bytes, offset, length);
-                if (buffer.isDone()) parseHeader();
-            } catch (Throwable ignored) {
-                buffer = null;
+                collect(buffer, offset, length);
+            } catch (Throwable t) {
+                discard();
             }
         }
 
         @Override
         public void close() {
             try {
+                // Less than the budget arrived: a short file, or the player closed the source early —
+                // which is the normal path for Matroska, whose extractor seeks away to read the cues.
+                // What is here is all there will be, so parse it instead of dropping it.
                 parseHeader();
-            } catch (Throwable ignored) {
-                buffer = null;
+            } catch (Throwable t) {
+                discard();
+            }
+        }
+
+        private void collect(byte[] buffer, int offset, int length) {
+            if (done) {
+                return;
+            }
+            if (budget == 0) {
+                final int taken = Math.min(length, signature.length - signatureLength);
+                System.arraycopy(buffer, offset, signature, signatureLength, taken);
+                signatureLength += taken;
+                if (signatureLength < signature.length) {
+                    return;
+                }
+                budget = ContainerMetadataReader.headerBudget(signature);
+                if (uri != null && ContainerMetadataReader.isMatroska(signature)) {
+                    matroskaUri = uri.toString();
+                }
+                if (budget == 0) {
+                    // Nothing here any parser reads — an HLS manifest, an MPEG-TS segment. Every segment
+                    // of a streaming playback opens at offset 0, and this is what keeps them free: the
+                    // signature lands in a field, so a stream we do not parse allocates nothing at all.
+                    discard();
+                    return;
+                }
+                header = new ByteArrayOutputStream(Math.min(budget, 64 * 1024));
+                header.write(signature, 0, signature.length);
+                offset += taken;
+                length -= taken;
+                if (length == 0) {
+                    return;
+                }
+            }
+            header.write(buffer, offset, length);
+            if (header.size() >= budget) {
+                parseHeader();
             }
         }
 
         private void parseHeader() {
-            if (buffer == null) return;
-            byte[] bytes = buffer.finish();
-            buffer = null;
-            if (bytes == null) return;
-            if (originalUri != null && ContainerMetadataReader.isMatroska(bytes)) {
-                matroskaUri = originalUri.toString();
+            if (done || header == null) {
+                return;
             }
-            List<TrackMetadata> tracks = ContainerMetadataReader.parse(
-                    new ByteArrayInputStream(bytes));
-            if (!tracks.isEmpty()) listener.onMetadataParsed(originalUri, tracks);
+            final byte[] bytes = header.toByteArray();
+            discard();
+            final List<TrackMetadata> tracks = ContainerMetadataReader.parse(new ByteArrayInputStream(bytes));
+            if (!tracks.isEmpty()) {
+                listener.onMetadataParsed(uri, tracks);
+            }
+        }
+
+        /** Stops collecting and lets the buffer go; nothing more will be parsed for this open. */
+        private void discard() {
+            done = true;
+            header = null;
+            signatureLength = 0;
         }
     }
 

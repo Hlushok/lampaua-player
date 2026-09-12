@@ -12,8 +12,10 @@ android {
         applicationId "com.lampaua.player"
         minSdkVersion 23
         targetSdkVersion 36
-        versionCode 22
-        versionName "2.0.2"
+        versionCode 23
+        versionName "2.0.3"
+        buildConfigField "String", "SENTRY_DSN", '""'
+        buildConfigField "boolean", "ENABLE_CRASH_REPORTING", "false"
         if (abiFilter) {
             def abiCodeMap = ["x86": 1, "x86_64": 2, "armeabi-v7a": 3, "arm64-v8a": 4]
             versionCode = versionCode * 10 + abiCodeMap[abiFilter]
@@ -23,7 +25,7 @@ android {
         }
     }
     base {
-        archivesName = "LampaUA.Player.v${defaultConfig.versionName}"
+        archivesName = "UA-Player-${defaultConfig.versionName}"
     }
     buildTypes {
         release {
@@ -56,12 +58,15 @@ android {
 
         universal {
             dimension "distribution"
+            buildConfigField "boolean", "ENABLE_UPDATE", "true"
         }
         amazon {
             dimension "distribution"
+            buildConfigField "boolean", "ENABLE_UPDATE", "false"
         }
         accrescent {
             dimension "distribution"
+            buildConfigField "boolean", "ENABLE_UPDATE", "false"
         }
     }
     variantFilter { variant ->
@@ -143,6 +148,7 @@ dependencies {
     implementation 'com.squareup.okhttp3:okhttp:5.5.0'
     implementation 'com.github.bumptech.glide:glide:4.16.0'
     implementation 'com.google.zxing:core:3.5.4'
+    implementation 'io.sentry:sentry-android:8.16.0'
     implementation 'com.sigpwned:chardet4j:78.1.0'
     implementation project(path: ':doubletapplayerview')
     implementation project(path: ':android-file-chooser')

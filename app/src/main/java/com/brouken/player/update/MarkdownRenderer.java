@@ -13,8 +13,8 @@ import java.util.regex.Pattern;
 
 /**
  * Minimal Markdown-to-{@link Spanned} renderer for the update dialog's release notes. Handles only
- * the small subset that appears in GitHub release bodies вЂ” ATX headings, bullet lists, bold/italic,
- * inline code, {@code [text](url)} links and bare URLs вЂ” with no external dependency and nothing
+ * the small subset that appears in GitHub release bodies — ATX headings, bullet lists, bold/italic,
+ * inline code, {@code [text](url)} links and bare URLs — with no external dependency and nothing
  * newer than API 1, so it works on every supported device. Malformed markup (unclosed {@code **},
  * stray markers) is left as literal text rather than throwing.
  */
@@ -35,8 +35,7 @@ public final class MarkdownRenderer {
         if (markdown == null) {
             return out;
         }
-        final String safe = markdown.replaceAll("<[^>]*>", "");
-        final String[] lines = safe.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
+        final String[] lines = markdown.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
         boolean lastBlank = true; // suppress leading blank lines
         for (final String rawLine : lines) {
             final String line = rawLine;
@@ -60,7 +59,7 @@ public final class MarkdownRenderer {
                 out.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), start, out.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 out.setSpan(new RelativeSizeSpan(1.15f), start, out.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             } else if (bullet.matches()) {
-                out.append("\u2022  ");
+                out.append("•  ");
                 appendInline(out, bullet.group(1));
             } else {
                 appendInline(out, line);
@@ -74,9 +73,6 @@ public final class MarkdownRenderer {
 
         // Bare URLs (Markdown links already stripped their raw URL, so no overlap).
         Linkify.addLinks(out, Linkify.WEB_URLS);
-        for (URLSpan span : out.getSpans(0, out.length(), URLSpan.class)) {
-            if (span.getURL() == null || !span.getURL().startsWith("https://")) out.removeSpan(span);
-        }
         return out;
     }
 
@@ -105,9 +101,7 @@ public final class MarkdownRenderer {
             final String label = m.group(1);
             final String url = m.group(2);
             out.replace(start, end, label);
-            if (url.startsWith("https://")) {
-                out.setSpan(new URLSpan(url), start, start + label.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
+            out.setSpan(new URLSpan(url), start, start + label.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             // Rebuild the matcher over the mutated tail.
             m = LINK.matcher(out.subSequence(base, out.length()));
         }

@@ -3,8 +3,6 @@ package com.brouken.player;
 import android.net.Uri;
 import android.util.Base64;
 
-import androidx.media3.common.C;
-
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -71,7 +69,7 @@ final class SubtitleSearch {
     static final String SOURCE_STREMIO = "stremio";
     static final String SOURCE_REST = "restOpenSubtitles";
 
-    private static final String UA = "UA-Player/" + BuildConfig.VERSION_NAME;
+    private static final String UA = "UA Player v" + BuildConfig.VERSION_NAME;
 
     private static final int TIMEOUT_SEC = 10;
 
@@ -204,27 +202,22 @@ final class SubtitleSearch {
         // are waited for, so the keyed one leading costs the others nothing when it delivers.
         // Whether a machine translation may be taken at all is one answer for every source that says
         // so — the setting is about the class of file, not about who is offering it.
-        final boolean allowMachine = prefs == null || prefs.subtitleTranslate;
+        final boolean allowMachine = prefs.subtitleTranslate;
         final List<Callable<Result>> sources = new ArrayList<>(4);
-        if (prefs == null || prefs.subtitleSourceOpenSubtitles) {
-            sources.add(() -> fromOpenSubtitles(id, preferred, answered, allowMachine));
+        if (prefs.subtitleSourceOpenSubtitles) {
+            sources.add(() -> fromOpenSubtitles(id, preferred, allowMachine));
         }
-        if (prefs == null || prefs.subtitleSourceRest) {
+        if (prefs.subtitleSourceRest) {
             sources.add(() -> best(SOURCE_REST,
                     restOpenSubtitles(id, preferred, answered, allowMachine), preferred, durationMs));
         }
-        if (prefs == null || prefs.subtitleSourceStremio) {
+        if (prefs.subtitleSourceStremio) {
             sources.add(() -> best(SOURCE_STREMIO, stremio(id, answered), preferred, durationMs));
         }
-        if (prefs == null || prefs.subtitleSourceShegu) {
+        if (prefs.subtitleSourceShegu) {
             sources.add(() -> best(SOURCE_SHEGU, shegu(id, answered), preferred, durationMs));
         }
         return firstDelivered(sources, sink, preferred);
-    }
-
-    static Result find(MediaId identifier, List<String> preferred, Sink sink,
-                       AtomicBoolean answered) {
-        return find(identifier, preferred, null, C.TIME_UNSET, sink, answered);
     }
 
     /** How long all the sources together get before the search moves on without them. */
@@ -478,7 +471,6 @@ final class SubtitleSearch {
      * rather than a second set of results to explain. It is the only source in the list with a choice.
      */
     private static boolean needsOtherId(MediaId id, Prefs prefs) {
-        if (prefs == null) return id.imdb == null || id.tmdb == null;
         if (id.imdb == null && (prefs.subtitleSourceStremio || prefs.subtitleSourceRest
                 || prefs.subtitleSourceOpenSubtitles)) {
             return true;
@@ -516,14 +508,17 @@ final class SubtitleSearch {
      * minted last, once nothing has cancelled the search, because a unit is spent even when the
      * answer arrives to a player that no longer exists.
      */
-    private static Result fromOpenSubtitles(MediaId id, List<String> preferred,
-                                            AtomicBoolean answered, boolean allowMachine) {
+    private static Result fromOpenSubtitles(MediaId id, List<String> preferred, boolean allowMachine) {
+        // Every exit here used to be silent, and this is the one source that does not go through best():
+        // so when it won, the trace jumped from its quota line straight to a file being painted, and when
+        // it lost there was nothing at all. It is also the source most likely to answer, being the keyed
+        // one, which made its silence the largest hole in a report about subtitles.
         final List<String> codes = OpenSubtitles.toIso639_1(preferred);
         if (codes.isEmpty()) {
             Utils.log("subtitles: " + SOURCE_OPENSUBTITLES + " has no 639-1 code for " + preferred);
             return null;
         }
-        final List<OpenSubtitles.Candidate> found = OpenSubtitles.search(id, codes, answered);
+        final List<OpenSubtitles.Candidate> found = OpenSubtitles.search(id, codes);
         final OpenSubtitles.Candidate best = OpenSubtitles.pick(found, codes, allowMachine);
         if (best == null || cancelled()) {
             Utils.log("subtitles: " + SOURCE_OPENSUBTITLES + " has " + found.size()

@@ -10,16 +10,27 @@ import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.Iterator;
 
-/** Serializes the full launcher Bundle so existing LAMPA parsing remains the single source of truth. */
+/**
+ * Turns an intent's extras into JSON and back, so a room can carry the whole session its host was
+ * launched with — the playlist and its per-episode names, posters, seasons, imdb/tmdb ids, quality
+ * variants, subtitle lists and headers — rather than only the URL of what is playing.
+ *
+ * <p>Generic on purpose: the launcher contract has indexed keys ({@code video_list.quality_urls.3})
+ * and nests bundles inside parcelable arrays, so a hand-written field list would be wrong the day
+ * either side gains a key. Types are tagged per entry and rebuilt as the shapes the intent parser
+ * already accepts.
+ *
+ * <p>Nothing arbitrary is executed on the receiving end: the rebuilt bundle is read only through the
+ * launcher keys the player already knows, and the only object type that comes back out of it is a
+ * {@link Uri} built from a string. Unknown keys are inert.
+ */
 public final class SessionCodec {
+
     private static final String TYPE = "t";
     private static final String VALUE = "v";
+
     private static final int MAX_DEPTH = 4;
 
-    /*
-     * Generic encoding intentionally preserves launcher-owned video_list, headers, subs, segments,
-     * season, episode, imdb_id, id, quality_levels and per-episode quality_urls keys.
-     */
     private SessionCodec() {
     }
 
@@ -27,47 +38,50 @@ public final class SessionCodec {
         return toJson(bundle, 0);
     }
 
-    public static Bundle toBundle(final JSONObject json) {
-        return toBundle(json, 0);
-    }
-
     private static JSONObject toJson(final Bundle bundle, final int depth) {
-        final JSONObject output = new JSONObject();
+        final JSONObject out = new JSONObject();
         if (bundle == null || depth > MAX_DEPTH) {
-            return output;
+            return out;
         }
         for (String key : bundle.keySet()) {
             final JSONObject encoded = encode(bundle.get(key), depth);
             if (encoded != null) {
                 try {
-                    output.put(key, encoded);
+                    out.put(key, encoded);
                 } catch (Exception ignored) {
-                    // Skip only the malformed entry, not the session.
+                    // A key JSON will not take is a key not worth the session.
                 }
             }
         }
-        return output;
+        return out;
+    }
+
+    public static Bundle toBundle(final JSONObject json) {
+        return toBundle(json, 0);
     }
 
     private static Bundle toBundle(final JSONObject json, final int depth) {
-        final Bundle output = new Bundle();
+        final Bundle out = new Bundle();
         if (json == null || depth > MAX_DEPTH) {
-            return output;
+            return out;
         }
         final Iterator<String> keys = json.keys();
         while (keys.hasNext()) {
             final String key = keys.next();
             final JSONObject entry = json.optJSONObject(key);
             if (entry != null) {
-                put(output, key, entry, depth);
+                put(out, key, entry, depth);
             }
         }
-        return output;
+        return out;
     }
 
     private static JSONObject encode(final Object value, final int depth) {
         try {
-            if (value instanceof String || value instanceof CharSequence) {
+            if (value instanceof String) {
+                return entry("s", value);
+            }
+            if (value instanceof CharSequence) {
                 return entry("s", value.toString());
             }
             if (value instanceof Integer) {
@@ -89,192 +103,123 @@ public final class SessionCodec {
                 return entry("bu", toJson((Bundle) value, depth + 1));
             }
             if (value instanceof String[]) {
-                return entry("sa", strings((String[]) value));
+                final JSONArray array = new JSONArray();
+                for (String item : (String[]) value) {
+                    array.put(item == null ? JSONObject.NULL : item);
+                }
+                return entry("sa", array);
             }
             if (value instanceof int[]) {
-                final JSONArray values = new JSONArray();
+                final JSONArray array = new JSONArray();
                 for (int item : (int[]) value) {
-                    values.put(item);
+                    array.put(item);
                 }
-                return entry("ia", values);
+                return entry("ia", array);
             }
             if (value instanceof long[]) {
-                final JSONArray values = new JSONArray();
+                final JSONArray array = new JSONArray();
                 for (long item : (long[]) value) {
-                    values.put(item);
+                    array.put(item);
                 }
-                return entry("la", values);
+                return entry("la", array);
             }
             if (value instanceof ArrayList) {
-                return encodeList((ArrayList<?>) value, depth);
+                final JSONArray array = new JSONArray();
+                for (Object item : (ArrayList<?>) value) {
+                    array.put(item == null ? JSONObject.NULL : String.valueOf(item));
+                }
+                return entry("sl", array);
             }
             if (value instanceof Parcelable[]) {
-                final JSONArray values = new JSONArray();
+                final JSONArray array = new JSONArray();
                 for (Parcelable item : (Parcelable[]) value) {
                     final JSONObject encoded = encode(item, depth + 1);
-                    values.put(encoded == null ? JSONObject.NULL : encoded);
+                    array.put(encoded == null ? JSONObject.NULL : encoded);
                 }
-                return entry("pa", values);
+                return entry("pa", array);
             }
         } catch (Exception ignored) {
-            // Unsupported values are inert in the launch contract and can be omitted.
+            // Fall through: an entry we cannot describe is simply left out of the session.
         }
         return null;
     }
 
-    private static void put(final Bundle output, final String key, final JSONObject entry,
-                            final int depth) {
+    private static void put(final Bundle out, final String key, final JSONObject entry, final int depth) {
         final String type = entry.optString(TYPE);
         try {
             switch (type) {
                 case "s":
-                    output.putString(key, entry.optString(VALUE));
+                    out.putString(key, entry.optString(VALUE));
                     break;
                 case "i":
-                    output.putInt(key, entry.optInt(VALUE));
+                    out.putInt(key, entry.optInt(VALUE));
                     break;
                 case "l":
-                    output.putLong(key, entry.optLong(VALUE));
+                    out.putLong(key, entry.optLong(VALUE));
                     break;
                 case "b":
-                    output.putBoolean(key, entry.optBoolean(VALUE));
+                    out.putBoolean(key, entry.optBoolean(VALUE));
                     break;
                 case "d":
-                    output.putDouble(key, entry.optDouble(VALUE));
+                    out.putDouble(key, entry.optDouble(VALUE));
                     break;
                 case "u":
-                    output.putParcelable(key, Uri.parse(entry.optString(VALUE)));
+                    out.putParcelable(key, Uri.parse(entry.optString(VALUE)));
                     break;
                 case "bu":
-                    output.putBundle(key, toBundle(entry.optJSONObject(VALUE), depth + 1));
+                    out.putBundle(key, toBundle(entry.optJSONObject(VALUE), depth + 1));
                     break;
                 case "sa":
-                case "sl":
-                    output.putStringArray(key, stringArray(entry.optJSONArray(VALUE)));
+                case "sl": {
+                    final JSONArray array = entry.optJSONArray(VALUE);
+                    final String[] items = new String[array == null ? 0 : array.length()];
+                    for (int i = 0; i < items.length; i++) {
+                        items[i] = array.isNull(i) ? null : array.optString(i);
+                    }
+                    // Both shapes come back as a plain array; the intent parser reads either.
+                    out.putStringArray(key, items);
                     break;
-                case "ul":
-                    output.putParcelableArrayList(key, uriList(entry.optJSONArray(VALUE)));
+                }
+                case "ia": {
+                    final JSONArray array = entry.optJSONArray(VALUE);
+                    final int[] items = new int[array == null ? 0 : array.length()];
+                    for (int i = 0; i < items.length; i++) {
+                        items[i] = array.optInt(i);
+                    }
+                    out.putIntArray(key, items);
                     break;
-                case "bl":
-                    output.putParcelableArrayList(key,
-                            bundleList(entry.optJSONArray(VALUE), depth));
+                }
+                case "la": {
+                    final JSONArray array = entry.optJSONArray(VALUE);
+                    final long[] items = new long[array == null ? 0 : array.length()];
+                    for (int i = 0; i < items.length; i++) {
+                        items[i] = array.optLong(i);
+                    }
+                    out.putLongArray(key, items);
                     break;
-                case "ia":
-                    output.putIntArray(key, intArray(entry.optJSONArray(VALUE)));
+                }
+                case "pa": {
+                    final JSONArray array = entry.optJSONArray(VALUE);
+                    final int size = array == null ? 0 : array.length();
+                    final Parcelable[] items = new Parcelable[size];
+                    for (int i = 0; i < size; i++) {
+                        final JSONObject item = array.optJSONObject(i);
+                        final String itemType = item == null ? "" : item.optString(TYPE);
+                        if ("u".equals(itemType)) {
+                            items[i] = Uri.parse(item.optString(VALUE));
+                        } else if ("bu".equals(itemType)) {
+                            items[i] = toBundle(item.optJSONObject(VALUE), depth + 1);
+                        }
+                    }
+                    out.putParcelableArray(key, items);
                     break;
-                case "la":
-                    output.putLongArray(key, longArray(entry.optJSONArray(VALUE)));
-                    break;
-                case "pa":
-                    output.putParcelableArray(key, parcelables(entry.optJSONArray(VALUE), depth));
-                    break;
+                }
                 default:
                     break;
             }
         } catch (Exception ignored) {
-            // Malformed peer data costs one field, never the whole playback session.
+            // A malformed entry costs that entry, not the session.
         }
-    }
-
-    private static JSONArray strings(final String[] items) {
-        final JSONArray values = new JSONArray();
-        for (String item : items) {
-            values.put(item == null ? JSONObject.NULL : item);
-        }
-        return values;
-    }
-
-    private static JSONObject encodeList(final ArrayList<?> items, final int depth)
-            throws Exception {
-        boolean bundles = !items.isEmpty();
-        boolean uris = !items.isEmpty();
-        boolean strings = true;
-        boolean typed = false;
-        for (Object item : items) {
-            if (item == null) {
-                continue;
-            }
-            typed = true;
-            bundles &= item instanceof Bundle;
-            uris &= item instanceof Uri;
-            strings &= item instanceof String || item instanceof CharSequence;
-        }
-        final JSONArray values = new JSONArray();
-        if (typed && bundles) {
-            for (Object item : items) {
-                values.put(item == null ? JSONObject.NULL
-                        : toJson((Bundle) item, depth + 1));
-            }
-            return entry("bl", values);
-        }
-        if (typed && uris) {
-            for (Object item : items) {
-                values.put(item == null ? JSONObject.NULL : item.toString());
-            }
-            return entry("ul", values);
-        }
-        if (strings) {
-            for (Object item : items) {
-                values.put(item == null ? JSONObject.NULL : item.toString());
-            }
-            return entry("sl", values);
-        }
-        return null;
-    }
-
-    private static String[] stringArray(final JSONArray values) {
-        final String[] items = new String[values == null ? 0 : values.length()];
-        for (int i = 0; i < items.length; i++) {
-            items[i] = values.isNull(i) ? null : values.optString(i);
-        }
-        return items;
-    }
-
-    private static ArrayList<Uri> uriList(final JSONArray values) {
-        final ArrayList<Uri> items = new ArrayList<>();
-        for (int i = 0; values != null && i < values.length(); i++) {
-            items.add(values.isNull(i) ? null : Uri.parse(values.optString(i)));
-        }
-        return items;
-    }
-
-    private static ArrayList<Bundle> bundleList(final JSONArray values, final int depth) {
-        final ArrayList<Bundle> items = new ArrayList<>();
-        for (int i = 0; values != null && i < values.length(); i++) {
-            items.add(values.isNull(i) ? null
-                    : toBundle(values.optJSONObject(i), depth + 1));
-        }
-        return items;
-    }
-
-    private static int[] intArray(final JSONArray values) {
-        final int[] items = new int[values == null ? 0 : values.length()];
-        for (int i = 0; i < items.length; i++) {
-            items[i] = values.optInt(i);
-        }
-        return items;
-    }
-
-    private static long[] longArray(final JSONArray values) {
-        final long[] items = new long[values == null ? 0 : values.length()];
-        for (int i = 0; i < items.length; i++) {
-            items[i] = values.optLong(i);
-        }
-        return items;
-    }
-
-    private static Parcelable[] parcelables(final JSONArray values, final int depth) {
-        final Parcelable[] items = new Parcelable[values == null ? 0 : values.length()];
-        for (int i = 0; i < items.length; i++) {
-            final JSONObject item = values.optJSONObject(i);
-            final String type = item == null ? "" : item.optString(TYPE);
-            if ("u".equals(type)) {
-                items[i] = Uri.parse(item.optString(VALUE));
-            } else if ("bu".equals(type)) {
-                items[i] = toBundle(item.optJSONObject(VALUE), depth + 1);
-            }
-        }
-        return items;
     }
 
     private static JSONObject entry(final String type, final Object value) throws Exception {
