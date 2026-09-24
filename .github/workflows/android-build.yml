@@ -156,14 +156,14 @@ jobs:
       - name: Validate downloaded release APKs
         shell: bash
         run: |
-          mapfile -t latest_apks < <(find release/latestUniversal/release -maxdepth 1 -name '*.apk' -type f -print)
+          mapfile -t latest_apks < <(find release -maxdepth 1 -name '*.apk' -type f -print)
           test "${#latest_apks[@]}" -eq 1
 
       - name: Publish stable GitHub release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
-            release/latestUniversal/release/*.apk
+            release/*.apk
           fail_on_unmatched_files: true
           prerelease: false
           draft: false

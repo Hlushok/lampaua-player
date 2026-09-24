@@ -133,7 +133,9 @@ public class ReleaseWorkflowContractTest {
         assertTrue(publish.contains("permissions:\n      contents: write"));
         assertTrue(publish.contains("uses: actions/download-artifact@v8"));
         assertTrue(publish.contains(
-                "find release/latestUniversal/release -maxdepth 1"));
+                "find release -maxdepth 1 -name '*.apk'"));
+        assertTrue(publish.contains("release/*.apk"));
+        assertFalse(publish.contains("release/latestUniversal/release"));
         assertFalse(publish.contains("legacyUniversal"));
         assertTrue(publish.contains(
                 "uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64"));
