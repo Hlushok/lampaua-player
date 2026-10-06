@@ -33,6 +33,7 @@ final class LampaPlaylistBridge {
      * either case is deliberately fail-open so a direct media URI still plays.
      */
     static boolean normalize(final Intent intent) {
+        if (intent != null && intent.hasExtra(PlaylistApi.EXTRA)) return false;
         if (intent == null) {
             return false;
         }

@@ -12,9 +12,9 @@ public class OpenSubtitlesTest {
     @Test
     public void preferredLanguageBeatsDownloadCount() {
         List<OpenSubtitles.Candidate> candidates = Arrays.asList(
-                new OpenSubtitles.Candidate("en", 1, 50_000, "popular", false),
-                new OpenSubtitles.Candidate("uk", 2, 10, "wanted", false),
-                new OpenSubtitles.Candidate("uk", 3, 20, "better wanted", false));
+                new OpenSubtitles.Candidate("en", 1, 50_000, "popular", false, false),
+                new OpenSubtitles.Candidate("uk", 2, 10, "wanted", false, false),
+                new OpenSubtitles.Candidate("uk", 3, 20, "better wanted", false, false));
 
         assertEquals(3, OpenSubtitles.pick(candidates,
                 Arrays.asList("uk", "en"), true).fileId);
@@ -23,8 +23,8 @@ public class OpenSubtitlesTest {
     @Test
     public void humanTranslationBeatsMorePopularMachineTranslation() {
         List<OpenSubtitles.Candidate> candidates = Arrays.asList(
-                new OpenSubtitles.Candidate("uk", 1, 50_000, "machine", true),
-                new OpenSubtitles.Candidate("uk", 2, 10, "human", false));
+                new OpenSubtitles.Candidate("uk", 1, 50_000, "machine", true, false),
+                new OpenSubtitles.Candidate("uk", 2, 10, "human", false, false));
 
         assertEquals(2, OpenSubtitles.pick(candidates,
                 Arrays.asList("uk"), true).fileId);

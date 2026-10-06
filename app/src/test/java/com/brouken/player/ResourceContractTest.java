@@ -31,7 +31,7 @@ public class ResourceContractTest {
         final String updater = read("src/main/java/com/brouken/player/update/Updater.java");
 
         assertTrue(build.contains("applicationId \"com.lampaua.player\""));
-        assertTrue(build.contains("versionName \"2.0.4\""));
+        assertTrue(build.contains("versionName \"2.0.5\""));
         assertTrue(strings.contains("name=\"app_name\"") && strings.contains(">UA Player</string>"));
         assertTrue(updater.contains("Hlushok/lampaua-player/releases"));
         assertTrue(updater.contains("ua-player-update.apk"));
@@ -67,23 +67,25 @@ public class ResourceContractTest {
     @Test
     public void panelsDismissOutsideAndTvHeaderHasOnlyUsableControls() throws Exception {
         final String player = read("src/main/java/com/brouken/player/PlayerActivity.java");
+        final String dialogs = read("src/main/java/com/brouken/player/Dialogs.java");
 
-        assertTrue(player.contains("playlistDialog.setCanceledOnTouchOutside(true)"));
-        assertTrue(player.contains("qualityDialog.setCanceledOnTouchOutside(true)"));
-        assertTrue(player.contains("menuDialog.setCanceledOnTouchOutside(true)"));
+        assertTrue(dialogs.contains("dialog.setCanceledOnTouchOutside(true)"));
+        assertTrue(player.contains("Dialogs.menu(this, ui"));
         assertTrue(player.contains("final LinearLayout displayParent = headerButtons"));
-        assertTrue(player.contains("if (!isTvBox) {\n            displayParent.addView(buttonRotation)"));
+        assertTrue(player.matches("(?s).*if \\(!isTvBox\\) \\{\\s*displayParent.addView\\(buttonRotation\\).*"));
         assertTrue(player.contains("endsAtView.setVisibility(View.VISIBLE)"));
     }
 
     @Test
     public void launcherLogoHasNoSquareUnderlay() throws Exception {
         final String adaptiveIcon = read("src/main/res/mipmap-anydpi-v26/ic_launcher.xml");
-        final String playerLayout = read("src/main/res/layout/activity_player.xml");
+        final String browserLayout = read("src/main/res/layout/browse_home.xml");
+        final String logo = read("src/main/res/drawable/ic_logo_mark.xml");
 
         assertTrue(adaptiveIcon.contains("@android:color/transparent"));
         assertTrue(adaptiveIcon.contains("@drawable/ua_player_launcher_icon"));
-        assertTrue(playerLayout.contains("android:src=\"@drawable/ua_player_icon\""));
+        assertTrue(browserLayout.contains("android:src=\"@drawable/ic_logo_mark\""));
+        assertTrue(logo.contains("android:src=\"@drawable/ua_player_icon\""));
         assertTrue(Files.isRegularFile(resolve(
                 "src/main/res/drawable-nodpi/ua_player_launcher_icon.png")));
     }

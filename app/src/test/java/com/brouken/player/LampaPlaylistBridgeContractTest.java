@@ -47,6 +47,7 @@ public class LampaPlaylistBridgeContractTest {
         assertTrue(bridge.contains("collectionTitle"));
         assertTrue(player.contains("apiSeriesTitle"));
         assertTrue(player.contains("subtitleSearchInitialTitle()"));
-        assertTrue(player.contains("query.setText(initialTitle)"));
+        assertTrue(player.contains("query.setText(prefill)"));
+        assertTrue(player.contains("subtitleSearchInitialTitle() != null ? subtitleSearchInitialTitle() : playingId()"));
     }
 }

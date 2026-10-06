@@ -3,7 +3,7 @@
 Open-source Android video player for Lampa and LampaUA, based on [Just Player](https://github.com/moneytoo/Player).
 
 - Android application ID: `com.lampaua.player`
-- Current version: `2.0.4` (`versionCode 24`)
+- Current version: `2.0.5` (`versionCode 25`)
 - Android 6.0+ and Android TV
 - Media3/ExoPlayer playback engine
 - Website: [hlushok.github.io/lampaua-player](https://hlushok.github.io/lampaua-player/)
@@ -44,6 +44,12 @@ UA Player certificate.
 - independent update discovery with formatted notes from public GitHub Releases.
 
 ## LAMPA integration
+
+The nested `playlist` API also supports per-item sources and voices, clip-relative
+progress, track-selection rules and session snapshots through a result callback.
+See the [full contract](docs/playlist-api-contract.md) and
+[integration status](docs/playlist-api-integration.md) for supported fields and
+the outstanding device-validation and studio-alias coverage limitations.
 
 UA Player supports the public extended external-player contract introduced in LAMPA 1.12.6:
 

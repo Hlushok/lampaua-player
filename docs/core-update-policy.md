@@ -20,3 +20,7 @@ build, APK alignment, package metadata, ABIs and signatures before publication.
 
 Commit and release messages describe the resulting core update and fixes in
 neutral product terms. Detailed source-comparison notes are not published.
+
+Fetch source updates with `--no-tags` into private core refs. Product release
+tags belong only to UA Player release commits; never publish imported source
+tags or use `git push --tags` for a product release.
