@@ -7,6 +7,8 @@ import android.animation.PropertyValuesHolder;
 import android.animation.ValueAnimator;
 import android.content.Intent;
 import android.content.res.Configuration;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.KeyEvent;
@@ -30,6 +32,7 @@ import com.brouken.player.update.Updater;
 /** UA Player's launch page; browsing and playback remain separate destinations. */
 public class UaHomeActivity extends AppCompatActivity {
     private ObjectAnimator pulse;
+    private Drawable restingButtonBackground;
     private boolean attentionPlayed;
 
     @Override
@@ -107,6 +110,14 @@ public class UaHomeActivity extends AppCompatActivity {
     }
 
     private void startPulse(final View view) {
+        restingButtonBackground = view.getBackground();
+        final RippleDrawable moving = (RippleDrawable) restingButtonBackground.getConstantState()
+                .newDrawable(getResources()).mutate();
+        final UaButtonGradient colors = new UaButtonGradient(
+                getColor(R.color.brand_ramp_start), getColor(R.color.brand_ramp_end),
+                getResources().getDisplayMetrics().density);
+        moving.setDrawableByLayerId(android.R.id.background, colors);
+        view.setBackground(moving);
         view.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         pulse = ObjectAnimator.ofPropertyValuesHolder(view,
                 PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.04f),
@@ -116,6 +127,7 @@ public class UaHomeActivity extends AppCompatActivity {
         pulse.setRepeatCount(5);
         pulse.setRepeatMode(ValueAnimator.REVERSE);
         pulse.setInterpolator(new AccelerateDecelerateInterpolator());
+        pulse.addUpdateListener(animation -> colors.setPhase(animation.getAnimatedFraction()));
         pulse.addListener(new AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(final Animator animation) { stopPulse(); }
         });
@@ -130,6 +142,10 @@ public class UaHomeActivity extends AppCompatActivity {
         }
         final View open = findViewById(R.id.ua_home_open);
         if (open != null) {
+            if (restingButtonBackground != null) {
+                open.setBackground(restingButtonBackground);
+                restingButtonBackground = null;
+            }
             open.setScaleX(1f);
             open.setScaleY(1f);
             open.setLayerType(View.LAYER_TYPE_NONE, null);

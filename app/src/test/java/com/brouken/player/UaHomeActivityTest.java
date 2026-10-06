@@ -11,6 +11,9 @@ import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Rect;
+import android.graphics.Color;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.RippleDrawable;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.LayoutInflater;
@@ -163,16 +166,53 @@ public class UaHomeActivityTest {
             assertEquals(1400L, pulse.getDuration());
             assertEquals(5, pulse.getRepeatCount());
             assertEquals(ValueAnimator.REVERSE, pulse.getRepeatMode());
-            pulse.setCurrentPlayTime(1400);
             final View button = activity.findViewById(R.id.ua_home_open);
+            final Drawable resting = ReflectionHelpers.getField(activity, "restingButtonBackground");
+            final UaButtonGradient colors = (UaButtonGradient) ((RippleDrawable) button.getBackground())
+                    .findDrawableByLayerId(android.R.id.background);
+            colors.setBounds(0, 0, 320, 60);
+            pulse.setCurrentPlayTime(0);
+            final int initialColor = centerColor(colors);
+            pulse.setCurrentPlayTime(700);
+            assertNotEquals("Colors must move, not just the button scale", initialColor, centerColor(colors));
+            pulse.setCurrentPlayTime(1400);
             assertEquals(1.04f, button.getScaleX(), 0.001f);
             assertEquals(View.LAYER_TYPE_HARDWARE, button.getLayerType());
             controller.pause();
             assertNull(ReflectionHelpers.getField(activity, "pulse"));
             assertEquals(1f, button.getScaleX(), 0f);
             assertEquals(View.LAYER_TYPE_NONE, button.getLayerType());
+            assertSame(resting, button.getBackground());
+            assertNull(ReflectionHelpers.getField(activity, "restingButtonBackground"));
             controller.resume();
             assertNull(ReflectionHelpers.getField(activity, "pulse"));
+        }
+    }
+
+    @Test public void movingColorsKeepRoundedCornersAndTelevisionFocusRing() {
+        final UaButtonGradient colors = new UaButtonGradient(Color.BLUE, Color.YELLOW, 1f);
+        colors.setBounds(0, 0, 320, 60);
+        final Bitmap image = Bitmap.createBitmap(320, 60, Bitmap.Config.ARGB_8888);
+        try {
+            colors.draw(new Canvas(image));
+            assertEquals(0, Color.alpha(image.getPixel(0, 0)));
+            final int unfocused = image.getPixel(160, 1);
+            colors.setState(new int[]{android.R.attr.state_focused});
+            colors.draw(new Canvas(image));
+            assertEquals(Color.WHITE, image.getPixel(160, 1));
+            assertNotEquals(unfocused, image.getPixel(160, 1));
+        } finally {
+            image.recycle();
+        }
+    }
+
+    private static int centerColor(final Drawable drawable) {
+        final Bitmap image = Bitmap.createBitmap(320, 60, Bitmap.Config.ARGB_8888);
+        try {
+            drawable.draw(new Canvas(image));
+            return image.getPixel(160, 30);
+        } finally {
+            image.recycle();
         }
     }
 
