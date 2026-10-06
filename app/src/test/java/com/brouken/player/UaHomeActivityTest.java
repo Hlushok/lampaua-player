@@ -162,30 +162,45 @@ public class UaHomeActivityTest {
                 .buildActivity(UaHomeActivity.class).create().start().resume()) {
             final UaHomeActivity activity = controller.get();
             final ObjectAnimator pulse = ReflectionHelpers.getField(activity, "pulse");
+            final ValueAnimator colorFlow = ReflectionHelpers.getField(activity, "colorFlow");
             assertNotNull(pulse);
+            assertNotNull(colorFlow);
+            // Robolectric limits infinite animators to one repeat to keep test loops bounded.
+            assertEquals(ValueAnimator.INFINITE, Shadows.shadowOf(colorFlow).getActualRepeatCount());
             assertEquals(1400L, pulse.getDuration());
             assertEquals(5, pulse.getRepeatCount());
             assertEquals(ValueAnimator.REVERSE, pulse.getRepeatMode());
             final View button = activity.findViewById(R.id.ua_home_open);
             final Drawable resting = ReflectionHelpers.getField(activity, "restingButtonBackground");
-            final UaButtonGradient colors = (UaButtonGradient) ((RippleDrawable) button.getBackground())
-                    .findDrawableByLayerId(android.R.id.background);
-            colors.setBounds(0, 0, 320, 60);
-            pulse.setCurrentPlayTime(0);
-            final int initialColor = centerColor(colors);
-            pulse.setCurrentPlayTime(700);
-            assertNotEquals("Colors must move, not just the button scale", initialColor, centerColor(colors));
+            final View root = activity.findViewById(R.id.ua_home_root);
+            measure(root, 360, 800);
+            measure(root, 360, 800);
+            colorFlow.setCurrentPlayTime(0);
+            final int initialColor = buttonBackgroundColor(button);
+            colorFlow.setCurrentPlayTime(1400);
+            final int flowingColor = buttonBackgroundColor(button);
+            assertTrue("The rendered button must visibly change color",
+                    Math.abs(Color.red(initialColor) - Color.red(flowingColor))
+                            + Math.abs(Color.blue(initialColor) - Color.blue(flowingColor)) > 60);
             pulse.setCurrentPlayTime(1400);
             assertEquals(1.04f, button.getScaleX(), 0.001f);
-            assertEquals(View.LAYER_TYPE_HARDWARE, button.getLayerType());
+            pulse.end();
+            assertNull(ReflectionHelpers.getField(activity, "pulse"));
+            assertEquals(1f, button.getScaleX(), 0f);
+            assertTrue("Color flow must continue after the three breaths", colorFlow.isRunning());
+            assertNotSame(resting, button.getBackground());
             controller.pause();
             assertNull(ReflectionHelpers.getField(activity, "pulse"));
+            assertNull(ReflectionHelpers.getField(activity, "colorFlow"));
+            assertFalse(colorFlow.isRunning());
             assertEquals(1f, button.getScaleX(), 0f);
             assertEquals(View.LAYER_TYPE_NONE, button.getLayerType());
             assertSame(resting, button.getBackground());
             assertNull(ReflectionHelpers.getField(activity, "restingButtonBackground"));
             controller.resume();
-            assertNull(ReflectionHelpers.getField(activity, "pulse"));
+            assertNotNull(ReflectionHelpers.getField(activity, "pulse"));
+            assertNotNull(ReflectionHelpers.getField(activity, "colorFlow"));
+            assertNotSame(colorFlow, ReflectionHelpers.getField(activity, "colorFlow"));
         }
     }
 
@@ -206,11 +221,11 @@ public class UaHomeActivityTest {
         }
     }
 
-    private static int centerColor(final Drawable drawable) {
-        final Bitmap image = Bitmap.createBitmap(320, 60, Bitmap.Config.ARGB_8888);
+    private static int buttonBackgroundColor(final View button) {
+        final Bitmap image = Bitmap.createBitmap(button.getWidth(), button.getHeight(), Bitmap.Config.ARGB_8888);
         try {
-            drawable.draw(new Canvas(image));
-            return image.getPixel(160, 30);
+            button.draw(new Canvas(image));
+            return image.getPixel(button.getWidth() / 2, 6);
         } finally {
             image.recycle();
         }
@@ -220,7 +235,29 @@ public class UaHomeActivityTest {
         try (ActivityController<UaHomeActivity> controller = Robolectric
                 .buildActivity(UaHomeActivity.class).setup()) {
             assertNull(ReflectionHelpers.getField(controller.get(), "pulse"));
+            assertNull(ReflectionHelpers.getField(controller.get(), "colorFlow"));
+            assertNull(ReflectionHelpers.getField(controller.get(), "restingButtonBackground"));
         }
+    }
+
+    @Test public void freshPreferencesDefaultToDarkAndAmoled() {
+        final Application app = RuntimeEnvironment.getApplication();
+        assertEquals(Prefs.THEME_DARK, Prefs.getThemeMode(app));
+        assertEquals(androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES, Prefs.getNightMode(app));
+        assertFalse(Prefs.isLight(app));
+        assertTrue(Prefs.isAmoledBlack(app));
+        PreferenceManager.setDefaultValues(app, R.xml.root_preferences, true);
+        assertTrue(PreferenceManager.getDefaultSharedPreferences(app).getBoolean("amoledBlack", false));
+    }
+
+    @Test public void explicitAppearanceChoicesRemainSelectable() {
+        final Application app = RuntimeEnvironment.getApplication();
+        Prefs.setThemeMode(app, Prefs.THEME_LIGHT);
+        PreferenceManager.getDefaultSharedPreferences(app).edit().putBoolean("amoledBlack", false).commit();
+        PreferenceManager.setDefaultValues(app, R.xml.root_preferences, true);
+        assertEquals(Prefs.THEME_LIGHT, Prefs.getThemeMode(app));
+        assertTrue(Prefs.isLight(app));
+        assertFalse(Prefs.isAmoledBlack(app));
     }
 
     @Test public void allFilesAccessIsDeclaredInTheMergedAppManifest() throws Exception {

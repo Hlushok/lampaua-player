@@ -59,7 +59,7 @@
                     app:selectable="false" />
 
                 <SwitchPreferenceCompat
-                    app:defaultValue="false"
+                    app:defaultValue="true"
                     app:key="amoledBlack"
                     app:summary="@string/pref_amoled_summary"
                     app:title="@string/pref_amoled" />

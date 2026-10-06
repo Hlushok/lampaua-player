@@ -32,14 +32,13 @@ import com.brouken.player.update.Updater;
 /** UA Player's launch page; browsing and playback remain separate destinations. */
 public class UaHomeActivity extends AppCompatActivity {
     private ObjectAnimator pulse;
+    private ValueAnimator colorFlow;
     private Drawable restingButtonBackground;
-    private boolean attentionPlayed;
 
     @Override
     protected void onCreate(final Bundle state) {
         getDelegate().setLocalNightMode(AppCompatDelegate.MODE_NIGHT_YES);
         super.onCreate(state);
-        attentionPlayed = state != null && state.getBoolean("ua.attention_played", false);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView())
                 .setAppearanceLightStatusBars(false);
@@ -103,13 +102,10 @@ public class UaHomeActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (!attentionPlayed) {
-            attentionPlayed = true;
-            if (!Utils.isReducedMotion(this)) startPulse(findViewById(R.id.ua_home_open));
-        }
+        if (!Utils.isReducedMotion(this)) startAttention(findViewById(R.id.ua_home_open));
     }
 
-    private void startPulse(final View view) {
+    private void startAttention(final View view) {
         restingButtonBackground = view.getBackground();
         final RippleDrawable moving = (RippleDrawable) restingButtonBackground.getConstantState()
                 .newDrawable(getResources()).mutate();
@@ -118,7 +114,17 @@ public class UaHomeActivity extends AppCompatActivity {
                 getResources().getDisplayMetrics().density);
         moving.setDrawableByLayerId(android.R.id.background, colors);
         view.setBackground(moving);
-        view.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        colorFlow = ValueAnimator.ofFloat(0f, 1f);
+        colorFlow.setDuration(2800);
+        colorFlow.setRepeatCount(ValueAnimator.INFINITE);
+        colorFlow.setRepeatMode(ValueAnimator.REVERSE);
+        colorFlow.setInterpolator(new AccelerateDecelerateInterpolator());
+        colorFlow.addUpdateListener(animation -> {
+            colors.setPhase((float) animation.getAnimatedValue());
+            // Redraw the actual button as well as its drawable, including hardware display lists.
+            view.invalidate();
+        });
+        colorFlow.start();
         pulse = ObjectAnimator.ofPropertyValuesHolder(view,
                 PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.04f),
                 PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.04f));
@@ -127,7 +133,6 @@ public class UaHomeActivity extends AppCompatActivity {
         pulse.setRepeatCount(5);
         pulse.setRepeatMode(ValueAnimator.REVERSE);
         pulse.setInterpolator(new AccelerateDecelerateInterpolator());
-        pulse.addUpdateListener(animation -> colors.setPhase(animation.getAnimatedFraction()));
         pulse.addListener(new AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(final Animator animation) { stopPulse(); }
         });
@@ -142,29 +147,33 @@ public class UaHomeActivity extends AppCompatActivity {
         }
         final View open = findViewById(R.id.ua_home_open);
         if (open != null) {
-            if (restingButtonBackground != null) {
-                open.setBackground(restingButtonBackground);
-                restingButtonBackground = null;
-            }
             open.setScaleX(1f);
             open.setScaleY(1f);
-            open.setLayerType(View.LAYER_TYPE_NONE, null);
         }
     }
 
-    @Override protected void onPause() {
+    private void stopAttention() {
         stopPulse();
+        if (colorFlow != null) {
+            colorFlow.cancel();
+            colorFlow.removeAllUpdateListeners();
+            colorFlow = null;
+        }
+        final View open = findViewById(R.id.ua_home_open);
+        if (open != null && restingButtonBackground != null) {
+            open.setBackground(restingButtonBackground);
+        }
+        restingButtonBackground = null;
+    }
+
+    @Override protected void onPause() {
+        stopAttention();
         super.onPause();
     }
 
     @Override protected void onDestroy() {
-        stopPulse();
+        stopAttention();
         super.onDestroy();
-    }
-
-    @Override protected void onSaveInstanceState(final Bundle state) {
-        super.onSaveInstanceState(state);
-        state.putBoolean("ua.attention_played", attentionPlayed);
     }
 
     private int dp(final int value) {

@@ -679,7 +679,7 @@ class Prefs {
 
     public static String getThemeMode(final Context context) {
         return PreferenceManager.getDefaultSharedPreferences(context)
-                .getString(THEME_MODE_KEY, THEME_SYSTEM);
+                .getString(THEME_MODE_KEY, THEME_DARK);
     }
 
     public static void setThemeMode(final Context context, final String mode) {
@@ -926,7 +926,7 @@ class Prefs {
 
     public static boolean isAmoledBlack(final Context context) {
         return PreferenceManager.getDefaultSharedPreferences(context)
-                .getBoolean(PREF_KEY_AMOLED, false);
+                .getBoolean(PREF_KEY_AMOLED, true);
     }
 
     /**

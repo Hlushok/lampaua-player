@@ -11,6 +11,9 @@ fixes. Only these UA Player boundaries are reconciled afterward:
 
 - package, name, icons and navy/blue/gold presentation;
 - UA home page and its four actions; keep new browsing destinations behind it;
+- dark appearance and Super AMOLED enabled by default; retain saved appearance
+  choices on update, and keep the home button's visible color flow independent
+  of its finite three-cycle scale pulse;
 - primary author and source repository shown in About belong to UA Player;
 - LAMPA and LampaUA launch, playlist and result contracts;
 - Ukrainian as the only automatic-translation target;
