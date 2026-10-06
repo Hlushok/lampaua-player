@@ -60,9 +60,6 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.documentfile.provider.DocumentFile;
-import com.brouken.player.together.Relay;
-import com.brouken.player.together.Room;
-import com.brouken.player.together.TogetherManager;
 import com.brouken.player.update.UpdateUi;
 import com.brouken.player.update.Updater;
 import androidx.documentfile.provider.NetworkDocumentFile;
@@ -111,6 +108,7 @@ public class BrowserActivity extends AppCompatActivity implements Dialogs.Chrome
 
     /** Browse for a subtitle rather than for something to play. */
     public static final String EXTRA_SUBTITLES = "subtitles";
+    static final String EXTRA_OPEN_FILES = "ua.open_files";
 
     /**
      * The four places this screen can be standing in. Only where they are listed changes with the
@@ -492,10 +490,14 @@ public class BrowserActivity extends AppCompatActivity implements Dialogs.Chrome
         trailFromText(savedInstanceState != null
                 ? savedInstanceState.getString(STATE_TRAIL) : Prefs.getBrowseTrail(this));
 
+        final boolean openFiles = savedInstanceState == null && !picker
+                && getIntent().getBooleanExtra(EXTRA_OPEN_FILES, false);
+        if (openFiles) choose(Dest.FILES);
+
         // ... and on a television that is also what decides whether the start page is what opens: a
         // remembered folder is where the viewer was, so landing on the showcase instead would be one
         // press of Back away from it anyway.
-        if (tv && !picker && trail.isEmpty()) {
+        if (tv && !picker && trail.isEmpty() && !openFiles) {
             showHome();
         }
 
@@ -1774,97 +1776,7 @@ public class BrowserActivity extends AppCompatActivity implements Dialogs.Chrome
      * lives over there, and none of it is worth a second copy here.
      */
     private void joinRoom() {
-        final List<Dialogs.MenuItem> items = new ArrayList<>();
-        items.add(new Dialogs.MenuItem(R.drawable.ic_search_24dp,
-                getString(R.string.together_find), null, false, this::findRooms));
-        items.add(new Dialogs.MenuItem(R.drawable.ic_link_24dp,
-                getString(R.string.together_enter_code), null, false, this::askRoomCode));
-        Dialogs.menu(this, UiMetrics.of(this, Utils.isTvBox(this)), null,
-                getString(R.string.together_join), items);
-    }
-
-    /**
-     * Ask the shared lobby who is watching what, and show the answers here.
-     *
-     * <p>The asking used to happen in the player: this screen handed it an intent and let it open its
-     * own menu, on the grounds that every piece of the watch party lives over there. What that missed
-     * is where the viewer is standing. Pressing "join" on this page took them to a player with no
-     * media, drew a black screen, and put the menu on top of it — so the answer to "which room" was
-     * asked somewhere they had not chosen to go. The party still lives in the player; only the
-     * question moved, and the player is opened once there is an answer to open it with.
-     */
-    private void findRooms() {
-        Relay.setBase(Prefs.getTogetherRelay(this));
-        Notice.show(this, R.string.together_searching, false, R.drawable.ic_together_24dp);
-        TogetherManager.discover(rooms -> {
-            if (isFinishing() || isDestroyed()) {
-                return;
-            }
-            if (rooms.isEmpty()) {
-                Notice.show(this, R.string.together_none_found, true, R.drawable.ic_together_24dp);
-                return;
-            }
-            final List<Dialogs.MenuItem> items = new ArrayList<>();
-            for (final org.json.JSONObject ad : rooms) {
-                final String id = ad.optString("id");
-                final boolean locked = ad.optInt("pwd") == 1;
-                final String title = ad.optString("title", "").isEmpty()
-                        ? ad.optString("name", id) : ad.optString("title");
-                final String poster = ad.optString("poster", "");
-                items.add(new Dialogs.MenuItem(
-                        locked ? R.drawable.ic_lock_24dp
-                                : poster.isEmpty() ? R.drawable.ic_together_24dp : 0,
-                        poster, title,
-                        getString(R.string.together_room_summary,
-                                ad.optString("owner", ""), ad.optInt("members")),
-                        false,
-                        () -> {
-                            if (locked) {
-                                askRoomPassword(id);
-                            } else {
-                                openRoom(id, "");
-                            }
-                        }));
-            }
-            Dialogs.menu(this, UiMetrics.of(this, Utils.isTvBox(this)), null,
-                    getString(R.string.together_find), items);
-        });
-    }
-
-    private void askRoomCode() {
-        final Context dialogContext = Dialogs.dialogContext(this);
-        final ViewGroup fields = Dialogs.dialogFields(dialogContext);
-        // Text, not digits: a room made in Lampa has a letter code.
-        final EditText code = Dialogs.textField(fields, getString(R.string.together_code), "ABC234");
-        code.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
-        final EditText password = Dialogs.textField(fields, getString(R.string.together_password));
-        Dialogs.fields(this, getString(R.string.together_join), fields,
-                getString(android.R.string.ok), () -> {
-                    final String entered =
-                            code.getText().toString().trim().toUpperCase(java.util.Locale.US);
-                    if (Room.isCode(entered)) {
-                        openRoom(entered, password.getText().toString());
-                    } else {
-                        Notice.show(this, R.string.together_code_invalid, true, R.drawable.ic_together_24dp);
-                    }
-                });
-    }
-
-    private void askRoomPassword(final String code) {
-        final Context dialogContext = Dialogs.dialogContext(this);
-        final ViewGroup fields = Dialogs.dialogFields(dialogContext);
-        final EditText input = Dialogs.textField(fields, getString(R.string.together_password));
-        input.setText(Prefs.getTogetherPassword(this));
-        input.setSelection(input.getText().length());
-        Dialogs.fields(this, code, fields, getString(android.R.string.ok),
-                () -> openRoom(code, input.getText().toString()));
-    }
-
-    /** The room is chosen; the player is what joins it and plays what it says. */
-    private void openRoom(final String code, final String password) {
-        startActivity(new Intent(this, PlayerActivity.class)
-                .putExtra(PlayerActivity.EXTRA_JOIN_CODE, code)
-                .putExtra(PlayerActivity.EXTRA_JOIN_PASSWORD, password));
+        RoomJoin.show(this);
     }
 
     @Override

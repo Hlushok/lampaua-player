@@ -7,6 +7,6 @@
         <intent
             android:action="android.intent.action.MAIN"
             android:targetPackage="com.lampaua.player"
-            android:targetClass="com.brouken.player.BrowserActivity" />
+            android:targetClass="com.brouken.player.UaHomeActivity" />
     </shortcut>
 </shortcuts>

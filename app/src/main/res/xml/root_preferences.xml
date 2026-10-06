@@ -787,6 +787,21 @@
 
             </PreferenceCategory>
 
+            <PreferenceCategory app:key="aboutThanks" app:title="@string/pref_about_thanks">
+                <Preference
+                    app:icon="@drawable/ic_person_24dp"
+                    app:key="aboutThanksDeveloper"
+                    app:selectable="false"
+                    app:summary="@string/about_thanks_developer"
+                    app:title="@string/pref_about_developer" />
+                <Preference
+                    app:icon="@drawable/ic_code_24dp"
+                    app:key="aboutThanksSource"
+                    app:persistent="false"
+                    app:summary="@string/about_thanks_source_repo"
+                    app:title="@string/pref_about_source" />
+            </PreferenceCategory>
+
             <!-- Both ways a report leaves: by hand, whether or not statistics are on (the player's own
                  report row rides the stats panel), and in the background to Sentry. -->
             <PreferenceCategory app:title="@string/pref_diagnostics_header">

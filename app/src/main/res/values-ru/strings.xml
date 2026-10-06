@@ -460,6 +460,7 @@
     <string name="about_github_qr">Отсканируйте камерой телефона, чтобы открыть страницу проекта.</string>
 
     <string name="pref_about_project">Проект</string>
+    <string name="pref_about_thanks">Благодарность</string>
     <string name="pref_about_developer">Разработчик</string>
     <string name="pref_about_source">Исходный код</string>
 

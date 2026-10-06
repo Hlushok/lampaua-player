@@ -9,6 +9,7 @@ import java.nio.file.Paths;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertEquals;
 
 public class ResourceContractTest {
 
@@ -31,8 +32,12 @@ public class ResourceContractTest {
         final String updater = read("src/main/java/com/brouken/player/update/Updater.java");
 
         assertTrue(build.contains("applicationId \"com.lampaua.player\""));
-        assertTrue(build.contains("versionName \"2.0.5\""));
+        assertTrue(build.contains("versionName \"2.0.6\""));
         assertTrue(strings.contains("name=\"app_name\"") && strings.contains(">UA Player</string>"));
+        assertTrue(strings.contains("https://github.com/Hlushok/lampaua-player</string>"));
+        assertTrue(strings.contains("Віталій Глушок (@Hlushok)</string>"));
+        assertTrue(strings.contains("name=\"about_github_url\" translatable=\"false\">https://github.com/Hlushok/lampaua-player"));
+        assertFalse(strings.contains(">@levende</string>"));
         assertTrue(updater.contains("Hlushok/lampaua-player/releases"));
         assertTrue(updater.contains("ua-player-update.apk"));
     }
@@ -85,9 +90,25 @@ public class ResourceContractTest {
         assertTrue(adaptiveIcon.contains("@android:color/transparent"));
         assertTrue(adaptiveIcon.contains("@drawable/ua_player_launcher_icon"));
         assertTrue(browserLayout.contains("android:src=\"@drawable/ic_logo_mark\""));
-        assertTrue(logo.contains("android:src=\"@drawable/ua_player_icon\""));
+        assertTrue(logo.contains("android:src=\"@drawable/ua_player_launcher_icon\""));
         assertTrue(Files.isRegularFile(resolve(
                 "src/main/res/drawable-nodpi/ua_player_launcher_icon.png")));
+    }
+
+    @Test
+    public void mainAndLeanbackLaunchTheUaHomeWithoutChangingExternalPlayback() throws Exception {
+        final String manifest = read("src/main/AndroidManifest.xml");
+        final String shortcuts = read("src/main/res/xml/shortcuts.xml");
+        final int main = manifest.indexOf("android.intent.action.MAIN");
+        final String entry = manifest.substring(manifest.lastIndexOf("<activity", main),
+                manifest.indexOf("</activity>", main));
+        assertTrue(entry.contains("android:name=\".UaHomeActivity\""));
+        assertTrue(entry.contains("android.intent.category.LEANBACK_LAUNCHER"));
+        assertTrue(shortcuts.contains("com.brouken.player.UaHomeActivity"));
+        assertTrue(manifest.contains("android:name=\".PlayerActivity\""));
+        assertTrue(manifest.contains("android.intent.action.VIEW"));
+        assertTrue(manifest.contains("android.intent.action.SEND"));
+        assertFalse(manifest.contains("android:screenOrientation=\"locked\""));
     }
 
     @Test
@@ -98,5 +119,23 @@ public class ResourceContractTest {
         assertTrue(build.contains("ENABLE_CRASH_REPORTING\", \"false\""));
         assertTrue(build.contains("SENTRY_DSN\", '\"\"'"));
         assertTrue(app.contains("if (!BuildConfig.ENABLE_CRASH_REPORTING"));
+    }
+
+    @Test
+    public void acknowledgementsHaveTheirOwnAuthorAndLinkBetweenProjectAndDiagnostics() throws Exception {
+        final String preferences = read("src/main/res/xml/root_preferences.xml");
+        final String strings = read("src/main/res/values/strings.xml");
+        final String settings = read("src/main/java/com/brouken/player/SettingsActivity.java");
+        final int thanks = preferences.indexOf("app:key=\"aboutThanks\"");
+        assertTrue(thanks > preferences.indexOf("app:title=\"@string/pref_about_project\""));
+        assertTrue(thanks < preferences.indexOf("app:title=\"@string/pref_diagnostics_header\"", thanks));
+        assertEquals(thanks, preferences.lastIndexOf("app:key=\"aboutThanks\""));
+        assertTrue(strings.contains("Олександр (@levende)</string>"));
+        assertTrue(strings.contains("name=\"about_thanks_source_url\" translatable=\"false\">https://github.com/just-plus-player/just-plus-player"));
+        assertTrue(settings.contains("openSource(R.string.about_github_url)"));
+        assertTrue(settings.contains("openSource(R.string.about_thanks_source_url)"));
+        final String button = read("src/main/res/drawable/bg_cta_button.xml");
+        assertTrue(button.contains("@color/brand_ramp_start"));
+        assertTrue(button.contains("@color/brand_ramp_end"));
     }
 }

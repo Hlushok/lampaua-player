@@ -734,7 +734,15 @@ public class SettingsActivity extends AppCompatActivity
             Preference source = findPreference("aboutSource");
             if (source != null) {
                 source.setOnPreferenceClickListener(preference -> {
-                    openSource();
+                    openSource(R.string.about_github_url);
+                    return true;
+                });
+            }
+
+            Preference thanksSource = findPreference("aboutThanksSource");
+            if (thanksSource != null) {
+                thanksSource.setOnPreferenceClickListener(preference -> {
+                    openSource(R.string.about_thanks_source_url);
                     return true;
                 });
             }
@@ -998,12 +1006,12 @@ public class SettingsActivity extends AppCompatActivity
          * <p>The two intents are resolved the way the room invite already resolves its own; copying is
          * judged rather than resolved, because no API says whether there is anywhere to paste.
          */
-        private void openSource() {
+        private void openSource(final int urlResource) {
             final Activity activity = getActivity();
             if (activity == null) {
                 return;
             }
-            final String url = getString(R.string.about_github_url);
+            final String url = getString(urlResource);
             // A television first, whatever else resolves there: reading a page with a remote is not
             // why anyone presses this row, and a phone camera is the way off that screen.
             if (Utils.isTvBox(activity)) {

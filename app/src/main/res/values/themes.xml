@@ -9,12 +9,12 @@
         <item name="accentSkip">@color/skip_fill</item>
         <item name="accentFill">@color/brand</item>
         <item name="accentOnFill">@color/brand_on</item>
-        <item name="accentContainer">#6C3029</item>
-        <item name="accentOnContainer">#FFDBD6</item>
-        <item name="accentGround">#181211</item>
-        <item name="accentCard">#241E1D</item>
-        <item name="accentCardHigh">#2F2928</item>
-        <item name="accentRaised">#3A3332</item>
+        <item name="accentContainer">@color/brand_container</item>
+        <item name="accentOnContainer">#DEEDFF</item>
+        <item name="accentGround">@color/ua_navy</item>
+        <item name="accentCard">#0B203B</item>
+        <item name="accentCardHigh">#133151</item>
+        <item name="accentRaised">#1C4268</item>
         <!-- The Snackbar is the one component in this app that reads Material's inverse roles, and
              nothing here had ever set them: it arrived in the baseline lavender with a mauve action,
              which belongs to no other pixel on this screen. Pointed at the chrome the app already
@@ -152,6 +152,33 @@
          one definition of it. §2.5 of DESIGN.md records four separate times a restated set shipped
          with a hole in it, and every one of them arrived as M3's #6750A4. -->
     <style name="Theme.Browser" parent="BaseTheme.Settings">
+    </style>
+
+    <style name="Theme.UaHome" parent="BaseTheme.Player">
+        <item name="android:windowBackground">@drawable/bg_brand_wash</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="alertDialogTheme">@style/ThemeOverlay.JustPlus.AlertDialog</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.JustPlus.AlertDialog</item>
+    </style>
+
+    <style name="Widget.Ua.HomeAction" parent="">
+        <item name="android:background">@drawable/bg_ghost_button</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:gravity">center</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:paddingStart">22dp</item>
+        <item name="android:paddingEnd">22dp</item>
+        <item name="android:paddingTop">13dp</item>
+        <item name="android:paddingBottom">13dp</item>
+    </style>
+
+    <style name="TextAppearance.Ua.HomeAction" parent="">
+        <item name="android:textColor">@color/white</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:gravity">center</item>
     </style>
 
     <!-- The overflow menu, wearing the app's own container instead of Material's 4dp default. -->

@@ -13,6 +13,8 @@
         android:name="android.permission.WRITE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Needed for the user-controlled all-files switch used by the local media browser. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <queries>
         <intent>
@@ -736,15 +738,12 @@
             android:exported="false"
             android:taskAffinity=""
             android:theme="@style/Theme.Error" />
-        <!-- The front door. It holds the destinations and the television start page, and the player is
-             somewhere you come back from: launching from the icon opens this, while a file handed over by
-             another app still goes straight to the player's own VIEW and SEND filters above. -->
+        <!-- UA Player's front door. External playback still goes directly to PlayerActivity. -->
         <activity
-            android:name=".BrowserActivity"
-            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|touchscreen"
+            android:name=".UaHomeActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.Browser">
+            android:theme="@style/Theme.UaHome">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
@@ -753,11 +752,16 @@
             </intent-filter>
         </activity>
         <activity
+            android:name=".BrowserActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|touchscreen"
+            android:exported="false"
+            android:label="@string/browse_title"
+            android:theme="@style/Theme.Browser" />
+        <activity
             android:name=".SettingsActivity"
             android:exported="true"
             android:label="@string/pref_title"
-            android:parentActivityName=".BrowserActivity"
-            android:screenOrientation="locked"
+            android:parentActivityName=".UaHomeActivity"
             android:theme="@style/Theme.Settings" >
             <intent-filter>
                 <action android:name="android.intent.action.APPLICATION_PREFERENCES" />

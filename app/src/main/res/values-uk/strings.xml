@@ -459,6 +459,7 @@
     <string name="about_github_qr">Скануйте камерою телефона, щоб відкрити сторінку проєкту.</string>
 
     <string name="pref_about_project">Проєкт</string>
+    <string name="pref_about_thanks">Подяка</string>
     <string name="pref_about_developer">Розробник</string>
     <string name="pref_about_source">Вихідний код</string>
 

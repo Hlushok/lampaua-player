@@ -546,16 +546,20 @@
     <string name="pref_about_device">Device info</string>
 
     <string name="about_github" translatable="false">GitHub</string>
-    <string name="about_github_url" translatable="false">https://github.com/just-plus-player/just-plus-player</string>
+    <string name="about_github_url" translatable="false">https://github.com/Hlushok/lampaua-player</string>
 
     <string name="about_github_qr">Scan with a phone camera to open the project page.</string>
 
     <string name="pref_about_project">Project</string>
+    <string name="pref_about_thanks">Acknowledgements</string>
+    <string name="about_thanks_developer" translatable="false">Олександр (@levende)</string>
+    <string name="about_thanks_source_url" translatable="false">https://github.com/just-plus-player/just-plus-player</string>
+    <string name="about_thanks_source_repo" translatable="false">github.com/just-plus-player/just-plus-player</string>
     <string name="pref_about_developer">Developer</string>
     <string name="pref_about_source">Source code</string>
 
-    <string name="about_developer" translatable="false">@levende</string>
-    <string name="about_github_repo" translatable="false">github.com/just-plus-player/just-plus-player</string>
+    <string name="about_developer" translatable="false">Віталій Глушок (@Hlushok)</string>
+    <string name="about_github_repo" translatable="false">github.com/Hlushok/lampaua-player</string>
 
 
     <!-- The badge is lettered in English wherever the app is read. -->
