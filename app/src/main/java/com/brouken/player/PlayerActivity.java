@@ -420,6 +420,8 @@ public class PlayerActivity extends Activity {
     // Read by the codec selector on the playback thread.
     private volatile boolean forceHevcForDolbyVision;
     private boolean pendingStuckRecovery;
+    private final TunnelingAudioRecovery tunnelingAudioRecovery = new TunnelingAudioRecovery();
+    private static final String STATE_TUNNELING_AUDIO_DISABLED = "ua.tunneling_audio_disabled";
     // Installed for this player build when Dolby Vision profile 7 is being rewritten as profile 8.1;
     // null when it is not. Kept only so the dump can say which mode the stream actually got.
     @Nullable
@@ -1642,6 +1644,11 @@ public class PlayerActivity extends Activity {
         }
         // After the intent, so a session being restored wins over the launch extras it was started with.
         restoreApiSession(savedInstanceState != null ? savedInstanceState : continuingInherited ? inheritedState : null);
+        final Bundle audioState = savedInstanceState != null ? savedInstanceState : inheritedState;
+        if (audioState != null) {
+            tunnelingAudioRecovery.restore(audioState.getBoolean(STATE_TUNNELING_AUDIO_DISABLED, false));
+            tunnelingAudioRecovery.recordMedia(audioState.getString(STATE_TUNNELING_AUDIO_DISABLED + ".uri"));
+        }
         if (rejectedPlaylistResult != null) getWindow().getDecorView().post(this::finish);
 
         coordinatorLayout = findViewById(R.id.coordinatorLayout);
@@ -3125,6 +3132,8 @@ public class PlayerActivity extends Activity {
     }
 
     private void saveApiSession(Bundle outState) {
+        outState.putBoolean(STATE_TUNNELING_AUDIO_DISABLED, tunnelingAudioRecovery.isDisabled());
+        outState.putString(STATE_TUNNELING_AUDIO_DISABLED + ".uri", tunnelingAudioRecovery.mediaKey());
         capturePlaylistProgress();
         if (playlistSession != null) playlistSession.persist();
         if (!apiAccess || !haveMedia) {
@@ -3744,6 +3753,7 @@ public class PlayerActivity extends Activity {
             if (handleRoomIntent(intent)) {
                 // An invite link carries only a room code; what to play arrives over its channel.
             } else if (Intent.ACTION_VIEW.equals(action) && (uri != null || intent.hasExtra(PlaylistApi.EXTRA))) {
+                tunnelingAudioRecovery.reset();
                 closePlaylistSession();
                 intent.removeExtra(PlaylistSession.ID);
                 // Keep getIntent() pointing at what is actually playing (used by the intent report).
@@ -3755,6 +3765,7 @@ public class PlayerActivity extends Activity {
                 if (text != null) {
                     final Uri parsedUri = Uri.parse(text);
                     if (parsedUri.isAbsolute()) {
+                        tunnelingAudioRecovery.reset();
                         closePlaylistSession();
                         // A shared link is new media, not a continuation: end whatever session was
                         // running, as the VIEW branch above does through handleViewIntent. Otherwise the
@@ -11912,6 +11923,8 @@ public class PlayerActivity extends Activity {
         // leaves the flag set from the last bitstream, and DefaultAudioSink may still be holding the new
         // config in pendingConfiguration when we read it. Both only ever cost one needless seek.
         private volatile boolean passthrough;
+        private volatile boolean tunneling;
+        private final TunnelingStereoProcessor stereoProcessor;
         // How far the clock this sink publishes is shifted, in microseconds, one value per route. The
         // sink's position becomes the player's media clock, and the video renderer picks frames against
         // it, so reporting it ahead of the sound makes the picture run ahead — which is the sound
@@ -11932,10 +11945,12 @@ public class PlayerActivity extends Activity {
         private final long passthroughOffsetUs;
 
         AudioPassthroughDenylistSink(AudioSink sink, Set<String> initiallyDenied, boolean forceDecode,
-                                     int decodedSyncMs, int passthroughSyncMs) {
+                                     int decodedSyncMs, int passthroughSyncMs,
+                                     TunnelingStereoProcessor stereoProcessor) {
             super(sink);
             this.deniedMimes = new CopyOnWriteArraySet<>(initiallyDenied);
             this.forceDecode = forceDecode;
+            this.stereoProcessor = stereoProcessor;
             this.decodedOffsetUs = decodedSyncMs * 1000L;
             this.passthroughOffsetUs = passthroughSyncMs * 1000L;
         }
@@ -11965,6 +11980,20 @@ public class PlayerActivity extends Activity {
         boolean isPassthrough() {
             return passthrough;
         }
+
+        @Override public void enableTunnelingV21() {
+            tunneling = true;
+            stereoProcessor.setTunneling(true);
+            super.enableTunnelingV21();
+        }
+
+        @Override public void disableTunneling() {
+            tunneling = false;
+            stereoProcessor.setTunneling(false);
+            super.disableTunneling();
+        }
+
+        boolean isTunneling() { return tunneling; }
 
         @Override
         public int getFormatSupport(Format format) {
@@ -12112,7 +12141,7 @@ public class PlayerActivity extends Activity {
         trackSelector = new DefaultTrackSelector(this, new AverageBitrateTrackSelection.Factory());
         trackSelector.setParameters(trackSelector.buildUponParameters()
                 .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true));
-        if (mPrefs.tunneling) {
+        if (isTunnelingEnabled()) {
             trackSelector.setParameters(trackSelector.buildUponParameters()
                     .setTunnelingEnabled(true)
             );
@@ -12404,7 +12433,16 @@ public class PlayerActivity extends Activity {
                 // not the forced one: the platform folds the channels by what it really has. Set here
                 // rather than from applyBoost — this is a preference, not a gesture, and a changed
                 // preference rebuilds the player.
-                final int routeChannels = AudioCapabilities.getCapabilities(context).getMaxChannelCount();
+                final AudioCapabilities route = AudioCapabilities.getCapabilities(context);
+                final int routeChannels = route.getMaxChannelCount();
+                // Before API 33 the library may substitute a stereo speaker layout even for HDMI.
+                // Do not use that placeholder to downmix a multichannel receiver.
+                final int pcmChannels = Build.VERSION.SDK_INT >= 33
+                        ? TunnelingStereoProcessor.routeChannels(route.getSpeakerLayoutChannelMasks())
+                        : routeChannels;
+                final TunnelingStereoProcessor stereoProcessor = new TunnelingStereoProcessor(
+                        pcmChannels > 0 && pcmChannels <= 2);
+                Utils.log("audio route: speaker channels=" + pcmChannels + ", advertised max=" + routeChannels);
                 boostProcessor.setCentreBoost(centreBoostOn(), routeChannels);
                 final boolean forceCapabilities = mPrefs.audioPassthrough && mPrefs.audioPassthroughForce;
                 // Declared capabilities are only honoured by a builder holding no context: given one,
@@ -12436,10 +12474,11 @@ public class PlayerActivity extends Activity {
                         // Always in the chain, bypassed while off: the session switches it mid-film.
                         .setAudioProcessors(new AudioProcessor[]{boostProcessor,
                                 dynamicRangeProcessor = new DynamicRangeProcessor(routeChannels <= 2,
-                                        dynamicRangeOn())});
+                                        dynamicRangeOn()), stereoProcessor});
                 AudioSink sink = builder.build();
                 audioSink = new AudioPassthroughDenylistSink(sink, revokedAudioMimes,
-                        !mPrefs.audioPassthrough, mPrefs.audioSyncMs, mPrefs.audioPassthroughSyncMs);
+                        !mPrefs.audioPassthrough, mPrefs.audioSyncMs, mPrefs.audioPassthroughSyncMs,
+                        stereoProcessor);
                 return audioSink;
             }
 
@@ -13607,7 +13646,7 @@ public class PlayerActivity extends Activity {
             speedRefusalSaid = true;
             // Tunnelling first: on a box both it and pass-through are commonly on at once, and then
             // "turn pass-through off" is advice that changes nothing.
-            showNotice(getString(mPrefs.tunneling ? R.string.speed_refused_tunneling
+            showNotice(getString(isTunnelingEnabled() ? R.string.speed_refused_tunneling
                     : R.string.speed_refused_passthrough), true, R.drawable.ic_speed_24dp);
         }
 
@@ -13763,6 +13802,14 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onMediaItemTransition(MediaItem mediaItem, int reason) {
+            // A retry's PLAYLIST_CHANGED must retain its guard; an actual next/reselected item may try again.
+            final String audioMediaKey = mediaItem != null && mediaItem.localConfiguration != null
+                    ? mediaItem.localConfiguration.uri.toString() : null;
+            if (tunnelingAudioRecovery.moveTo(audioMediaKey,
+                    reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED)) {
+                if (trackSelector != null) trackSelector.setParameters(trackSelector.buildUponParameters()
+                        .setTunnelingEnabled(mPrefs.tunneling));
+            }
             // The link rides the trace so the app log names the file too, masked as the setting says.
             Utils.log("item transition reason=" + reason
                     + (player != null ? " index=" + player.getCurrentMediaItemIndex() : "")
@@ -14351,6 +14398,9 @@ public class PlayerActivity extends Activity {
             // playback position) and arrives 1.2 s later at an AudioTrack that is still dead — four more
             // init failures, a second re-read, eight seconds of frozen picture. Answering on the audio
             // path costs one prepare() and the sound comes back decoded.
+            if (recoverTunneledPcmAudio(error)) {
+                return;
+            }
             if ((error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED
                     || error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED)
                     && recoverByRevokingAudioMime(audioFailureMime(error),
@@ -14901,10 +14951,35 @@ public class PlayerActivity extends Activity {
     // playback does, and a user who needs tunneling can turn it back on. Writing false is also the whole
     // guard — the rung cannot fire twice. Only on a stall at the very start (see stalledAtStart): if the
     // stream played for a while, tunneling was evidently working and something else stopped it.
+    private boolean isTunnelingEnabled() {
+        return mPrefs != null && mPrefs.tunneling && !tunnelingAudioRecovery.isDisabled();
+    }
+
+    private boolean recoverTunneledPcmAudio(PlaybackException error) {
+        if (player == null || audioSink == null || !isTunnelingEnabled()
+                || !tunnelingAudioRecovery.recover(error.errorCode, audioFailureMime(error),
+                        audioSink.isTunneling())) return false;
+        // Unlike the start-only frozen-video recovery, PCM refusal can happen after any seek.
+        // This is one item-local retry, not a permanent preference change or codec revocation.
+        Utils.log("audio recovery: tunneling off for this item, preserving playback state");
+        final Uri audioMediaUri = currentPlayingUri();
+        tunnelingAudioRecovery.recordMedia(audioMediaUri != null ? audioMediaUri.toString() : null);
+        showNotice(getString(R.string.notice_tunneling_audio_retry), true, R.drawable.ic_memory_24dp);
+        restorePlayState = true;
+        pendingStuckRecovery = true;
+        final ExoPlayer failedPlayer = player;
+        playerView.post(() -> {
+            if (player != failedPlayer) return;
+            releasePlayer();
+            initializePlayer();
+        });
+        return true;
+    }
+
     private boolean recoverByDisablingTunneling() {
         // The baseline has to be known: this rung changes a setting the user made, so it must not act on a
         // player that was never ready. A frozen clock implies it was, but that is a library invariant.
-        if (player == null || !mPrefs.tunneling
+        if (player == null || !isTunnelingEnabled()
                 || playerStartPositionMs == C.TIME_UNSET || !stalledAtStart()) {
             return false;
         }
@@ -15050,7 +15125,7 @@ public class PlayerActivity extends Activity {
     // seekability and liveness do not matter — and with no audio track selected there is nothing to recreate.
     private void restartPassthroughAudio() {
         if (!alive || player == null || isScrubbing
-                || audioSink == null || !audioSink.isPassthrough() || mPrefs.tunneling
+                || audioSink == null || !audioSink.isPassthrough() || isTunnelingEnabled()
                 || !player.getCurrentTracks().isTypeSelected(C.TRACK_TYPE_AUDIO)) {
             return;
         }
@@ -16462,7 +16537,7 @@ public class PlayerActivity extends Activity {
         sb.append("\nPlayback: decoder priority ").append(mPrefs.decoderPriority)
                 .append(", speed ").append(mPrefs.speed)
                 .append(", resize ").append(mPrefs.resizeMode)
-                .append(mPrefs.tunneling ? ", tunneling" : "")
+                .append(isTunnelingEnabled() ? ", tunneling" : "")
                 .append(mPrefs.frameRateMatching ? ", frame rate matching" : "")
                 .append(backBufferAppliedMs > 0 ? ", back buffer " + backBufferAppliedMs / 1000 + "s" : "")
                 .append(mPrefs.frameRateMatching && mPrefs.displayResolutionMatching
@@ -16524,7 +16599,7 @@ public class PlayerActivity extends Activity {
             scope.setExtra("media_uri", Utils.uriToReportString(uri));
         }
         scope.setTag("decoder.priority", String.valueOf(mPrefs.decoderPriority));
-        scope.setTag("player.tunneling", String.valueOf(mPrefs.tunneling));
+        scope.setTag("player.tunneling", String.valueOf(isTunnelingEnabled()));
         if (ffmpegAvailable != null) {
             scope.setTag("decoder.ffmpeg", String.valueOf(ffmpegAvailable));
         }

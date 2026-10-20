@@ -110,6 +110,7 @@
     <string name="pref_tunneling">Тунельне відтворення</string>
     <string name="pref_tunneling_summary">Покращує 4K і HDR. На частині приставок зображення зупиняється, тоді застосунок вимкне це сам</string>
     <string name="notice_tunneling_disabled">Тунельне відтворення вимкнено — на цьому пристрої воно зупиняє зображення</string>
+    <string name="notice_tunneling_audio_retry">Повторна спроба без тунельного відтворення для цього відео — пристрій відхилив звуковий вихід</string>
     <string name="notice_quality_lowered">Перемкнено на %1$s — оригіналу потрібен апаратний декодер, якого на цьому пристрої немає</string>
     <string name="pref_auto_pip">Автоматична картинка в картинці</string>
     <string name="pref_auto_pip_on">Картинка в картинці сама вмикається при виході</string>

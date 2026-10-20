@@ -32,7 +32,7 @@ public class ResourceContractTest {
         final String updater = read("src/main/java/com/brouken/player/update/Updater.java");
 
         assertTrue(build.contains("applicationId \"com.lampaua.player\""));
-        assertTrue(build.contains("versionName \"2.0.6\""));
+        assertTrue(build.contains("versionName \"" + BuildConfig.VERSION_NAME + "\""));
         assertTrue(strings.contains("name=\"app_name\"") && strings.contains(">UA Player</string>"));
         assertTrue(strings.contains("https://github.com/Hlushok/lampaua-player</string>"));
         assertTrue(strings.contains("Віталій Глушок (@Hlushok)</string>"));
