@@ -67,7 +67,7 @@ public class PlaylistApiTest {
         episode.putStringArray("audio_languages", new String[]{"uk-UA", "eng", "zz", "ukr"});
         episode.putString("position_sec", "12.9");
         PlaylistApi api = new PlaylistApi(request(episode));
-        assertNull(api.items.get(0).audio.index); assertEquals(12000, api.items.get(0).positionMs);
+        assertNull(api.items.get(0).audio.index); assertEquals(12900, api.items.get(0).positionMs);
         assertEquals(Arrays.asList("ukr", "eng"), api.items.get(0).audio.languages);
         assertEquals(2, api.warnings.size());
     }
@@ -93,9 +93,51 @@ public class PlaylistApiTest {
         assertNull(api.audio.languages); assertTrue(api.suppressSubtitleDiscovery(0));
     }
     @Test public void periodicReportingIsOffUnlessRequestedAndClampsAtThirty() throws Exception {
-        Bundle root = request(item("https://a/video")); assertEquals(0, new PlaylistApi(root).reportInterval);
-        root.putInt("report_interval_sec", 1); assertEquals(30, new PlaylistApi(root).reportInterval);
-        root.putInt("report_interval_sec", 120); assertEquals(120, new PlaylistApi(root).reportInterval);
+        Bundle root = request(item("https://a/video")); assertEquals(0, new PlaylistApi(root).reportIntervalMs);
+        root.putInt("report_interval_sec", 1); assertEquals(30_000, new PlaylistApi(root).reportIntervalMs);
+        root.putInt("report_interval_sec", 120); assertEquals(120_000, new PlaylistApi(root).reportIntervalMs);
+    }
+    @Test public void askResumeIsOptionalAndObsoleteResumeModeIsIgnored() throws Exception {
+        Bundle root = request(item("https://a/video"));
+        root.putString("resume_mode", "ask");
+        assertFalse(new PlaylistApi(root).askResume);
+        root.putBoolean("ask_resume", true);
+        assertTrue(new PlaylistApi(root).askResume);
+        root.putBoolean("ask_resume", false);
+        assertFalse(new PlaylistApi(root).askResume);
+        root.putInt("ask_resume", 1);
+        assertFalse(new PlaylistApi(root).askResume);
+    }
+    @Test public void explicitZeroResumeIsDistinctFromNoCallerPosition() throws Exception {
+        Bundle episode = item("https://a/video");
+        assertFalse(new PlaylistApi(request(episode)).items.get(0).hasPosition);
+        episode.putInt("position_sec", 0);
+        assertTrue(new PlaylistApi(request(episode)).items.get(0).hasPosition);
+    }
+    @Test public void pendingResumeSurvivesRecreationWithoutBecomingWatchedProgress() throws Exception {
+        PlaylistApi api = new PlaylistApi(request(item("https://a/video"), item("https://a/next")));
+        Intent launch = new Intent();
+        PlaylistSession session = new PlaylistSession(context, api, launch);
+        session.resumeInitialized = true;
+        session.pendingResume(1, 123_000, false);
+        PlaylistSession restored = new PlaylistSession(context, api, launch);
+        assertTrue(restored.resumeInitialized);
+        assertEquals(1, restored.resumePendingIndex);
+        assertEquals(123_000, restored.resumePendingMs);
+        assertFalse(restored.resumePendingInitial);
+        assertArrayEquals(new long[]{-1, -1}, restored.positionsMs);
+        assertTrue(restored.history.isEmpty());
+        assertEquals("cancelled", restored.result(context.getPackageName()).getStringExtra("end_by"));
+        restored.clearPendingResume();
+        assertEquals(-1, new PlaylistSession(context, api, launch).resumePendingIndex);
+    }
+    @Test public void sessionRemembersDurationEvenBeforePlaybackStarts() throws Exception {
+        PlaylistApi api = new PlaylistApi(request(item("https://a/video")));
+        PlaylistSession session = new PlaylistSession(context, api, new Intent());
+        session.capture(0, "https://a/video", 30_000, 1_000_000, false);
+        assertEquals(1_000_000, session.durationsMs[0]);
+        assertEquals(-1, session.positionsMs[0]);
+        assertFalse(session.played);
     }
     @Test public void headerMappingWorksForPrefetchedVoiceQualityAndSubtitle() throws Exception {
         Bundle a = item("https://a/first"), b = item("https://b/second");
@@ -125,7 +167,7 @@ public class PlaylistApiTest {
         session.capture(0, "https://a/hd", 10000, 100000, true);
         session.capture(0, "https://a/voice", 11000, 100000, true); session.qualityLines = 1080; session.persist();
         PlaylistSession restored = new PlaylistSession(context, new PlaylistApi(root), launch);
-        assertEquals(1, restored.history.size()); assertEquals(11, restored.positions[0]); assertEquals("https://a/voice", restored.uri);
+        assertEquals(1, restored.history.size()); assertEquals(11_000, restored.positionsMs[0]); assertEquals("https://a/voice", restored.uri);
         assertEquals("https://a/voice", restored.sourceUris[0]); assertEquals(1080, restored.qualityLines);
         restored.capture(0, restored.uri, 12000, 100000, true); assertEquals(1, restored.history.size());
         assertFalse(context.getSharedPreferences("playlist_sessions", 0).getAll().isEmpty());
@@ -136,16 +178,16 @@ public class PlaylistApiTest {
         Intent cancelled = session.result("com.lampaua.player");
         assertEquals("cancelled", cancelled.getStringExtra("end_by"));
         assertEquals(42, cancelled.getIntExtra("position_sec", -1)); assertEquals(100, cancelled.getIntExtra("duration_sec", -1));
-        assertArrayEquals(new int[]{-1, -1}, session.positions); assertEquals(0, session.history.size());
+        assertArrayEquals(new long[]{-1, -1}, session.positionsMs); assertEquals(0, session.history.size());
         session.capture(0, session.uri, 43000, 100000, true);
         session.transition(0, 1, "https://a/2", 43000, false, 7000, 60000, false);
-        assertEquals(2, session.history.size()); assertArrayEquals(new int[]{43, 7}, session.positions);
+        assertEquals(2, session.history.size()); assertArrayEquals(new long[]{43_000, 7_000}, session.positionsMs);
         assertEquals("user", session.result("com.lampaua.player").getStringExtra("end_by"));
     }
     @Test public void journalsKeepFiveHundredVisitsWithoutTruncatingPositions() throws Exception {
         PlaylistSession session = new PlaylistSession(context, new PlaylistApi(request(item("https://a/1"), item("https://a/2"))), new Intent());
         for (int i = 0; i < 510; i++) { session.capture(i % 2, "https://a/" + i % 2, i * 1000L, -1, true); session.leave(i % 2, i * 1000L, false); }
-        assertEquals(500, session.history.size()); assertArrayEquals(new int[]{508, 509}, session.positions);
+        assertEquals(500, session.history.size()); assertArrayEquals(new long[]{508_000, 509_000}, session.positionsMs);
     }
     @Test public void errorsClearOnlyAfterRealPlaybackAndRefusalsHaveNoWarnings() throws Exception {
         PlaylistSession session = new PlaylistSession(context, new PlaylistApi(request(item("https://a/1"))), new Intent());

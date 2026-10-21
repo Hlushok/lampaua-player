@@ -6,9 +6,8 @@
 
 ## Контракт і джерела
 
-- Повний контракт: `D:\opt\lampaua-player\docs\playlist-api-contract.md` — незмінена копія
-  переданого користувачем API.md, SHA-256
-  `9cf1d80c59a30cdf5722627f303fa9e1f2b29a1cd777c65363657633b6b73531`.
+- Повний контракт: `D:\opt\lampaua-player\docs\playlist-api-contract.md` — API.md із
+  сумісними доповненнями `ask_resume` і мілісекунд станом на 2026-10-20.
 - LAMPA PR: https://github.com/lampa-app/LAMPA/pull/82 — злитий 5 жовтня 2026,
   merge `a8e7d702b116481348ddf164e1647ae3a0454b07`.
 - Android-код для порівняння семантики: `PlaylistApi.java`, `PlaylistSession.java`,
@@ -35,9 +34,13 @@ Media3/JNI та package `com.lampaua.player` у Windows не копіювати.
    IMDb/TMDB, сезон/серія, власні заголовки, субтитри, сегменти, позиція,
    `uri`/`qualities` або `voices`. Назва серії не замінює назву серіалу в пошуку
    субтитрів. Використовувати наявний resolver без регресії торрентів/онлайн/IPTV.
-3. Одиниці API — **секунди**. Позиції й журнал не конвертувати двічі. Усередині
-   адаптера Windows дозволені мілісекунди. `clip_start_sec`/`clip_end_sec` дробові;
-   seek, прогрес і duration відносні до кліпу. Некоректний кінець ігнорується.
+3. Часові ключі приймають **мілісекунди `_ms` або секунди `_sec`**. Валідний `_ms`
+   має пріоритет (навіть 0); некоректний — резервне читання `_sec`. Усередині зберігати
+   точні `long` мілісекунди, не конвертувати через цілу секунду або `double`.
+   Звіт завжди містить обидві одиниці; `_sec` округлено вниз і обмежено `int`,
+   `positions_ms` — `long[]`, `positions_sec` — `int[]`. Сентинел `-1` зберегти.
+   Межі кліпу також приймають обидві одиниці; seek, прогрес і duration відносні до
+   кліпу. Старі секундні журнали мігрувати без втрати ідентичності та visits.
 4. Заголовки root+item об'єднуються без урахування регістру, item перемагає.
    Останній непарний ключ/пари з null пропускаються. Обирати заголовки за URI
    конкретного item/voice/quality/subtitle; невідома URI фрагмента — поточного item.
@@ -81,9 +84,11 @@ Media3/JNI та package `com.lampaua.player` у Windows не копіювати.
 
 Повні ідемпотентні snapshots, прив'язані до session ID, а не дельти:
 
-- поточні uri/index/position_sec/duration_sec;
+- поточні uri/index/position_sec/duration_sec і точні position_ms/duration_ms;
 - positions_sec на всі items: -1 не відкривався; duration переглянуто до кінця;
   не позначати всі попередні серії переглянутими при переході на п'яту;
+- positions_ms та history.position_ms/duration_ms мають зберігати точні значення;
+  started_at лишається Unix seconds, сегменти start/end — також seconds;
 - history: окремий visit при першому playback і кожному переході/повторі;
   quality/voice rebuild не новий visit; максимум останні 500 visits;
   index/started_at Unix seconds/position_sec/duration_sec (-1 невідомо);

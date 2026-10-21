@@ -24,6 +24,18 @@ malformed input.
 `putParcelableArray` (an `ArrayList<Bundle>` is accepted too); read one from the result with
 `getParcelableArray`, as it arrives as `Parcelable[]`. `A | B` means either type.
 
+**Times (UA Player extension matching the current Playlist API).** `position`, `report_interval`,
+`clip_start` and `clip_end` accept either `_ms` or `_sec`. A valid `_ms` value wins, including zero;
+invalid `_ms` falls back to `_sec`. Numbers and numeric strings (up to 256 characters after trimming)
+are accepted; oversized numeric representations are treated as invalid before arbitrary-precision parsing.
+Position and report
+interval are rounded down to a millisecond; clip boundaries use the nearest millisecond. Values are
+bounded to Java `long`. Output always includes both units: `_ms` as `long` (`long[]` for `positions_ms`),
+and `_sec` as whole seconds rounded down, bounded to `int`. The unvisited/unknown `-1` sentinel stays
+`-1` in both units. `segments.start/end` and Unix `started_at` keep their existing seconds convention.
+Canonical API state retains the `long` value. At the Media3 clip/seek boundary only, values are capped
+to `Long.MAX_VALUE / 1000` milliseconds to avoid overflowing the engine's microsecond conversion.
+
 ---
 
 ## Quick start
@@ -77,13 +89,15 @@ entry:
 | `items` | `Bundle[]` | P | [2](#2-input-the-playlist-bundle), [3](#3-input-an-item) |
 | `start_index` | `int` | P | [2](#2-input-the-playlist-bundle) |
 | `result_callback` | `PendingIntent` | P | [8](#8-the-result-callback) |
-| `report_interval_sec` | `int` | P | [2](#2-input-the-playlist-bundle) |
+| `report_interval_sec` / `report_interval_ms` | `int` / `long` | P | [2](#2-input-the-playlist-bundle) |
+| `ask_resume` | `boolean` | P | [2](#2-input-the-playlist-bundle) |
 | `title`, `logo`, `background` | `String` | P, I | [2](#2-input-the-playlist-bundle), [3](#3-input-an-item) |
 | `headers` | `String[]` | P, I | [2](#2-input-the-playlist-bundle) |
 | `uri` | `String` | I, Q, V, S | [3](#3-input-an-item), [4](#4-qualities-voices-subtitles) |
 | `episode_title`, `thumbnail`, `imdb_id`, `tmdb_id`, `segments` | `String` | I | [3](#3-input-an-item) |
-| `season`, `episode`, `position_sec` | `int` | I | [3](#3-input-an-item) |
-| `clip_start_sec`, `clip_end_sec` | `double` | I | [3](#3-input-an-item) |
+| `season`, `episode` | `int` | I | [3](#3-input-an-item) |
+| `position_sec` / `position_ms` | `int` / `long` | I | [3](#3-input-an-item) |
+| `clip_start_sec`, `clip_end_sec` / `_ms` | `double` / `long` | I | [3](#3-input-an-item) |
 | `qualities` | `Bundle[]` | I, V | [4.1](#41-qualities) |
 | `voices` | `Bundle[]` | I | [4.2](#42-voices--one-dub-per-stream) |
 | `subtitles` | `Bundle[]` | I, V | [4.3](#43-external-subtitles) |
@@ -102,8 +116,9 @@ entry:
 | Key | Type | Section |
 |---|---|---|
 | `uri` | `String` | [7.2](#72-extras) |
-| `index`, `position_sec`, `duration_sec` | `int` | [7.2](#72-extras) |
-| `positions_sec` | `int[]` | [7.2](#72-extras) |
+| `index` | `int` | [7.2](#72-extras) |
+| `position_sec`, `duration_sec` / `_ms` | `int` / `long` | [7.2](#72-extras) |
+| `positions_sec` / `positions_ms` | `int[]` / `long[]` | [7.2](#72-extras) |
 | `end_by`, `error_message` | `String` | [7.2](#72-extras) |
 | `history` | `Bundle[]` | [7.4](#74-history) |
 | `audio_language`, `audio_label`, `subtitle_language`, `subtitle_label` | `String` | [7.2](#72-extras) |
@@ -176,6 +191,7 @@ playlist : Bundle
 ├─ headers             String[]        HTTP headers as name, value pairs, for every item
 ├─ result_callback     PendingIntent   optional; section 8
 ├─ report_interval_sec int             optional; a report every N s while playing, N ≥ 30
+├─ ask_resume          boolean         optional; ask before resuming an item; default false
 ├─ (track keys)                        optional; section 5 — an item's own key beats these
 └─ items               Bundle[]        at least one; section 3
 ```
@@ -189,9 +205,28 @@ playlist : Bundle
 | `headers` | `String[]` | none | `{"User-Agent", "x", "Referer", "y"}`. An item's `headers` override these name by name, case-insensitive. With an odd count the last name is dropped silently; a pair with a `null` is skipped. |
 | `result_callback` | `PendingIntent` | none | Section 8. |
 | `report_interval_sec` | `int` | off | ≤ 0 or absent = off; below 30 counts as 30. Reports only while something plays. |
+| `ask_resume` | `boolean` | `false` | Ask “Resume / Start over” for the start item and a manual selection in the playlist panel. |
 | `items` | `Bundle[]` | — | Required, at least one. |
 
 ---
+
+### Resume behavior in UA Player
+
+`ask_resume` applies only to a nested `playlist` launch; the global resume preference and the older
+LampaUA launch formats are unchanged. An omitted/false value resumes without a question. The obsolete
+`resume_mode` is ignored. An explicit `position_sec: 0` wins over local history; without a caller position,
+the player's saved position may be used. Positions remain clip-relative.
+
+With `ask_resume: true`, a position below 30 seconds starts at zero without asking. Watched positions
+also start at zero: the last 5% of the item, or credible end credits from `segments.skip` (ending in the
+last 5% and no longer than 15% of the item). Ads do not count as credits. Duration priority is the local
+file-length store, this session's observed duration, then `segments.duration_ms`. Full-file credit
+markers are not used for clipped items. With no known duration, a non-short position is retained.
+
+Automatic next-item playback starts at zero, without a question. Quality/voice switches and recovery
+rebuilds do not ask again. An unanswered question survives activity recreation; no playback is started
+until a choice is made. Back cancels a fresh launch, or leaves the previous item paused for a manual jump.
+The dialog does not create watched-history visits or change callback/session identity.
 
 ## 3. Input: an item
 
@@ -489,7 +524,8 @@ why the caller's key did not apply — to see it, ask the viewer to send a repor
 | Kind | Read as |
 |---|---|
 | `String` keys | any value's text, trimmed; blank = absent |
-| `int` keys (`start_index`, `season`, `episode`, `position_sec`, `report_interval_sec`) | any number or numeric `String`, rounded down; anything else = absent |
+| `int` keys (`start_index`, `season`, `episode`) | any number or numeric `String`, rounded down; anything else = absent |
+| time keys (`position`, `report_interval`, `clip_start`, `clip_end` with `_sec` or `_ms`) | any number or numeric `String`; invalid values fall back to the other unit; see Times above |
 | `double` keys (`clip_start_sec`, `clip_end_sec`) | any number or numeric `String` |
 | `boolean` keys (`selected`) | a `boolean`, or the `String` `"true"` exactly (case-sensitive) |
 | `Bundle[]` keys (`items`, `qualities`, `voices`, `subtitles`) | `Parcelable[]` or `ArrayList<Bundle>` |
@@ -597,6 +633,10 @@ One Bundle per visit of an item, in order, the visit in progress included:
 | `started_at` | `long` | Unix time, seconds. |
 | `position_sec` | `int` | Where that visit ended; for the current one, where it is now. |
 | `duration_sec` | `int` | The item's duration; **`-1` = not known** (unlike the top-level `duration_sec`, where it is `0`). |
+
+Each visit also carries precise `position_ms` and `duration_ms` (`long`). Existing second-based launch
+journals are migrated on read, retaining visits, sentinels, source choices and session/callback identity.
+Millisecond state is retained on future saves and activity/process restoration.
 
 A visit opens on the first playback and on every move to another item (auto-next, a jump, a repeat); a
 rebuild of the same item (a quality or voice switch) continues the open visit. The journal survives a

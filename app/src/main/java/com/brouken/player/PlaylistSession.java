@@ -20,7 +20,7 @@ final class PlaylistSession {
     final PlaylistApi request;
     final String id;
     final Context context;
-    final int[] positions, durations;
+    final long[] positionsMs, durationsMs;
     final String[] sourceUris;
     final List<Bundle> history = new ArrayList<>();
     final Bundle[] choices;
@@ -29,8 +29,12 @@ final class PlaylistSession {
     String viewerVoice, error;
     int index, visitIndex = -1;
     int qualityLines;
-    int positionSec, durationSec;
+    long positionMs, durationMs;
     boolean played, complete;
+    boolean resumeInitialized;
+    int resumePendingIndex = -1;
+    long resumePendingMs;
+    boolean resumePendingInitial;
     String uri;
 
     PlaylistSession(Context context, PlaylistApi request, Intent launch) {
@@ -39,54 +43,54 @@ final class PlaylistSession {
         String incoming = launch.getStringExtra(ID);
         id = incoming == null ? UUID.randomUUID().toString() : incoming;
         launch.putExtra(ID, id);
-        positions = new int[request.items.size()]; Arrays.fill(positions, -1);
-        durations = new int[positions.length]; Arrays.fill(durations, -1);
-        sourceUris = new String[positions.length];
-        choices = new Bundle[positions.length];
-        audioApplied = new boolean[positions.length]; textApplied = new boolean[positions.length];
+        positionsMs = new long[request.items.size()]; Arrays.fill(positionsMs, -1);
+        durationsMs = new long[positionsMs.length]; Arrays.fill(durationsMs, -1);
+        sourceUris = new String[positionsMs.length];
+        choices = new Bundle[positionsMs.length];
+        audioApplied = new boolean[positionsMs.length]; textApplied = new boolean[positionsMs.length];
         for (int i = 0; i < choices.length; i++) choices[i] = new Bundle();
         index = request.startIndex;
         uri = request.items.get(index).currentSource().uri;
-        positionSec = seconds(request.items.get(index).positionMs);
+        positionMs = request.items.get(index).positionMs;
         restore();
     }
 
     void capture(int current, String currentUri, long positionMs, long durationMs, boolean playing) {
-        if (current < 0 || current >= positions.length) return;
+        if (current < 0 || current >= positionsMs.length) return;
         index = current; uri = currentUri; sourceUris[current] = currentUri;
-        positionSec = seconds(positionMs); durationSec = durationMs > 0 ? seconds(durationMs) : 0;
+        this.positionMs = Math.max(0, positionMs); this.durationMs = Math.max(0, durationMs);
+        if (durationMs > 0) durationsMs[current] = durationMs;
         if (playing) {
             error = null; played = true;
             if (visitIndex != current) openVisit(current);
         }
         if (visitIndex == current) {
-            positions[current] = seconds(positionMs);
-            if (durationMs > 0) durations[current] = seconds(durationMs);
+            positionsMs[current] = this.positionMs;
             updateVisit();
         }
     }
 
     void leave(int oldIndex, long positionMs, boolean finished) {
-        if (oldIndex < 0 || oldIndex >= positions.length || positions[oldIndex] < 0) return;
-        positions[oldIndex] = finished && durations[oldIndex] >= 0
-                ? durations[oldIndex] : seconds(positionMs);
+        if (oldIndex < 0 || oldIndex >= positionsMs.length || positionsMs[oldIndex] < 0) return;
+        positionsMs[oldIndex] = finished && durationsMs[oldIndex] >= 0
+                ? durationsMs[oldIndex] : Math.max(0, positionMs);
         if (visitIndex == oldIndex) { updateVisit(); visitIndex = -1; }
-        if (index == oldIndex) positionSec = positions[oldIndex];
+        if (index == oldIndex) this.positionMs = positionsMs[oldIndex];
     }
 
     void transition(int oldIndex, int nextIndex, String nextUri, long oldPositionMs,
                     boolean finished, long nextPositionMs, long nextDurationMs, boolean playing) {
         leave(oldIndex, oldPositionMs, finished);
         // Once playback has begun, a paused manual jump still opens a new visit.
-        if (played && nextIndex >= 0 && nextIndex < positions.length) openVisit(nextIndex);
+        if (played && nextIndex >= 0 && nextIndex < positionsMs.length) openVisit(nextIndex);
         capture(nextIndex, nextUri, nextPositionMs, nextDurationMs, playing);
     }
 
     private void openVisit(int value) {
         Bundle visit = new Bundle();
         visit.putInt("index", value); visit.putLong("started_at", System.currentTimeMillis() / 1000);
-        visit.putInt("position_sec", Math.max(0, positions[value]));
-        visit.putInt("duration_sec", durations[value]);
+        putTime(visit, "position", Math.max(0, positionsMs[value]));
+        putTime(visit, "duration", durationsMs[value]);
         history.add(visit);
         while (history.size() > 500) history.remove(0);
         visitIndex = value;
@@ -95,8 +99,8 @@ final class PlaylistSession {
     private void updateVisit() {
         if (history.isEmpty() || visitIndex < 0) return;
         Bundle visit = history.get(history.size() - 1);
-        visit.putInt("position_sec", positions[visitIndex]);
-        visit.putInt("duration_sec", durations[visitIndex]);
+        putTime(visit, "position", positionsMs[visitIndex]);
+        putTime(visit, "duration", durationsMs[visitIndex]);
     }
 
     Intent result(String packageName) {
@@ -105,9 +109,10 @@ final class PlaylistSession {
         Bundle extras = new Bundle(choices[index]);
         extras.remove("audio_keys"); extras.remove("subtitle_keys");
         extras.putString("uri", uri); extras.putInt("index", index);
-        extras.putInt("position_sec", positionSec);
-        extras.putInt("duration_sec", durationSec);
-        extras.putIntArray("positions_sec", positions.clone());
+        putTime(extras, "position", positionMs);
+        putTime(extras, "duration", durationMs);
+        extras.putLongArray("positions_ms", positionsMs.clone());
+        extras.putIntArray("positions_sec", toSeconds(positionsMs));
         extras.putParcelableArray("history", history.toArray(new Bundle[0]));
         extras.putString("end_by", error != null ? "error" : complete ? "completion" : played ? "user" : "cancelled");
         if (error != null) extras.putString("error_message", error);
@@ -126,11 +131,27 @@ final class PlaylistSession {
     static Intent rejected(String packageName, String message) {
         return new Intent(packageName + ".result").putExtra("index", -1)
                 .putExtra("position_sec", 0).putExtra("duration_sec", 0)
+                .putExtra("position_ms", 0L).putExtra("duration_ms", 0L)
+                .putExtra("positions_ms", new long[0])
                 .putExtra("positions_sec", new int[0]).putExtra("history", new Bundle[0])
                 .putExtra("uri", (String) null).putExtra("end_by", "error").putExtra("error_message", message);
     }
 
     void report() { persist(); send(context, request.callback, result(context.getPackageName())); }
+
+    void pendingResume(int itemIndex, long positionMs, boolean initial) {
+        resumePendingIndex = itemIndex;
+        resumePendingMs = positionMs;
+        resumePendingInitial = initial;
+        persist();
+    }
+
+    void clearPendingResume() {
+        resumePendingIndex = -1;
+        resumePendingMs = 0;
+        resumePendingInitial = false;
+        persist();
+    }
 
     static void send(Context context, PendingIntent callback, Intent result) {
         if (callback == null) return;
@@ -232,14 +253,21 @@ final class PlaylistSession {
         Bundle state = new Bundle();
         state.putInt("index", index); state.putString("uri", uri); state.putString("error", error);
         state.putStringArray("sourceUris", sourceUris); state.putInt("qualityLines", qualityLines);
-        state.putInt("positionSec", positionSec); state.putInt("durationSec", durationSec);
+        state.putLong("positionMs", positionMs); state.putLong("durationMs", durationMs);
+        // Keep second-based projections readable by older installed builds as well.
+        state.putInt("positionSec", seconds(positionMs)); state.putInt("durationSec", seconds(durationMs));
         state.putBoolean("played", played); state.putBoolean("complete", complete);
-        state.putInt("visit", visitIndex); state.putIntArray("positions", positions); state.putIntArray("durations", durations);
+        state.putBoolean("resumeInitialized", resumeInitialized);
+        state.putInt("resumePendingIndex", resumePendingIndex); state.putLong("resumePendingMs", resumePendingMs);
+        state.putBoolean("resumePendingInitial", resumePendingInitial);
+        state.putInt("visit", visitIndex);
+        state.putLongArray("positionsMs", positionsMs); state.putLongArray("durationsMs", durationsMs);
+        state.putIntArray("positions", toSeconds(positionsMs)); state.putIntArray("durations", toSeconds(durationsMs));
         state.putParcelableArrayList("history", new ArrayList<>(history)); state.putParcelableArray("choices", choices);
         state.putBooleanArray("audioApplied", audioApplied); state.putBooleanArray("textApplied", textApplied);
         state.putBundle("viewerAudio", writeKeys(viewerAudio)); state.putBundle("viewerText", writeKeys(viewerText));
         state.putString("viewerVoice", viewerVoice);
-        int[] voices = new int[positions.length];
+        int[] voices = new int[positionsMs.length];
         for (int i = 0; i < voices.length; i++) voices[i] = request.items.get(i).voiceIndex;
         state.putIntArray("voices", voices);
         Parcel parcel = Parcel.obtain();
@@ -262,19 +290,35 @@ final class PlaylistSession {
         try {
             byte[] bytes = Base64.decode(encoded, Base64.NO_WRAP); parcel.unmarshall(bytes, 0, bytes.length); parcel.setDataPosition(0);
             Bundle state = parcel.readBundle(PlaylistSession.class.getClassLoader());
-            int[] saved = state.getIntArray("positions"), lengths = state.getIntArray("durations");
-            if (saved == null || saved.length != positions.length || lengths == null || lengths.length != saved.length) return;
-            System.arraycopy(saved, 0, positions, 0, saved.length); System.arraycopy(lengths, 0, durations, 0, lengths.length);
-            index = Math.max(0, Math.min(positions.length - 1, state.getInt("index")));
+            long[] saved = restoreTimes(state, "positionsMs", "positions", positionsMs.length);
+            long[] lengths = restoreTimes(state, "durationsMs", "durations", durationsMs.length);
+            if (saved == null || lengths == null) return;
+            System.arraycopy(saved, 0, positionsMs, 0, saved.length);
+            System.arraycopy(lengths, 0, durationsMs, 0, lengths.length);
+            index = Math.max(0, Math.min(positionsMs.length - 1, state.getInt("index")));
             uri = state.getString("uri"); error = state.getString("error");
             String[] sources = state.getStringArray("sourceUris");
             if (sources != null && sources.length == sourceUris.length) System.arraycopy(sources, 0, sourceUris, 0, sources.length);
             qualityLines = state.getInt("qualityLines");
-            positionSec = state.getInt("positionSec", Math.max(0, positions[index]));
-            durationSec = state.getInt("durationSec", Math.max(0, durations[index]));
+            positionMs = state.containsKey("positionMs") ? Math.max(0, state.getLong("positionMs"))
+                    : state.containsKey("positionSec") ? Math.max(0L, state.getInt("positionSec")) * 1000L
+                    : Math.max(0, positionsMs[index]);
+            durationMs = state.containsKey("durationMs") ? Math.max(0, state.getLong("durationMs"))
+                    : state.containsKey("durationSec") ? Math.max(0L, state.getInt("durationSec")) * 1000L
+                    : Math.max(0, durationsMs[index]);
             played = state.getBoolean("played"); complete = state.getBoolean("complete"); visitIndex = state.getInt("visit", -1);
+            // A journal written before this option already represents a launch that was opened.
+            resumeInitialized = state.getBoolean("resumeInitialized", true);
+            int pendingIndex = state.getInt("resumePendingIndex", -1);
+            resumePendingIndex = pendingIndex >= 0 && pendingIndex < positionsMs.length ? pendingIndex : -1;
+            resumePendingMs = Math.max(0, state.getLong("resumePendingMs"));
+            resumePendingInitial = state.getBoolean("resumePendingInitial");
             ArrayList<Bundle> visits = state.getParcelableArrayList("history");
             if (visits != null) history.addAll(visits.subList(Math.max(0, visits.size() - 500), visits.size()));
+            for (Bundle visit : history) {
+                restoreVisitTime(visit, "position");
+                restoreVisitTime(visit, "duration");
+            }
             android.os.Parcelable[] savedChoices = state.getParcelableArray("choices");
             if (savedChoices != null && savedChoices.length == choices.length) {
                 for (int i = 0; i < choices.length; i++) if (savedChoices[i] instanceof Bundle) choices[i] = (Bundle) savedChoices[i];
@@ -285,7 +329,7 @@ final class PlaylistSession {
             viewerAudio = readKeys(state.getBundle("viewerAudio")); viewerText = readKeys(state.getBundle("viewerText"));
             viewerVoice = state.getString("viewerVoice");
             int[] voices = state.getIntArray("voices");
-            if (voices != null && voices.length == positions.length) for (int i = 0; i < voices.length; i++) {
+            if (voices != null && voices.length == positionsMs.length) for (int i = 0; i < voices.length; i++) {
                 PlaylistApi.Item item = request.items.get(i);
                 if (voices[i] >= 0 && voices[i] < item.voices.size()) item.voiceIndex = voices[i];
             }
@@ -295,5 +339,34 @@ final class PlaylistSession {
 
     static int seconds(long milliseconds) {
         return (int) Math.min(Integer.MAX_VALUE, Math.max(0, milliseconds / 1000));
+    }
+
+    private static void putTime(Bundle target, String name, long milliseconds) {
+        target.putLong(name + "_ms", milliseconds);
+        target.putInt(name + "_sec", milliseconds < 0 ? -1 : seconds(milliseconds));
+    }
+
+    private static int[] toSeconds(long[] milliseconds) {
+        int[] seconds = new int[milliseconds.length];
+        for (int i = 0; i < seconds.length; i++) seconds[i] = milliseconds[i] < 0 ? -1 : seconds(milliseconds[i]);
+        return seconds;
+    }
+
+    private static long[] restoreTimes(Bundle state, String preciseKey, String legacyKey, int count) {
+        Object precise = state.get(preciseKey);
+        if (precise instanceof long[] && ((long[]) precise).length == count) return (long[]) precise;
+        Object old = state.get(legacyKey);
+        if (!(old instanceof int[]) || ((int[]) old).length != count) return null;
+        int[] seconds = (int[]) old;
+        long[] milliseconds = new long[count];
+        for (int i = 0; i < count; i++) milliseconds[i] = seconds[i] < 0 ? -1 : seconds[i] * 1000L;
+        return milliseconds;
+    }
+
+    private static void restoreVisitTime(Bundle visit, String name) {
+        long value = visit.containsKey(name + "_ms") ? visit.getLong(name + "_ms")
+                : visit.getInt(name + "_sec", -1);
+        if (!visit.containsKey(name + "_ms") && value >= 0) value *= 1000;
+        putTime(visit, name, value);
     }
 }

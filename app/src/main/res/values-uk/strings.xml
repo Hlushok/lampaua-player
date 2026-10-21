@@ -555,4 +555,8 @@
     <string name="pref_mask_reports">Приховувати посилання у звітах</string>
     <string name="pref_mask_reports_on">Посилання на відео скорочуються до сервера й шляху, локальні файли — до типу</string>
     <string name="pref_mask_reports_off">Звіти містять повні посилання на відео разом із токенами. Вивантажений звіт публічний</string>
+    <string name="playlist_resume_title">Продовжити перегляд?</string>
+    <string name="playlist_resume_message">Продовжити з %1$s?</string>
+    <string name="playlist_resume_continue">Продовжити</string>
+    <string name="playlist_resume_restart">Спочатку</string>
 </resources>

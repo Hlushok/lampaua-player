@@ -9,6 +9,10 @@ import android.os.Parcelable;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.math.RoundingMode;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -46,7 +50,8 @@ final class PlaylistApi {
         String title, episodeTitle, logo, background, thumbnail, imdb, tmdb, segments;
         Integer season, episode;
         long positionMs;
-        double clipStart, clipEnd = -1;
+        boolean hasPosition;
+        long clipStartMs, clipEndMs = -1;
         Keys audio, text;
         Map<String, String> headers;
         Source source;
@@ -83,10 +88,10 @@ final class PlaylistApi {
             }
             MediaItem.Builder media = new MediaItem.Builder().setUri(selected.uri)
                     .setMediaMetadata(metadata.build()).setSubtitleConfigurations(configs);
-            if (clipStart > 0 || clipEnd > clipStart) {
+            if (clipStartMs > 0 || clipEndMs > clipStartMs) {
                 MediaItem.ClippingConfiguration.Builder clip = new MediaItem.ClippingConfiguration.Builder()
-                        .setStartPositionMs(Math.round(clipStart * 1000));
-                if (clipEnd > clipStart) clip.setEndPositionMs(Math.round(clipEnd * 1000));
+                        .setStartPositionMs(engineTimeMs(clipStartMs));
+                if (clipEndMs > clipStartMs) clip.setEndPositionMs(engineTimeMs(clipEndMs));
                 media.setClippingConfiguration(clip.build());
             }
             return media.build();
@@ -98,16 +103,19 @@ final class PlaylistApi {
     final List<String> warnings = new ArrayList<>();
     final Keys audio, text;
     final PendingIntent callback;
-    final int startIndex, reportInterval;
+    final int startIndex;
+    final long reportIntervalMs;
+    final boolean askResume;
 
     PlaylistApi(Bundle bundle) throws Invalid {
         original = new Bundle(bundle);
+        askResume = bool(bundle.get("ask_resume"));
         audio = keys(bundle, "audio", "playlist");
         text = keys(bundle, "subtitle", "playlist");
         Object pending = bundle.get("result_callback");
         callback = pending instanceof PendingIntent ? (PendingIntent) pending : null;
-        int interval = number(bundle, "report_interval_sec", 0);
-        reportInterval = interval <= 0 ? 0 : Math.max(30, interval);
+        Long interval = timeMillis(bundle, "report_interval", RoundingMode.FLOOR);
+        reportIntervalMs = interval == null || interval <= 0 ? 0 : Math.max(30_000, interval);
         Object[] values = array(bundle.get("items"));
         if (values == null || values.length == 0) throw new Invalid("playlist has no items");
         final Map<String, String> commonHeaders = headers(bundle.get("headers"));
@@ -128,11 +136,15 @@ final class PlaylistApi {
             item.segments = string(value, "segments");
             item.season = integer(value.get("season"), false);
             item.episode = integer(value.get("episode"), false);
-            item.clipStart = Math.max(0, decimal(value.get("clip_start_sec"), 0));
-            item.clipEnd = decimal(value.get("clip_end_sec"), -1);
-            item.positionMs = Math.max(0, (long) number(value, "position_sec", 0) * 1000L);
-            if (item.clipEnd > item.clipStart) {
-                item.positionMs = Math.min(item.positionMs, Math.round((item.clipEnd - item.clipStart) * 1000));
+            Long clipStart = timeMillis(value, "clip_start", RoundingMode.HALF_UP);
+            Long clipEnd = timeMillis(value, "clip_end", RoundingMode.HALF_UP);
+            Long position = timeMillis(value, "position", RoundingMode.FLOOR);
+            item.clipStartMs = clipStart == null ? 0 : Math.max(0, clipStart);
+            item.clipEndMs = clipEnd == null ? -1 : clipEnd;
+            item.positionMs = position == null ? 0 : Math.max(0, position);
+            item.hasPosition = position != null;
+            if (item.clipEndMs > item.clipStartMs) {
+                item.positionMs = Math.min(item.positionMs, item.clipEndMs - item.clipStartMs);
             }
             item.headers = new LinkedHashMap<>(commonHeaders);
             item.headers.putAll(headers(value.get("headers")));
@@ -278,6 +290,51 @@ final class PlaylistApi {
         if (Double.isNaN(number) || Double.isInfinite(number) || number < Integer.MIN_VALUE || number > Integer.MAX_VALUE
                 || strict && number != Math.rint(number)) return null;
         return (int) Math.floor(number);
+    }
+
+    /** Valid milliseconds beat seconds, including zero/negative values. Invalid input falls back. */
+    static Long timeMillis(Bundle bundle, String name, RoundingMode rounding) {
+        BigDecimal value = timeNumber(bundle.get(name + "_ms"));
+        if (value == null) {
+            value = timeNumber(bundle.get(name + "_sec"));
+            if (value == null) return null;
+            try { value = value.multiply(BigDecimal.valueOf(1000)); }
+            catch (ArithmeticException invalid) { return null; }
+        }
+        return roundMillis(value, rounding);
+    }
+
+    static Long millisNumber(Object value) {
+        BigDecimal number = timeNumber(value);
+        return number == null ? null : roundMillis(number, RoundingMode.FLOOR);
+    }
+
+    /** Media3 converts these values to microseconds using an unchecked multiplication. */
+    static long engineTimeMs(long milliseconds) {
+        return Math.min(milliseconds, Long.MAX_VALUE / 1000);
+    }
+
+    private static long roundMillis(BigDecimal value, RoundingMode rounding) {
+        // Do not pass long values through double: positions above 2^53 would lose precision.
+        if (value.compareTo(BigDecimal.valueOf(Long.MAX_VALUE)) >= 0) return Long.MAX_VALUE;
+        if (value.compareTo(BigDecimal.valueOf(Long.MIN_VALUE)) <= 0) return Long.MIN_VALUE;
+        // Avoid constructing huge powers of ten for inputs such as "1e-2147483647".
+        if (value.abs().compareTo(BigDecimal.ONE) < 0) {
+            if (rounding == RoundingMode.FLOOR) return value.signum() < 0 ? -1L : 0L;
+            return value.abs().compareTo(BigDecimal.valueOf(.5)) >= 0 ? (long) value.signum() : 0L;
+        }
+        return value.setScale(0, rounding).longValue();
+    }
+
+    private static BigDecimal timeNumber(Object value) {
+        if (!(value instanceof Number) && !(value instanceof String)) return null;
+        // External Bundles are parsed on the UI thread. Bound mantissas before decimal conversion.
+        if (value instanceof BigInteger && ((BigInteger) value).bitLength() > 851) return null;
+        if (value instanceof BigDecimal && ((BigDecimal) value).unscaledValue().bitLength() > 851) return null;
+        String number = value.toString().trim();
+        if (number.length() > 256) return null;
+        try { return new BigDecimal(number); }
+        catch (NumberFormatException invalid) { return null; }
     }
     static double decimal(Object value, double fallback) {
         if (!(value instanceof Number) && !(value instanceof String)) return fallback;

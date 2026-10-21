@@ -1084,6 +1084,8 @@ public class PlayerActivity extends Activity {
     // stale `position`. See onSaveInstanceState()/restoreApiSession().
     private static final String STATE_API_SESSION = "apiSession";
     private PlaylistSession playlistSession;
+    private AlertDialog playlistResumeDialog;
+    private boolean applyingNestedResume;
     private PlaylistAudioMemory playlistAudioMemory;
     private boolean applyingPlaylistTracks;
     private boolean sourceSwitchResetAudio, sourceSwitchResetText;
@@ -1094,10 +1096,16 @@ public class PlayerActivity extends Activity {
             if (playlistSession == null || player == null || !player.isPlaying()) return;
             capturePlaylistProgress();
             playlistSession.report();
-            if (playlistSession.request.reportInterval > 0)
-                playlistReports.postDelayed(this, playlistSession.request.reportInterval * 1000L);
+            schedulePlaylistReport();
         }
     };
+    private void schedulePlaylistReport() {
+        if (playlistSession == null || playlistSession.request.reportIntervalMs <= 0) return;
+        // Use one clock reading: postDelayed would add a later uptime and could still overflow.
+        long now = SystemClock.uptimeMillis();
+        long when = now + Math.min(playlistSession.request.reportIntervalMs, Long.MAX_VALUE - now);
+        playlistReports.postAtTime(playlistReportTick, when);
+    }
     boolean apiAccess;
     boolean apiAccessPartial;
     String apiTitle;
@@ -2983,6 +2991,7 @@ public class PlayerActivity extends Activity {
     @Override
     public void onResume() {
         super.onResume();
+        showPlaylistResumePrompt();
         restorePlayStateAllowed = true;
         // Coming back is a sign of life, and it is also where a setting turned off while we were away
         // stops applying.
@@ -3004,6 +3013,7 @@ public class PlayerActivity extends Activity {
 
     @Override
     public void onStop() {
+        dismissPlaylistResumePrompt();
         playlistReports.removeCallbacks(playlistReportTick);
         if (playlistSession != null && !isChangingConfigurations() && !handedOver) {
             capturePlaylistProgress();
@@ -3101,6 +3111,7 @@ public class PlayerActivity extends Activity {
      */
     @Override
     protected void onDestroy() {
+        dismissPlaylistResumePrompt();
         if (!handedOver) {
             releasePlayer(false);
         }
@@ -3466,6 +3477,8 @@ public class PlayerActivity extends Activity {
 
     private void openNestedPlaylist(Intent intent) {
         closePlaylistSession();
+        // A previous launch must not play underneath the new launch's resume question.
+        if (playerView != null && player != null) releasePlayer(false);
         resetApiAccess();
         Bundle bundle = null;
         try {
@@ -3488,11 +3501,19 @@ public class PlayerActivity extends Activity {
             }
             apiAccess = true; mPrefs.setPersistent(false);
             apiPlaylistPositions = new long[request.items.size()];
+            final java.util.Map<String, Long> savedPositions = Prefs.readPositions(this);
             for (int i = 0; i < request.items.size(); i++) {
-                apiPlaylistPositions[i] = playlistSession.positions[i] >= 0
-                        ? playlistSession.positions[i] * 1000L : request.items.get(i).positionMs;
+                PlaylistApi.Item item = request.items.get(i);
+                Long savedPosition = savedPositions.get(item.currentSource().uri);
+                long initialPosition = item.hasPosition ? item.positionMs
+                        : savedPosition == null ? 0L : Math.max(0, savedPosition - item.clipStartMs);
+                apiPlaylistPositions[i] = playlistSession.positionsMs[i] >= 0
+                        ? playlistSession.positionsMs[i] : initialPosition;
             }
             apiPlaylistStartIndex = playlistSession.index;
+            if (playlistSession.resumeInitialized) {
+                apiPlaylistPositions[apiPlaylistStartIndex] = playlistSession.positionMs;
+            }
             stickyQualityLines = playlistSession.qualityLines;
             if (playlistSession.played && playlistSession.uri != null) {
                 int index = playlistSession.index;
@@ -3502,6 +3523,19 @@ public class PlayerActivity extends Activity {
             intent.setData(uri); mPrefs.updateMedia(this, uri, null);
             mPrefs.updatePosition(apiPlaylistPositions[apiPlaylistStartIndex]);
             syncNestedItem(apiPlaylistStartIndex);
+            if (!playlistSession.resumeInitialized) {
+                playlistSession.resumeInitialized = true;
+                PlaylistResumePolicy.Decision decision = nestedResumeDecision(apiPlaylistStartIndex,
+                        apiPlaylistPositions[apiPlaylistStartIndex]);
+                if (decision.ask) {
+                    playlistSession.pendingResume(apiPlaylistStartIndex, decision.positionMs, true);
+                } else {
+                    rememberEpisodePosition(apiPlaylistStartIndex, decision.positionMs);
+                    mPrefs.updatePosition(decision.positionMs);
+                    playlistSession.positionMs = decision.positionMs;
+                    playlistSession.persist();
+                }
+            }
             intentReturnResult = true; focusPlay = true;
             checkRoomMedia(false, false);
         } catch (PlaylistApi.Invalid | RuntimeException invalid) {
@@ -3547,9 +3581,121 @@ public class PlayerActivity extends Activity {
     }
 
     private void closePlaylistSession() {
+        dismissPlaylistResumePrompt();
         playlistReports.removeCallbacks(playlistReportTick);
         if (playlistSession != null) { capturePlaylistProgress(); playlistSession.report(); playlistSession = null; }
         rejectedPlaylistResult = null;
+    }
+
+    private PlaylistResumePolicy.Decision nestedResumeDecision(int index, long positionMs) {
+        PlaylistApi.Item item = playlistSession.request.items.get(index);
+        Uri activeUri = playlistUri(index);
+        Long stored = Prefs.readLengths(this).get(activeUri == null ? item.currentSource().uri : activeUri.toString());
+        // The local database contains full-file lengths; the session has clip-relative lengths.
+        long storedDuration = stored == null ? 0 : Math.max(0, stored - item.clipStartMs);
+        long duration = PlaylistResumePolicy.duration(storedDuration,
+                playlistSession.durationsMs[index], item.segments);
+        if (storedDuration <= 0 && playlistSession.durationsMs[index] <= 0 && item.clipStartMs > 0) {
+            duration = Math.max(0, duration - item.clipStartMs);
+        }
+        if (item.clipEndMs > item.clipStartMs) {
+            long clipped = item.clipEndMs - item.clipStartMs;
+            duration = duration > 0 ? Math.min(duration, clipped) : clipped;
+        }
+        // Full-file credit markers cannot describe a clipped timeline without remapping.
+        String segments = item.clipStartMs > 0 || item.clipEndMs > item.clipStartMs ? null : item.segments;
+        return PlaylistResumePolicy.decide(positionMs, duration, segments, playlistSession.request.askResume);
+    }
+
+    private void selectNestedPlaylistItem(int index) {
+        capturePlaylistProgress();
+        long position = player != null && player.getCurrentMediaItemIndex() == index
+                ? player.getCurrentPosition() : savedPlaylistPosition(index);
+        PlaylistResumePolicy.Decision decision = nestedResumeDecision(index, position);
+        if (decision.ask) {
+            play = false;
+            restorePlayState = false;
+            if (player != null) player.pause();
+            playlistSession.pendingResume(index, decision.positionMs, false);
+            showPlaylistResumePrompt();
+        } else {
+            startNestedPlaylistItem(index, decision.positionMs);
+        }
+    }
+
+    private void startNestedPlaylistItem(int index, long positionMs) {
+        playlistSession.clearPendingResume();
+        apiPlaylistStartIndex = index;
+        rememberEpisodePosition(index, positionMs);
+        if (player != null) {
+            player.setSeekParameters(SeekParameters.EXACT);
+            applyingNestedResume = true;
+            try {
+                player.seekTo(index, PlaylistApi.engineTimeMs(positionMs));
+            } finally {
+                applyingNestedResume = false;
+            }
+            player.setPlayWhenReady(true);
+            prepareIfIdle();
+        } else {
+            Uri uri = playlistUri(index);
+            mPrefs.updateMedia(this, uri, null);
+            mPrefs.updatePosition(positionMs);
+            syncNestedItem(index);
+            playlistSession.uri = uri.toString();
+            playlistSession.positionMs = positionMs;
+            playlistSession.persist();
+            playerView.readout(null, 0);
+            // An explicit choice to play is not a background-return/recovery rebuild.
+            sourceSwitchKeepPaused = false;
+            pauseAfterScreenRestart = false;
+            restorePlayState = false;
+            initializePlayer();
+        }
+    }
+
+    private void showPlaylistResumePrompt() {
+        if (!alive || isFinishing() || playerView == null || playlistSession == null
+                || playlistSession.resumePendingIndex < 0 || playlistResumeDialog != null) return;
+        final PlaylistSession session = playlistSession;
+        final int index = session.resumePendingIndex;
+        final long position = session.resumePendingMs;
+        final boolean initial = session.resumePendingInitial;
+        playlistResumeDialog = new MaterialAlertDialogBuilder(Dialogs.dialogContext(this))
+                .setTitle(R.string.playlist_resume_title)
+                .setMessage(getString(R.string.playlist_resume_message,
+                        android.text.format.DateUtils.formatElapsedTime(position / 1000)))
+                .setPositiveButton(R.string.playlist_resume_continue, (dialog, which) -> {
+                    if (playlistSession == session) startNestedPlaylistItem(index, position);
+                })
+                .setNegativeButton(R.string.playlist_resume_restart, (dialog, which) -> {
+                    if (playlistSession == session) startNestedPlaylistItem(index, 0);
+                })
+                .setOnCancelListener(dialog -> {
+                    if (playlistSession != session) return;
+                    session.clearPendingResume();
+                    if (initial) {
+                        finish();
+                    } else if (player == null) {
+                        // Rotation/background teardown can release the previous item while asking.
+                        // Cancelling must restore that item paused, not leave inert play controls.
+                        play = false;
+                        restorePlayState = false;
+                        sourceSwitchKeepPaused = true;
+                        initializePlayer();
+                    }
+                })
+                .create();
+        playlistResumeDialog.setOnDismissListener(dialog -> playlistResumeDialog = null);
+        playlistResumeDialog.show();
+        playlistResumeDialog.getButton(AlertDialog.BUTTON_POSITIVE).requestFocus();
+    }
+
+    private void dismissPlaylistResumePrompt() {
+        if (playlistResumeDialog != null) {
+            playlistResumeDialog.dismiss();
+            playlistResumeDialog = null;
+        }
     }
 
     private void chooseInitialVoice(PlaylistApi.Item item) {
@@ -7286,7 +7432,11 @@ public class PlayerActivity extends Activity {
             }
 
             row.setOnClickListener(v -> {
-                if (player != null) {
+                if (playlistSession != null) {
+                    if (playlistDialog != null) playlistDialog.dismiss();
+                    selectNestedPlaylistItem(index);
+                    return;
+                } else if (player != null) {
                     player.seekToDefaultPosition(index);
                     player.setPlayWhenReady(true);
                     prepareIfIdle();
@@ -12013,6 +12163,10 @@ public class PlayerActivity extends Activity {
     }
 
     public void initializePlayer() {
+        if (playlistSession != null && playlistSession.resumePendingIndex >= 0) {
+            showPlaylistResumePrompt();
+            return;
+        }
         // Before anything asks where this file was left: another screen may have written that since
         // this activity was created, and on a torrent server another device may have.
         mPrefs.reloadPositions();
@@ -12901,7 +13055,8 @@ public class PlayerActivity extends Activity {
                 if (remembered != null && apiPlaylistStartIndex >= 0 && apiPlaylistStartIndex < items.size()) {
                     items.set(apiPlaylistStartIndex, withSubtitle(items.get(apiPlaylistStartIndex), remembered));
                 }
-                player.setMediaItems(items, apiPlaylistStartIndex, mPrefs.getPosition());
+                player.setMediaItems(items, apiPlaylistStartIndex, playlistSession == null
+                        ? mPrefs.getPosition() : PlaylistApi.engineTimeMs(mPrefs.getPosition()));
             } else {
                 player.setMediaItem(mediaItemBuilder.build(), mPrefs.getPosition());
             }
@@ -13760,7 +13915,8 @@ public class PlayerActivity extends Activity {
             // played to its end, so that one is remembered as unwatched. Keeping its end would send a
             // manual jump back to it straight to its last frame, from where it advances off again.
             if (oldIndex != newIndex) {
-                final boolean playedToEnd = reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION;
+                final boolean playedToEnd = reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION
+                        || playlistSession != null && steppedBySkip;
                 if (playlistSession != null) {
                     playlistSession.transition(oldIndex, newIndex, playlistUri(newIndex) == null ? null : playlistUri(newIndex).toString(),
                             oldPosition.positionMs, playedToEnd, newPosition.positionMs, -1, player.isPlaying());
@@ -13785,7 +13941,8 @@ public class PlayerActivity extends Activity {
             // Manually jumping back to an already-watched episode: resume where we left it. Auto-advance
             // (gapless) keeps starting the next episode from the beginning, as it should. The follow-up
             // seek lands with oldIndex == newIndex, so it neither loops nor overwrites the saved slot.
-            if (reason == Player.DISCONTINUITY_REASON_SEEK && oldIndex != newIndex
+            if (!applyingNestedResume && reason == Player.DISCONTINUITY_REASON_SEEK && oldIndex != newIndex
+                    && !(playlistSession != null && steppedBySkip)
                     && newPosition.positionMs < 1000) {
                 final long saved = savedPlaylistPosition(newIndex);
                 if (saved > 0) {
@@ -13795,7 +13952,7 @@ public class PlayerActivity extends Activity {
                     // timecode inside the first keyframe of the episode would resolve to nothing a
                     // clock can hold.
                     player.setSeekParameters(SeekParameters.EXACT);
-                    player.seekTo(newIndex, saved);
+                    player.seekTo(newIndex, playlistSession == null ? saved : PlaylistApi.engineTimeMs(saved));
                 }
             }
         }
@@ -14025,8 +14182,7 @@ public class PlayerActivity extends Activity {
                 capturePlaylistProgress();
                 playlistSession.persist();
                 playlistReports.removeCallbacks(playlistReportTick);
-                if (isPlaying && playlistSession.request.reportInterval > 0)
-                    playlistReports.postDelayed(playlistReportTick, playlistSession.request.reportInterval * 1000L);
+                if (isPlaying) schedulePlaylistReport();
             }
             Utils.log("playing=" + isPlaying + (player != null ? " playWhenReady=" + player.getPlayWhenReady()
                     + " state=" + stateName(player.getPlaybackState()) : ""));

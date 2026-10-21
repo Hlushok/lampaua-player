@@ -587,4 +587,8 @@
     <string name="pref_mask_reports">Hide links in reports</string>
     <string name="pref_mask_reports_on">Video links are cut to the server and path, local files to their type</string>
     <string name="pref_mask_reports_off">Reports carry whole video links, tokens included. An uploaded report is public</string>
+    <string name="playlist_resume_title">Resume playback?</string>
+    <string name="playlist_resume_message">Continue from %1$s?</string>
+    <string name="playlist_resume_continue">Resume</string>
+    <string name="playlist_resume_restart">Start over</string>
 </resources>
