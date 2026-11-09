@@ -21,6 +21,7 @@ import java.util.TreeMap;
 final class M3uPlaylist {
     static final String CHECKED = "com.lampaua.player.m3u_checked";
     static final String ORIGIN = "com.lampaua.player.m3u_origin";
+    static final String STATE = "com.lampaua.player.m3u_resolved_intent";
     static final int MAX_BYTES = 1024 * 1024;
     static final int MAX_ITEMS = 500;
 

@@ -123,7 +123,8 @@ public class M3uImportActivityTest {
             activity.pending.complete(playlist(), false);
             Shadows.shadowOf(Looper.getMainLooper()).idle();
             assertEquals(0, activity.opened);
-            controller.start().resume();
+            // On API 28 performRestart(true) includes onStart; calling start as well duplicates it.
+            controller.restart().resume();
             assertEquals(1, activity.opened);
         }
     }

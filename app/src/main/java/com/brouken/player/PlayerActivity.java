@@ -1570,6 +1570,12 @@ public class PlayerActivity extends Activity {
             live.saveApiSession(inheritedState);
             live.handOver();
         }
+        // setIntent changes this instance only; recreation may receive the original M3U launch.
+        // Restore the already imported list before parsing the launch or deciding orientation.
+        if (savedInstanceState != null) {
+            Intent resolvedM3u = savedInstanceState.getParcelable(M3uPlaylist.STATE);
+            if (resolvedM3u != null) setIntent(resolvedM3u);
+        }
         // Rotate ASAP, before super/inflating to avoid glitches with activity launch animation
         mPrefs = new Prefs(this);
         systemVolume = mPrefs.systemVolume;
@@ -3143,6 +3149,9 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
+        if (getIntent() != null && getIntent().getBooleanExtra(M3uPlaylist.CHECKED, false)) {
+            outState.putParcelable(M3uPlaylist.STATE, new Intent(getIntent()));
+        }
         saveApiSession(outState);
     }
 
