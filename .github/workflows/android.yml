@@ -32,6 +32,17 @@ jobs:
       - name: Test, lint and build universal APK
         run: ./gradlew clean :app:testLatestUniversalDebugUnitTest :app:lintLatestUniversalDebug :app:assembleLatestUniversalDebug --console=plain
 
+      - name: Upload test and lint reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ua-player-ci-reports
+          path: |
+            app/build/test-results/
+            app/build/reports/tests/
+            app/build/reports/lint-results-*
+          if-no-files-found: ignore
+
       - name: Verify packaged resources and signature
         shell: bash
         run: |
