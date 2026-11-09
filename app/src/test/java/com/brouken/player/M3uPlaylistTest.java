@@ -45,7 +45,7 @@ public class M3uPlaylistTest {
                 .setDataAndType(Uri.parse("https://server/list"), "audio/x-mpegurl")));
     }
 
-    @Test public void entriesKeepServerOrderNamesAndRelativeUrlsWithoutRestoringUnrelatedHistory() throws Exception {
+    @Test public void entriesKeepServerOrderNamesAndRelativeUrlsWithoutInventingACallerPosition() throws Exception {
         Bundle result = parse("\uFEFF#EXTM3U\r\n#EXTINF:-1,Серія 5\r\n../stream/episode5.mkv?index=5&play\r\n"
                 + "#EXTINF:-1 tvg-logo=\"https://a/img,a.png\",Серія 6, частина 2\nhttps://cdn/episode6.mkv\n");
         PlaylistApi api = new PlaylistApi(result);
@@ -54,7 +54,7 @@ public class M3uPlaylistTest {
         assertEquals("Серія 5", api.items.get(0).title);
         assertEquals("http://127.0.0.1:8090/stream/episode5.mkv?index=5&play", api.items.get(0).source.uri);
         assertEquals("Серія 6, частина 2", api.items.get(1).title);
-        assertTrue(api.items.get(0).hasPosition);
+        assertFalse(api.items.get(0).hasPosition);
         assertEquals(0, api.items.get(0).positionMs);
         assertEquals("Серія 5", api.items.get(0).mediaItem(RuntimeEnvironment.getApplication()).mediaMetadata.title);
     }

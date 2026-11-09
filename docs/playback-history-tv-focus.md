@@ -11,6 +11,8 @@
 - A local copy of actual external-player progress does not change Playlist API
   positions, callbacks or explicit launch positions. Store clip-relative playback
   as an absolute file position locally; never record unvisited playlist items.
+- M3U does not invent a caller-supplied zero position. The server keeps control
+  over `fromlast` ordering, while the selected file can resume from local history.
 - On TV, closing the final picker returns to its opening control. Moving between
   pickers does not flash or focus controls behind the new picker.
 - Back from a panel opened in More returns to More on the same row. Closing a

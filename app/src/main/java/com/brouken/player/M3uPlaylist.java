@@ -130,9 +130,9 @@ final class M3uPlaylist {
                     Bundle item = new Bundle();
                     item.putString("uri", uri.toString());
                     if (title != null && !title.isEmpty()) item.putString("title", title);
-                    // fromlast is resolved by TorrServer. Preserve the returned order and do not
-                    // substitute unrelated local resume positions for its first file.
-                    item.putInt("position_sec", 0);
+                    // fromlast selects the first file on TorrServer. M3U supplies no position;
+                    // use the ordinary history fallback for that exact file, without inventing a
+                    // caller-supplied zero that would disable resume.
                     List<String> pairs = new ArrayList<>();
                     for (Map.Entry<String, String> header : safeHeaders(headers, credentialOrigin, uri).entrySet()) {
                         pairs.add(header.getKey()); pairs.add(header.getValue());

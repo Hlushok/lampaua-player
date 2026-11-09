@@ -73,6 +73,25 @@ public class PlaybackHistoryActivityTest {
         }
     }
 
+    @Test public void importedFromlastKeepsTheServerFileOrderAndResumesThatExactTorrentFile() throws Exception {
+        Application app = RuntimeEnvironment.getApplication();
+        String hash = "0123456789abcdef0123456789abcdef01234567";
+        Uri old = Uri.parse("http://server:8090/stream/old?link=" + hash + "&index=5&play");
+        Prefs.rememberPosition(app, old, 123_456);
+        Uri list = Uri.parse("http://server:8090/playlist/show.m3u?hash=" + hash + "&fromlast");
+        Bundle bundle = M3uPlaylist.parse("#EXTM3U\n#EXTINF:-1,Episode 5\n/stream/new?index=5&link=" + hash
+                + "&play\n#EXTINF:-1,Episode 6\n/stream/next?index=6&link=" + hash + "&play\n",
+                list, list, java.util.Collections.emptyMap());
+        Intent intent = new Intent(Intent.ACTION_VIEW, list).putExtra("playlist", bundle);
+        try (ActivityController<HistoryActivity> controller = Robolectric.buildActivity(HistoryActivity.class, intent).setup()) {
+            assertEquals(123_456, controller.get().mPrefs.getPosition());
+            PlaylistSession session = ReflectionHelpers.getField(controller.get(), "playlistSession");
+            assertEquals(0, session.index);
+            assertEquals("Episode 5", session.request.items.get(0).title);
+            assertEquals(-1, session.positionsMs[1]);
+        }
+    }
+
     private void remember(HistoryActivity activity, int index, long position) {
         ReflectionHelpers.callInstanceMethod(activity, "rememberLocalPlaylistPosition",
                 ClassParameter.from(int.class, index), ClassParameter.from(long.class, position));
