@@ -87,7 +87,10 @@ public class M3uPlaylistLoaderTest {
         try (Server destination = new Server(200, "media", "");
              Server redirect = new Server(302, "", "Location: " + destination.url("/video.mkv") + "\r\n")) {
             Intent imported = new Intent(Intent.ACTION_VIEW, Uri.parse(redirect.url("/list.m3u")))
-                    .putExtra(M3uPlaylist.CHECKED, true);
+                    .putExtra(M3uPlaylist.CHECKED, true)
+                    .putExtra(M3uPlaylist.ORIGIN, redirect.url("/list.m3u"));
+            // Nested playlists replace Intent.data with the first item, possibly on another origin.
+            imported.setData(Uri.parse(destination.url("/first.mkv")));
             OkHttpClient media = M3uPlaylist.mediaClient(new OkHttpClient(), imported);
             okhttp3.Request request = new okhttp3.Request.Builder().url(redirect.url("/stream"))
                     .header("Authorization", "Basic test-only").header("Cookie", "session=test")

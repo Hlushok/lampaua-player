@@ -3508,7 +3508,8 @@ public class PlayerActivity extends Activity {
                 finish();
                 return;
             }
-            Intent resolved = new Intent(original).putExtra(M3uPlaylist.CHECKED, true);
+            Intent resolved = new Intent(original).putExtra(M3uPlaylist.CHECKED, true)
+                    .putExtra(M3uPlaylist.ORIGIN, original.getData().toString());
             if (playlist != null) resolved.putExtra(PlaylistApi.EXTRA, playlist);
             // HLS retains the original URI, MIME, headers and extras; only file lists become items.
             setIntent(resolved);

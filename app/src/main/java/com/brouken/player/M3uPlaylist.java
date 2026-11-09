@@ -20,6 +20,7 @@ import java.util.TreeMap;
 /** Converts a file-list M3U to the existing Playlist API; HLS stays with Media3. */
 final class M3uPlaylist {
     static final String CHECKED = "com.lampaua.player.m3u_checked";
+    static final String ORIGIN = "com.lampaua.player.m3u_origin";
     static final int MAX_BYTES = 1024 * 1024;
     static final int MAX_ITEMS = 500;
 
@@ -65,7 +66,8 @@ final class M3uPlaylist {
     /** Network interceptors run for every redirect and HLS segment, after request headers are set. */
     static okhttp3.OkHttpClient mediaClient(okhttp3.OkHttpClient client, Intent intent) {
         if (intent == null || !intent.getBooleanExtra(CHECKED, false) || intent.getData() == null) return client;
-        final Uri origin = intent.getData();
+        String original = intent.getStringExtra(ORIGIN);
+        final Uri origin = original == null ? intent.getData() : Uri.parse(original);
         return client.newBuilder().addNetworkInterceptor(chain -> {
             okhttp3.Request request = chain.request();
             if (!sameOrigin(origin, Uri.parse(request.url().toString()))) {

@@ -79,6 +79,7 @@ public class M3uImportActivityTest {
             assertEquals(2, session.request.items.size());
             assertEquals("Серія 5", session.request.items.get(0).title);
             assertTrue(activity.getIntent().hasExtra(PlaylistApi.EXTRA));
+            assertEquals(launch().getData().toString(), activity.getIntent().getStringExtra(M3uPlaylist.ORIGIN));
             controller.recreate();
             assertEquals(1, controller.get().opened);
             assertNull(controller.get().pending); // No second fetch after successful import.
