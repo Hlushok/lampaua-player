@@ -4,6 +4,7 @@ import android.net.Uri;
 
 import androidx.media3.common.C;
 
+import java.io.File;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -42,8 +43,7 @@ class SubtitleFetcher {
     /** The last copy {@link #fitsMedia} turned away, kept as the answer of last resort. */
     private Uri lastRejected;
 
-    private static final int CONNECT_TIMEOUT_SEC = 10;
-    private static final int READ_TIMEOUT_SEC = 20;
+    private static final int DOWNLOAD_TIMEOUT_SEC = 8;
     /** Whole-list budget, so a dozen dead guesses cost one wait rather than a dozen. */
     private static final long TOTAL_BUDGET_MS = 40_000;
 
@@ -52,8 +52,10 @@ class SubtitleFetcher {
      * rather than negotiating its own — which is where these hosts start timing out.
      */
     private static final OkHttpClient CLIENT = SubtitleSearch.CLIENT.newBuilder()
-            .connectTimeout(CONNECT_TIMEOUT_SEC, TimeUnit.SECONDS)
-            .readTimeout(READ_TIMEOUT_SEC, TimeUnit.SECONDS)
+            .connectTimeout(DOWNLOAD_TIMEOUT_SEC, TimeUnit.SECONDS)
+            .readTimeout(DOWNLOAD_TIMEOUT_SEC, TimeUnit.SECONDS)
+            // Includes connect, redirects and the complete response body, even if it trickles in.
+            .callTimeout(DOWNLOAD_TIMEOUT_SEC, TimeUnit.SECONDS)
             .build();
 
     /** Subtitles are text; anything this size is not one, and is not worth the memory to find out. */
@@ -132,10 +134,17 @@ class SubtitleFetcher {
         }
         // Nothing fitted, so the choice is no longer between a good file and a bad one but between a
         // bad file and none. Out of sync is visible and one tap from being replaced; empty is not.
-        if (lastRejected != null) {
+        if (completeLocalCopy(lastRejected)) {
             Utils.log("subtitle download: nothing fitted, taking the wrong-cut file anyway");
+            return lastRejected;
         }
-        return lastRejected;
+        return null;
+    }
+
+    private static boolean completeLocalCopy(Uri file) {
+        if (file == null || !"file".equals(file.getScheme()) || file.getPath() == null) return false;
+        File cached = new File(file.getPath());
+        return cached.isFile() && cached.length() > 0;
     }
 
     /**
@@ -203,7 +212,10 @@ class SubtitleFetcher {
                 stream = new GZIPInputStream(stream);
             }
             final Uri file = Utils.convertInputStreamToUTF(activity, url, stream, cacheName);
-            if (file != null && !fitsMedia(file)) {
+            // The general converter may return the original URL after a failed copy. That is not
+            // a delivered subtitle: it would end the search and add an empty/unavailable track.
+            if (!completeLocalCopy(file)) return null;
+            if (!fitsMedia(file)) {
                 WRONG_CUT.add(wrongCutKey(url));
                 // Left on disk rather than deleted, and remembered: if no candidate fits, this is what
                 // the viewer gets instead of nothing. Every download writes over the same cacheName, so

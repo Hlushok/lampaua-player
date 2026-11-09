@@ -79,6 +79,14 @@ public class SubtitleFetcherTest {
         }
     }
 
+    @Test public void failedLaterCandidateCannotReturnAnOverwrittenWrongCutCache() throws Exception {
+        String wrongCut = "1\n10:00:01,000 --> 10:00:03,000\nDifferent cut\n\n";
+        try (Server wrong = new Server(wrongCut, 0, false); Server empty = new Server("", 0, false)) {
+            assertNull(new SubtitleFetcher(context(), Arrays.asList(wrong.uri(), empty.uri()),
+                    "wrong-cut.ukr.srt", 60_000).fetchNow());
+        }
+    }
+
     /** Loopback only. An announced body can end early or keep arriving below a read timeout. */
     private static final class Server implements AutoCloseable {
         final ServerSocket listener;
