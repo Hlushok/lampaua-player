@@ -4,11 +4,13 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Parcel;
+import android.util.Base64;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.StringReader;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -52,7 +54,26 @@ final class M3uPlaylist {
         if (values != null) for (int i = 0; i + 1 < values.length; i += 2) {
             if (values[i] != null && values[i + 1] != null) result.put(values[i], values[i + 1]);
         }
+        String credentials = intent.getData() == null ? null : intent.getData().getUserInfo();
+        if (credentials != null && credentials.contains(":") && !result.containsKey("Authorization")) {
+            result.put("Authorization", "Basic " + Base64.encodeToString(
+                    credentials.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP));
+        }
         return result;
+    }
+
+    /** Network interceptors run for every redirect and HLS segment, after request headers are set. */
+    static okhttp3.OkHttpClient mediaClient(okhttp3.OkHttpClient client, Intent intent) {
+        if (intent == null || !intent.getBooleanExtra(CHECKED, false) || intent.getData() == null) return client;
+        final Uri origin = intent.getData();
+        return client.newBuilder().addNetworkInterceptor(chain -> {
+            okhttp3.Request request = chain.request();
+            if (!sameOrigin(origin, Uri.parse(request.url().toString()))) {
+                request = request.newBuilder().removeHeader("Authorization").removeHeader("Cookie")
+                        .removeHeader("Proxy-Authorization").build();
+            }
+            return chain.proceed(request);
+        }).build();
     }
 
     static boolean sameOrigin(Uri first, Uri second) {

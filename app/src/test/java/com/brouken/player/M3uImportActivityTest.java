@@ -32,6 +32,10 @@ public class M3uImportActivityTest {
         M3uPlaylistLoader.Callback pending;
         Intent requested;
         boolean cancelled;
+        @Override boolean handleRoomIntent(Intent intent) {
+            // Model a room waiting for its media without opening an external relay connection.
+            return com.brouken.player.together.Room.inviteFrom(intent == null ? null : intent.getData()) != null;
+        }
         @Override M3uPlaylistLoader.Job newM3uJob(Intent intent, M3uPlaylistLoader.Callback callback) {
             pending = callback; requested = new Intent(intent);
             return new M3uPlaylistLoader.Job(this, intent, MEDIA_HTTP_CLIENT, callback) {
@@ -120,6 +124,20 @@ public class M3uImportActivityTest {
             assertEquals(0, activity.opened);
             controller.start().resume();
             assertEquals(1, activity.opened);
+        }
+    }
+
+    @Test public void newerRoomInviteInvalidatesAnOutstandingImport() throws Exception {
+        try (ActivityController<ImportActivity> controller = Robolectric.buildActivity(ImportActivity.class, launch()).setup()) {
+            ImportActivity activity = controller.get();
+            M3uPlaylistLoader.Callback old = activity.pending;
+            Intent room = new Intent(Intent.ACTION_VIEW, Uri.parse("https://example.test/?room=ABC234"));
+            ReflectionHelpers.callInstanceMethod(activity, "onNewIntent", ClassParameter.from(Intent.class, room));
+            assertTrue(activity.cancelled);
+            old.complete(playlist(), false);
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            assertEquals(0, activity.opened);
+            assertNull(ReflectionHelpers.getField(activity, "playlistSession"));
         }
     }
 

@@ -3947,6 +3947,7 @@ public class PlayerActivity extends Activity {
             sourceSwitchKeepPaused = false;
 
             if (handleRoomIntent(intent)) {
+                cancelM3uImport();
                 // An invite link carries only a room code; what to play arrives over its channel.
             } else if (Intent.ACTION_VIEW.equals(action) && (uri != null || intent.hasExtra(PlaylistApi.EXTRA))) {
                 tunnelingAudioRecovery.reset();
@@ -12812,7 +12813,7 @@ public class PlayerActivity extends Activity {
             // gives the load: past that, the watchdog stops the player with a message that says what to
             // do, instead of a retry storm ending in a broken-stream error.
             final OkHttpDataSource.Factory httpDataSourceFactory =
-                    new OkHttpDataSource.Factory(MEDIA_HTTP_CLIENT);
+                    new OkHttpDataSource.Factory(M3uPlaylist.mediaClient(MEDIA_HTTP_CLIENT, getIntent()));
             if (userAgent != null) {
                 httpDataSourceFactory.setUserAgent(userAgent);
             }

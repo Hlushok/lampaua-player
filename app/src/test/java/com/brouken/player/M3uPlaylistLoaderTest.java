@@ -68,6 +68,46 @@ public class M3uPlaylistLoaderTest {
         }
     }
 
+    @Test public void urlCredentialsAuthorizeTheFetchAndItsSameOriginItems() throws Exception {
+        try (Server server = new Server(200, "#EXTM3U\n/stream/video.mkv\n", "")) {
+            Uri authenticated = Uri.parse(server.url("/list.m3u").replace("http://", "http://user:pass@"));
+            Result result = new Result();
+            job(new Intent(Intent.ACTION_VIEW, authenticated), result).run();
+            assertFalse(result.failed);
+            assertTrue(server.request().contains("Authorization: Basic dXNlcjpwYXNz"));
+            PlaylistApi api = new PlaylistApi(result.playlist);
+            assertEquals("Basic dXNlcjpwYXNz", api.items.get(0).headers.get("authorization"));
+            Intent explicit = new Intent(Intent.ACTION_VIEW, authenticated)
+                    .putExtra("headers", new String[]{"authorization", "Bearer explicit"});
+            assertEquals("Bearer explicit", M3uPlaylist.headers(explicit).get("Authorization"));
+        }
+    }
+
+    @Test public void mediaRedirectAndOffOriginSegmentsCannotCarryImportedCredentials() throws Exception {
+        try (Server destination = new Server(200, "media", "");
+             Server redirect = new Server(302, "", "Location: " + destination.url("/video.mkv") + "\r\n")) {
+            Intent imported = new Intent(Intent.ACTION_VIEW, Uri.parse(redirect.url("/list.m3u")))
+                    .putExtra(M3uPlaylist.CHECKED, true);
+            OkHttpClient media = M3uPlaylist.mediaClient(new OkHttpClient(), imported);
+            okhttp3.Request request = new okhttp3.Request.Builder().url(redirect.url("/stream"))
+                    .header("Authorization", "Basic test-only").header("Cookie", "session=test")
+                    .header("Proxy-Authorization", "Basic proxy-only").header("User-Agent", "UA-test").build();
+            try (okhttp3.Response response = media.newCall(request).execute()) { assertEquals(200, response.code()); }
+            assertTrue(redirect.request().contains("Cookie: session=test"));
+            assertFalse(destination.request().contains("Authorization:"));
+            assertFalse(destination.request().contains("Cookie:"));
+            assertTrue(destination.request().contains("User-Agent: UA-test"));
+            // HLS segments can already have another origin before any redirect occurs.
+            try (Server segment = new Server(200, "segment", "")) {
+                try (okhttp3.Response response = media.newCall(request.newBuilder().url(segment.url("/seg.ts")).build()).execute()) {
+                    assertEquals(200, response.code());
+                }
+                assertFalse(segment.request().contains("Cookie:"));
+                assertFalse(segment.request().contains("Authorization:"));
+            }
+        }
+    }
+
     @Test public void hlsContentFallsBackAndHttpFailureIsExplicitForFileLists() throws Exception {
         try (Server server = new Server(200, "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nseg.ts\n", "")) {
             Result result = new Result(); job(new Intent(Intent.ACTION_VIEW, Uri.parse(server.url("/live.m3u8"))), result).run();
