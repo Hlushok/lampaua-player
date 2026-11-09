@@ -143,6 +143,23 @@ public class M3uImportActivityTest {
         }
     }
 
+    @Test public void sharingNewMediaDropsThePreviousM3uCredentialScope() throws Exception {
+        try (ActivityController<ImportActivity> controller = Robolectric.buildActivity(ImportActivity.class, launch()).setup()) {
+            ImportActivity activity = controller.get();
+            activity.pending.complete(playlist(), false);
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            Uri shared = Uri.parse("https://user:pass@other.test/new.mkv");
+            Intent next = new Intent(Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(Intent.EXTRA_TEXT, shared.toString());
+            ReflectionHelpers.callInstanceMethod(activity, "onNewIntent", ClassParameter.from(Intent.class, next));
+            assertEquals(shared, activity.getIntent().getData());
+            assertEquals(shared, activity.mPrefs.mediaUri);
+            assertFalse(activity.getIntent().getBooleanExtra(M3uPlaylist.CHECKED, false));
+            assertSame(PlayerActivity.MEDIA_HTTP_CLIENT,
+                    M3uPlaylist.mediaClient(PlayerActivity.MEDIA_HTTP_CLIENT, activity.getIntent()));
+        }
+    }
+
     @Test public void failedImportReportsFailureRatherThanPlayingTheM3uAsVideo() {
         try (ActivityController<ImportActivity> controller = Robolectric.buildActivity(ImportActivity.class, launch()).setup()) {
             ImportActivity activity = controller.get();

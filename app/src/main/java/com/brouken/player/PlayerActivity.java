@@ -3978,6 +3978,8 @@ public class PlayerActivity extends Activity {
                         // running, as the VIEW branch above does through handleViewIntent. Otherwise the
                         // launcher's return_result stays armed and finish() reports this link's progress
                         // against the episode the launcher asked for.
+                        // Also replace private M3U state: a shared link is a new credential origin.
+                        setIntent(new Intent(intent).setAction(Intent.ACTION_VIEW).setDataAndType(parsedUri, null));
                         resetApiAccess();
                         mPrefs.updateMedia(this, parsedUri, null);
                         focusPlay = true;
