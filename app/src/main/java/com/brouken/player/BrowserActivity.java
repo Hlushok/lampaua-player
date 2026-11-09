@@ -2139,7 +2139,7 @@ public class BrowserActivity extends AppCompatActivity implements Dialogs.Chrome
     private void rebindChangedRuns() {
         for (int i = 0; i < rows.size(); i++) {
             final String key = rows.get(i).file.getUri().toString();
-            final Long now = positions.get(key);
+            final Long now = PlaybackHistory.get(positions, key);
             final Long was = shown.get(key);
             if (now == null ? was != null : !now.equals(was)) {
                 if (now == null) {
@@ -3344,7 +3344,7 @@ public class BrowserActivity extends AppCompatActivity implements Dialogs.Chrome
             if (played > 0) {
                 Utils.playedRun(box, played);
             }
-            final Long at = positions.get(item.file.getUri().toString());
+            final Long at = PlaybackHistory.get(positions, item.file.getUri().toString());
             if (at != null) {
                 shown.put(item.file.getUri().toString(), at);
             }
@@ -3379,7 +3379,7 @@ public class BrowserActivity extends AppCompatActivity implements Dialogs.Chrome
      * length off the retriever that was already reading this file for its running time.
      */
     private float playedFraction(final String uri) {
-        final Long position = positions.get(uri);
+        final Long position = PlaybackHistory.get(positions, uri);
         final Long length = lengths.get(uri);
         if (position == null || length == null || length <= 0) {
             return -1f;
@@ -3402,7 +3402,7 @@ public class BrowserActivity extends AppCompatActivity implements Dialogs.Chrome
                 lengths.put(key, stated);
             }
             durations.put(key, stated > 0 ? Utils.formatMilis(stated) : "");
-            final Long at = positions.get(key);
+            final Long at = PlaybackHistory.get(positions, key);
             final boolean stopped = at != null && at > 0;
             row.late(item, stated > 0 ? Utils.formatMilis(stated) : null,
                     stopped ? row.sizeOf(item, this) : null,

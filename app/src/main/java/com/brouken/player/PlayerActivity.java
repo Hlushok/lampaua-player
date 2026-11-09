@@ -848,6 +848,10 @@ public class PlayerActivity extends Activity {
     // While a picker panel is open the app must stay out of immersive/fullscreen, otherwise OxygenOS/ColorOS
     // applies its fullscreen back-gesture guard ("swipe again to go back") and the panel needs two swipes.
     private boolean pickerDialogOpen;
+    private android.app.Dialog activePickerDialog;
+    private View pickerReturnFocus;
+    private int pickerFocusGeneration;
+    private Runnable nextPickerBack;
     // Media3 keeps the controller shown indefinitely while paused (it forces the auto-hide timeout to 0),
     // so reuse the same CONTROLLER_TIMEOUT + hideController() to also clear the UI on pause. A tap re-shows
     // and re-arms it, exactly like during playback, and so does any key while the controls are up (see
@@ -3121,6 +3125,7 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onDestroy() {
         cancelM3uImport();
+        clearPickerReturnFocus();
         dismissPlaylistResumePrompt();
         if (!handedOver) {
             releasePlayer(false);
@@ -3564,7 +3569,7 @@ public class PlayerActivity extends Activity {
             final java.util.Map<String, Long> savedPositions = Prefs.readPositions(this);
             for (int i = 0; i < request.items.size(); i++) {
                 PlaylistApi.Item item = request.items.get(i);
-                Long savedPosition = savedPositions.get(item.currentSource().uri);
+                Long savedPosition = PlaybackHistory.get(savedPositions, item.currentSource().uri);
                 long initialPosition = item.hasPosition ? item.positionMs
                         : savedPosition == null ? 0L : Math.max(0, savedPosition - item.clipStartMs);
                 apiPlaylistPositions[i] = playlistSession.positionsMs[i] >= 0
@@ -4660,6 +4665,7 @@ public class PlayerActivity extends Activity {
 
     void resetApiAccess() {
         cancelM3uImport();
+        clearPickerReturnFocus();
         if (playlistSession != null) closePlaylistSession();
         apiAccess = false;
         apiAccessPartial = false;
@@ -5217,14 +5223,44 @@ public class PlayerActivity extends Activity {
         // Hide the controls for a clean panel. Keep the navigation/gesture bar visible (so OxygenOS doesn't
         // apply its fullscreen back-gesture guard) but hide the status bar (clean top, no strip over the
         // panel). Restore immersive when the panel dismisses.
+        if (isTvBox && pickerReturnFocus == null) {
+            View focused = getCurrentFocus();
+            if (focused != null && focused != playerView) pickerReturnFocus = focused;
+        }
+        final int generation = ++pickerFocusGeneration;
+        final Runnable back = nextPickerBack;
+        nextPickerBack = null;
+        activePickerDialog = dialog;
         pickerDialogOpen = true;
         playerView.hideController();
         applyPickerBars();
         dialog.setOnDismissListener(d -> {
+            if (activePickerDialog != dialog) return;
+            activePickerDialog = null;
             pickerDialogOpen = false;
             Utils.toggleSystemUi(PlayerActivity.this, playerView, controllerVisibleFully);
+            if (isTvBox) playerView.post(() -> {
+                // A menu row may synchronously open another panel. Only the final dismissal returns.
+                if (generation != pickerFocusGeneration || pickerDialogOpen) return;
+                View target = pickerReturnFocus;
+                pickerReturnFocus = null;
+                if (!alive || isFinishing() || isDestroyed()) return;
+                playerView.showController();
+                if (target != null && target.isShown() && target.isEnabled()) target.requestFocus();
+            });
         });
+        if (back != null) Utils.panelBack(dialog, () -> { dialog.dismiss(); back.run(); });
         dialog.show();
+    }
+
+    private void clearPickerReturnFocus() {
+        pickerFocusGeneration++;
+        pickerReturnFocus = null;
+        nextPickerBack = null;
+        android.app.Dialog previous = activePickerDialog;
+        activePickerDialog = null;
+        pickerDialogOpen = false;
+        if (previous != null) previous.dismiss();
     }
 
 
@@ -10978,6 +11014,17 @@ public class PlayerActivity extends Activity {
      * three names between them.
      */
     private void showMoreMenu() {
+        showMoreMenu(null);
+    }
+
+    private Runnable moreChild(final int title, final Runnable open) {
+        return () -> {
+            nextPickerBack = () -> showMoreMenu(getString(title));
+            try { open.run(); } finally { nextPickerBack = null; }
+        };
+    }
+
+    private void showMoreMenu(final CharSequence focusRow) {
         final List<Dialogs.MenuItem> items = new ArrayList<>();
         // The bands are divided by the rules below rather than by captions: a caption over the first of
         // them said what the rows under it say for themselves.
@@ -10986,27 +11033,27 @@ public class PlayerActivity extends Activity {
                     // Quiet at 1x, like every other row here: a summary reports what has been changed,
                     // and "Normal" is the absence of a change.
                     userSpeed() == 1f ? null : SpeedPanel.format(userSpeed()),
-                    false, this::showSpeedDialog));
+                    false, moreChild(R.string.speed_row, this::showSpeedDialog)));
             items.add(new Dialogs.MenuItem(R.drawable.ic_volume_up_24dp, getString(R.string.sound_row),
-                    soundSummary(), false, this::showSoundPanel));
+                    soundSummary(), false, moreChild(R.string.sound_row, this::showSoundPanel)));
         }
         // Only with subtitles on: there is nothing to shift otherwise. One row for both lines — the
         // panel behind it carries a slider each, and which is which is answered there.
         if (subtitleOffsetShiftable() || secondaryOffsetShiftable()) {
             items.add(new Dialogs.MenuItem(R.drawable.ic_subtitle_offset_24dp,
                     getString(R.string.subtitle_offset_title), subtitleOffsetSummary(),
-                    false, this::showSubtitleOffsetDialog));
+                    false, moreChild(R.string.subtitle_offset_title, this::showSubtitleOffsetDialog)));
         }
         if (skipOffsetReachable()) {
             // Named after the panel it opens, which is no longer only the offset: the row that said
             // "Skip offset" now leads to how each kind of segment is offered as well.
             items.add(new Dialogs.MenuItem(R.drawable.ic_skip_offset_24dp, getString(R.string.skip_session_title),
                     skipOffsetSec == 0 ? null : OffsetPanel.format(this, skipOffsetSec),
-                    false, this::showSkipOffsetDialog));
+                    false, moreChild(R.string.skip_session_title, this::showSkipOffsetDialog)));
         }
         if (player != null) {
             items.add(new Dialogs.MenuItem(R.drawable.ic_sleep_24dp, getString(R.string.sleep_timer_title),
-                    sleepTimerSummary(), false, this::showSleepTimerPanel));
+                    sleepTimerSummary(), false, moreChild(R.string.sleep_timer_title, this::showSleepTimerPanel)));
         }
         items.add(Dialogs.MenuItem.rule());
         // Here as well as in the subtitle panel: the panel is where somebody who has looked for
@@ -11014,13 +11061,13 @@ public class PlayerActivity extends Activity {
         if (player != null) {
             items.add(new Dialogs.MenuItem(R.drawable.ic_search_24dp,
                     getString(R.string.subtitle_search_manual), null, false,
-                    () -> showSubtitleSearchDialog(false)));
+                    moreChild(R.string.subtitle_search_manual, () -> showSubtitleSearchDialog(false))));
         }
         // Only for network media: a room syncs one shared URL, and there is nothing to share about a
         // file that lives on this device alone.
         if (togetherAvailable()) {
             items.add(new Dialogs.MenuItem(R.drawable.ic_together_24dp, getString(R.string.together_title),
-                    togetherSummary(), false, this::showTogetherMenu));
+                    togetherSummary(), false, moreChild(R.string.together_title, this::showTogetherMenu)));
         }
         // Rides the stats panel: the details it reports are the ones on screen, and the row would be
         // noise for everyone who has not asked for them. From the menu rather than a long-press on the
@@ -11051,6 +11098,7 @@ public class PlayerActivity extends Activity {
         // an empty one reads as a mistake rather than as restraint. Not "Settings", which the panel's
         // own last row already means: one word, two destinations, is what the title said before that.
         Dialogs.menu(this, ui, () -> showPickerDialog(Dialogs.openMenu()), getString(R.string.button_more), items);
+        if (focusRow != null) Dialogs.focusMenuRow(focusRow);
     }
 
     // --- Watch together -------------------------------------------------------------------------
@@ -13473,6 +13521,7 @@ public class PlayerActivity extends Activity {
                             ? 0 : player.getCurrentPosition();
                     mPrefs.updatePosition(position);
                     rememberEpisodePosition(player.getCurrentMediaItemIndex(), position);
+                    rememberLocalPlaylistPosition(player.getCurrentMediaItemIndex(), position);
                 }
                 // Not from a player that has no tracks yet (one held after an error, never prepared):
                 // getSelectedTrack would answer "#none" and switch the subtitles off for the retry.
@@ -13498,6 +13547,22 @@ public class PlayerActivity extends Activity {
         if (apiPlaylistPositions != null && index >= 0 && index < apiPlaylistPositions.length) {
             apiPlaylistPositions[index] = position;
         }
+    }
+
+    /** A general resume copy of actual playback, independent of the launcher's session journal. */
+    private void rememberLocalPlaylistPosition(final int index, final long position) {
+        if (mPrefs.persistentMode || position < 0) return;
+        long clipStart = 0;
+        if (playlistSession != null) {
+            // Launch-supplied positions are not visits. Never record episodes that were not played.
+            if (index < 0 || index >= playlistSession.positionsMs.length || playlistSession.positionsMs[index] < 0) return;
+            clipStart = playlistSession.request.items.get(index).clipStartMs;
+        } else if (playerStartPositionMs == C.TIME_UNSET) return;
+        Uri uri = playlistUri(index);
+        if (uri == null) uri = mPrefs.mediaUri;
+        if (uri == null || isLiveStream()) return;
+        long absolute = position == 0 ? 0 : position > Long.MAX_VALUE - clipStart ? Long.MAX_VALUE : position + clipStart;
+        Prefs.rememberPosition(this, uri, absolute);
     }
 
     /** The address of a playlist entry, or null where the list is not one this session is holding. */
@@ -13992,6 +14057,7 @@ public class PlayerActivity extends Activity {
                 }
                 final long leftAt = playedToEnd ? 0 : oldPosition.positionMs;
                 rememberEpisodePosition(oldIndex, leftAt);
+                rememberLocalPlaylistPosition(oldIndex, leftAt);
                 // And on disk, keyed by the episode's own uri: the array above lives for this session
                 // and goes back to the launcher, but "have I watched this" is a question the next
                 // opening of the folder asks. A zero from anywhere but the end is a slot that was only

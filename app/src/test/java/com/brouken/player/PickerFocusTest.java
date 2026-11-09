@@ -28,6 +28,7 @@ import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.ReflectionHelpers.ClassParameter;
 
 import java.util.ArrayList;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.*;
 
@@ -66,7 +67,7 @@ public class PickerFocusTest {
         return dialog;
     }
 
-    private void idle() { Shadows.shadowOf(Looper.getMainLooper()).idle(); }
+    private void idle() { Shadows.shadowOf(Looper.getMainLooper()).idleFor(500, TimeUnit.MILLISECONDS); }
 
     @Test public void closingAPickerRestoresItsOpeningControl() {
         try (ActivityController<FocusActivity> controller = screen()) {
@@ -101,6 +102,20 @@ public class PickerFocusTest {
             Dialog dialog = panel(activity);
             controller.pause().stop();
             dialog.dismiss(); idle();
+            assertFalse(activity.playerView.isControllerFullyVisible());
+        }
+    }
+
+    @Test public void aNewLaunchInvalidatesAnOldPickersDeferredReturn() {
+        try (ActivityController<FocusActivity> controller = screen()) {
+            FocusActivity activity = controller.get();
+            focus(activity, "buttonQuality");
+            panel(activity).dismiss();
+            Intent next = new Intent(Intent.ACTION_VIEW, Uri.parse("https://example.invalid/next.mkv"));
+            ReflectionHelpers.callInstanceMethod(activity, "onNewIntent", ClassParameter.from(Intent.class, next));
+            idle();
+            assertNull(ReflectionHelpers.getField(activity, "pickerReturnFocus"));
+            assertEquals(next.getData(), activity.mPrefs.mediaUri);
             assertFalse(activity.playerView.isControllerFullyVisible());
         }
     }

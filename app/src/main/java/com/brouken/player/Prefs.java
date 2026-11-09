@@ -391,7 +391,7 @@ class Prefs {
     // only the "Reset learned audio workarounds" setting or a full app data reset clears it.
     public Set<String> revokedAudioMimes = Collections.emptySet();
 
-    private LinkedHashMap positions;
+    private LinkedHashMap<String, Long> positions;
 
     public boolean persistentMode = true;
     public long nonPersitentPosition = -1L;
@@ -1119,10 +1119,7 @@ class Prefs {
             return;
         }
 
-        while (positions.size() > 100)
-            positions.remove(positions.keySet().toArray()[0]);
-
-        positions.put(uri.toString(), position);
+        PlaybackHistory.put(positions, uri.toString(), position);
         savePositions();
         // A torrent server keeps the timecode for everything that plays off it, which is what lets a
         // film started in one player be continued in another. Told on the way out rather than as it
@@ -1264,7 +1261,7 @@ class Prefs {
      * one film out of date on every return. A listing reads it once and asks the map per row.
      */
     static Map<String, Long> readPositions(final Context context) {
-        return readMap(context, "positions");
+        return PlaybackHistory.migrate(readMap(context, "positions"));
     }
 
     /**
@@ -1319,15 +1316,19 @@ class Prefs {
         } catch (Exception e) {
             known = new LinkedHashMap<>(10);
         }
-        final Long had = known.get(uri.toString());
+        final boolean history = "positions".equals(name);
+        if (history) known = PlaybackHistory.migrate(known);
+        final Long had = history ? PlaybackHistory.get(known, uri.toString()) : known.get(uri.toString());
         if (had != null && had == position) {
             // Nothing to write, and writing it would be a file rewritten per row of a listing.
             return;
         }
-        while (known.size() > 100) {
-            known.remove(known.keySet().toArray()[0]);
+        if (history) {
+            PlaybackHistory.put(known, uri.toString(), position);
+        } else {
+            while (known.size() > 100) known.remove(known.keySet().iterator().next());
+            known.put(uri.toString(), position);
         }
-        known.put(uri.toString(), position);
         try (FileOutputStream fos = context.openFileOutput(name, Context.MODE_PRIVATE);
              ObjectOutputStream os = new ObjectOutputStream(fos)) {
             os.writeObject(known);
@@ -1352,16 +1353,7 @@ class Prefs {
     }
 
     private void loadPositions() {
-        try {
-            FileInputStream fis = mContext.openFileInput("positions");
-            ObjectInputStream is = new ObjectInputStream(fis);
-            positions = (LinkedHashMap) is.readObject();
-            is.close();
-            fis.close();
-        } catch (Exception e) {
-            e.printStackTrace();
-            positions = new LinkedHashMap(10);
-        }
+        positions = new LinkedHashMap<>(readPositions(mContext));
     }
 
     public long getPosition() {
@@ -1370,11 +1362,12 @@ class Prefs {
 
     /** The same, for a file other than the one playing — an episode a playlist is about to jump to. */
     public long getPosition(final Uri mediaUri) {
+        if (mediaUri == null) return 0L;
         if (!persistentMode) {
             return mediaUri != null && mediaUri.equals(this.mediaUri) ? nonPersitentPosition : 0L;
         }
 
-        Object val = positions.get(mediaUri.toString());
+        Long val = PlaybackHistory.get(positions, mediaUri.toString());
         if (val != null)
             return (long) val;
 

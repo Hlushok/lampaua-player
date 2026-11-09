@@ -1494,6 +1494,23 @@ final class Dialogs {
         return openMenu;
     }
 
+    static void focusMenuRow(final CharSequence title) {
+        final android.app.Dialog menu = openMenu;
+        if (menu == null || menu.getWindow() == null) return;
+        final View root = menu.getWindow().getDecorView();
+        root.post(() -> {
+            if (openMenu != menu || !menu.isShowing()) return;
+            ArrayList<View> found = new ArrayList<>();
+            root.findViewsWithText(found, title, View.FIND_VIEWS_WITH_TEXT);
+            for (View text : found) {
+                if (!(text instanceof TextView) || !TextUtils.equals(((TextView) text).getText(), title)) continue;
+                View row = text;
+                while (!row.isClickable() && row.getParent() instanceof View) row = (View) row.getParent();
+                if (row.isFocusable() && row.isEnabled() && row.isShown()) { row.requestFocus(); return; }
+            }
+        });
+    }
+
     // A long label does not fit the width of a picker panel, and the two device classes want opposite
     // answers. On TV the row that has D-pad focus scrolls its text: focus makes the movement mean
     // something ("this row"), it is the 10-foot idiom, and only one row is ever moving. In touch mode
