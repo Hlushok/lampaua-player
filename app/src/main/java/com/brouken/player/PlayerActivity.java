@@ -1086,6 +1086,9 @@ public class PlayerActivity extends Activity {
     private PlaylistSession playlistSession;
     private AlertDialog playlistResumeDialog;
     private boolean applyingNestedResume;
+    private M3uPlaylistLoader.Job m3uJob;
+    private boolean m3uLoading;
+    private int m3uGeneration;
     private PlaylistAudioMemory playlistAudioMemory;
     private boolean applyingPlaylistTracks;
     private boolean sourceSwitchResetAudio, sourceSwitchResetText;
@@ -3111,6 +3114,7 @@ public class PlayerActivity extends Activity {
      */
     @Override
     protected void onDestroy() {
+        cancelM3uImport();
         dismissPlaylistResumePrompt();
         if (!handedOver) {
             releasePlayer(false);
@@ -3390,8 +3394,13 @@ public class PlayerActivity extends Activity {
     // onCreate and onNewIntent: with launchMode="singleTask" a second intent lands in the running
     // activity, and its extras have to replace the previous ones instead of being ignored.
     void handleViewIntent(Intent intent) {
+        cancelM3uImport();
         if (intent.hasExtra(PlaylistApi.EXTRA)) {
             openNestedPlaylist(intent);
+            return;
+        }
+        if (M3uPlaylist.isCandidate(intent)) {
+            beginM3uImport(intent);
             return;
         }
         LampaPlaylistBridge.normalize(intent);
@@ -3473,6 +3482,47 @@ public class PlayerActivity extends Activity {
         }
         focusPlay = true;
         checkRoomMedia(false, false);
+    }
+
+    M3uPlaylistLoader.Job newM3uJob(Intent intent, M3uPlaylistLoader.Callback callback) {
+        return new M3uPlaylistLoader.Job(this, intent, MEDIA_HTTP_CLIENT, callback);
+    }
+
+    private void beginM3uImport(Intent intent) {
+        closePlaylistSession();
+        if (playerView != null && player != null) releasePlayer(false);
+        resetApiAccess();
+        mPrefs.setPersistent(false);
+        mPrefs.updateMedia(this, null, null);
+        m3uLoading = true;
+        final int generation = m3uGeneration;
+        final Intent original = new Intent(intent);
+        m3uJob = newM3uJob(original, (playlist, failed) -> runOnUiThread(() -> {
+            if (generation != m3uGeneration || isFinishing() || isDestroyed() || handedOver) return;
+            m3uLoading = false;
+            m3uJob = null;
+            if (playerView != null) updateLoading(false);
+            if (failed) {
+                android.widget.Toast.makeText(this, R.string.playlist_import_failed,
+                        android.widget.Toast.LENGTH_LONG).show();
+                finish();
+                return;
+            }
+            Intent resolved = new Intent(original).putExtra(M3uPlaylist.CHECKED, true);
+            if (playlist != null) resolved.putExtra(PlaylistApi.EXTRA, playlist);
+            // HLS retains the original URI, MIME, headers and extras; only file lists become items.
+            setIntent(resolved);
+            handleViewIntent(resolved);
+            if (alive) initializePlayer();
+        }));
+        m3uJob.start();
+    }
+
+    private void cancelM3uImport() {
+        m3uGeneration++;
+        if (m3uJob != null) m3uJob.cancel();
+        m3uJob = null;
+        m3uLoading = false;
     }
 
     private void openNestedPlaylist(Intent intent) {
@@ -4596,6 +4646,7 @@ public class PlayerActivity extends Activity {
     }
 
     void resetApiAccess() {
+        cancelM3uImport();
         if (playlistSession != null) closePlaylistSession();
         apiAccess = false;
         apiAccessPartial = false;
@@ -12163,6 +12214,10 @@ public class PlayerActivity extends Activity {
     }
 
     public void initializePlayer() {
+        if (m3uLoading) {
+            if (playerView != null) updateLoading(true);
+            return;
+        }
         if (playlistSession != null && playlistSession.resumePendingIndex >= 0) {
             showPlaylistResumePrompt();
             return;

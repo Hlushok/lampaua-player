@@ -559,4 +559,5 @@
     <string name="playlist_resume_message">Продовжити з %1$s?</string>
     <string name="playlist_resume_continue">Продовжити</string>
     <string name="playlist_resume_restart">Спочатку</string>
+    <string name="playlist_import_failed">Не вдалося відкрити M3U-плейлист. Перевірте сервер і спробуйте знову.</string>
 </resources>
