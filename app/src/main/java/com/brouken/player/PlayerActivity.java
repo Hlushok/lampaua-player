@@ -11097,8 +11097,8 @@ public class PlayerActivity extends Activity {
         // repeat a word. Every panel carries a close button now, so the line is drawn either way — and
         // an empty one reads as a mistake rather than as restraint. Not "Settings", which the panel's
         // own last row already means: one word, two destinations, is what the title said before that.
-        Dialogs.menu(this, ui, () -> showPickerDialog(Dialogs.openMenu()), getString(R.string.button_more), items);
-        if (focusRow != null) Dialogs.focusMenuRow(focusRow);
+        Dialogs.menu(this, ui, () -> showPickerDialog(Dialogs.openMenu()), getString(R.string.button_more),
+                items, 34, 48, null, focusRow);
     }
 
     // --- Watch together -------------------------------------------------------------------------

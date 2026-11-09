@@ -1494,23 +1494,6 @@ final class Dialogs {
         return openMenu;
     }
 
-    static void focusMenuRow(final CharSequence title) {
-        final android.app.Dialog menu = openMenu;
-        if (menu == null || menu.getWindow() == null) return;
-        final View root = menu.getWindow().getDecorView();
-        root.post(() -> {
-            if (openMenu != menu || !menu.isShowing()) return;
-            ArrayList<View> found = new ArrayList<>();
-            root.findViewsWithText(found, title, View.FIND_VIEWS_WITH_TEXT);
-            for (View text : found) {
-                if (!(text instanceof TextView) || !TextUtils.equals(((TextView) text).getText(), title)) continue;
-                View row = text;
-                while (!row.isClickable() && row.getParent() instanceof View) row = (View) row.getParent();
-                if (row.isFocusable() && row.isEnabled() && row.isShown()) { row.requestFocus(); return; }
-            }
-        });
-    }
-
     // A long label does not fit the width of a picker panel, and the two device classes want opposite
     // answers. On TV the row that has D-pad focus scrolls its text: focus makes the movement mean
     // something ("this row"), it is the 10-foot idiom, and only one row is ever moving. In touch mode
@@ -1667,6 +1650,12 @@ final class Dialogs {
     static void menu(final Activity activity, final UiMetrics ui, final Runnable onShow,
                      CharSequence menuTitle, List<MenuItem> items, int posterWDp, int posterHDp,
                      Runnable back) {
+        menu(activity, ui, onShow, menuTitle, items, posterWDp, posterHDp, back, null);
+    }
+
+    static void menu(final Activity activity, final UiMetrics ui, final Runnable onShow,
+                     CharSequence menuTitle, List<MenuItem> items, int posterWDp, int posterHDp,
+                     Runnable back, CharSequence focusTitle) {
         if (items == null || items.isEmpty()) {
             return;
         }
@@ -1674,6 +1663,7 @@ final class Dialogs {
         // Where the D-pad starts when no row is checked — a panel of actions has nothing ticked, and
         // without this a remote opens onto whatever focus the dialog happened to pick.
         final View[] firstRow = new View[1];
+        final View[] returnRow = new View[1];
 
         // The panels follow the appearance choice, like the dialogs do — see
         // Utils.dialogContext. Every view below is built against it, so a light app gets a
@@ -1748,6 +1738,7 @@ final class Dialogs {
             row.setPadding(Utils.dpToPx(6), Utils.dpToPx(8), Utils.dpToPx(6), Utils.dpToPx(8));
             row.setClickable(true);
             row.setFocusable(true);
+            if (focusTitle != null && TextUtils.equals(item.title, focusTitle)) returnRow[0] = row;
             // A one-line row is 48dp and a one-line row that leads with an icon or a poster is 56dp —
             // Material states both, and this list has rows of each kind.
             final boolean leads = item.iconRes != 0
@@ -1898,7 +1889,7 @@ final class Dialogs {
             Utils.panelBack(openMenu, back);
         }
         if (onShow != null) { onShow.run(); } else { openMenu.show(); }
-        final View focus = currentRow[0] != null ? currentRow[0] : firstRow[0];
+        final View focus = returnRow[0] != null ? returnRow[0] : currentRow[0] != null ? currentRow[0] : firstRow[0];
         if (focus != null) {
             focus.post(focus::requestFocus);
         }
