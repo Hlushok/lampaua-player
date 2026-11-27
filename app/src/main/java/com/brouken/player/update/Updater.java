@@ -55,7 +55,6 @@ public final class Updater {
 
     private static final String RELEASES_URL =
             "https://api.github.com/repos/Hlushok/lampaua-player/releases";
-    private static final String APK_FILE_NAME = "ua-player-update.apk";
     /** How often a launch may ask; shared by the player and the browser so one launch never asks twice. */
     public static final long CHECK_INTERVAL_MS = 60 * 60 * 1000L;
     private static final Pattern VERSION_PATTERN = Pattern.compile("(\\d+)\\.(\\d+)\\.(\\d+)");
@@ -109,7 +108,8 @@ public final class Updater {
                         release.optString("body", ""),
                         apk.optString("browser_download_url", ""),
                         apk.optLong("size", 0),
-                        release.optString("published_at", ""));
+                        release.optString("published_at", ""),
+                        ApkUpdateVerifier.digest(apk.optString("digest", null)));
             }
         } catch (Exception e) {
             return null;
@@ -129,7 +129,9 @@ public final class Updater {
             final String name = asset.optString("name", "").toLowerCase(Locale.ROOT);
             final String url = asset.optString("browser_download_url", "");
             if (name.endsWith(".apk") && name.contains("ua") && name.contains("player")
-                    && !name.contains("legacy") && url.startsWith("https://")) {
+                    && !name.contains("legacy") && url.startsWith("https://")
+                    && asset.optLong("size") > 0
+                    && ApkUpdateVerifier.digest(asset.optString("digest", null)) != null) {
                 return asset;
             }
         }
@@ -171,11 +173,11 @@ public final class Updater {
     }
 
     /** Downloads the APK into the external files dir. Call on a background thread. Returns the file or {@code null}. */
-    public static File downloadApk(Context context, UpdateInfo info, ProgressListener listener) {
-        final File file = new File(context.getExternalFilesDir(null), APK_FILE_NAME);
-        if (file.exists()) {
-            file.delete();
-        }
+    public static synchronized File downloadApk(Context context, UpdateInfo info, ProgressListener listener) {
+        if (info == null || info.sha256 == null || !info.sha256.matches("[0-9a-f]{64}") || info.size <= 0) return null;
+        File directory = context.getExternalFilesDir(null);
+        if (directory == null) directory = context.getFilesDir();
+        File file = null;
         final Request request = new Request.Builder().url(info.apkUrl).build();
         try (Response response = CLIENT.newCall(request).execute()) {
             if (!response.isSuccessful()) {
@@ -186,6 +188,8 @@ public final class Updater {
                 return null;
             }
             final long total = responseBody.contentLength();
+            if (total >= 0 && total != info.size) return null;
+            file = File.createTempFile("ua-update-", ".part", directory);
             try (InputStream in = responseBody.byteStream();
                  FileOutputStream out = new FileOutputStream(file)) {
                 final byte[] buffer = new byte[64 * 1024];
@@ -198,8 +202,9 @@ public final class Updater {
                     }
                     out.write(buffer, 0, read);
                     downloaded += read;
+                    if (downloaded > info.size) return null;
                     if (listener != null && total > 0) {
-                        final int percent = (int) (downloaded * 100 / total);
+                        final int percent = (int) Math.min(99, downloaded * 100.0 / info.size);
                         if (percent != lastPercent) {
                             lastPercent = percent;
                             listener.onProgress(percent);
@@ -208,9 +213,16 @@ public final class Updater {
                 }
                 out.flush();
             }
-            return file;
+            if (!ApkUpdateVerifier.verify(context, file, info)) return null;
+            File verified = new File(directory, "ua-player-" + info.sha256.substring(0, 16) + ".apk");
+            if (verified.exists() && !verified.delete()) return null;
+            if (!file.renameTo(verified)) return null;
+            if (listener != null) listener.onProgress(100);
+            return verified;
         } catch (Exception e) {
             return null;
+        } finally {
+            if (file != null && file.exists()) file.delete();
         }
     }
 

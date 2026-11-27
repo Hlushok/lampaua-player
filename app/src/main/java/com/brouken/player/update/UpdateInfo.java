@@ -21,9 +21,15 @@ public final class UpdateInfo {
     public final long size;
     /** When the release was published, as GitHub gives it ({@code 2026-09-04T10:23:27Z}); empty if unknown. */
     public final String publishedAt;
+    public final String sha256;
 
     public UpdateInfo(int versionCode, String tagName, String versionName, String changelog, String apkUrl,
                       long size, String publishedAt) {
+        this(versionCode, tagName, versionName, changelog, apkUrl, size, publishedAt, null);
+    }
+
+    public UpdateInfo(int versionCode, String tagName, String versionName, String changelog, String apkUrl,
+                      long size, String publishedAt, String sha256) {
         this.versionCode = versionCode;
         this.tagName = tagName;
         this.versionName = versionName;
@@ -31,6 +37,7 @@ public final class UpdateInfo {
         this.apkUrl = apkUrl;
         this.size = size;
         this.publishedAt = publishedAt == null ? "" : publishedAt;
+        this.sha256 = sha256;
     }
 
     /**
@@ -48,6 +55,7 @@ public final class UpdateInfo {
             json.put("apkUrl", apkUrl);
             json.put("size", size);
             json.put("publishedAt", publishedAt);
+            json.put("sha256", sha256);
         } catch (JSONException e) {
             return null;
         }
@@ -63,7 +71,8 @@ public final class UpdateInfo {
             final JSONObject json = new JSONObject(raw);
             return new UpdateInfo(json.optInt("versionCode"), json.optString("tagName"),
                     json.optString("versionName"), json.optString("changelog"),
-                    json.optString("apkUrl"), json.optLong("size"), json.optString("publishedAt"));
+                    json.optString("apkUrl"), json.optLong("size"), json.optString("publishedAt"),
+                    json.optString("sha256", null));
         } catch (JSONException e) {
             return null;
         }

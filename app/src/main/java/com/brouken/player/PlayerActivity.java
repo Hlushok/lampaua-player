@@ -270,6 +270,29 @@ public class PlayerActivity extends Activity {
     // null when the chain never had it. Both only so dropMediaCache() can correct the chain of a player
     // that is already built.
     private DefaultMediaSourceFactory mediaSourceFactory;
+    private volatile java.util.Set<String> externalSubtitleSources = Collections.emptySet();
+    private String trackSelectionMediaUri;
+
+    private boolean isExternalSubtitleSource(Uri uri) {
+        String path = uri == null ? null : uri.getPath();
+        return uri != null && (externalSubtitleSources.contains(uri.toString())
+                || path != null && SubtitleUtils.hasSubtitleExtension(path.toLowerCase(java.util.Locale.ROOT)));
+    }
+
+    private void snapshotExternalSubtitleSources() {
+        java.util.Set<String> sources = new java.util.HashSet<>();
+        for (MediaItem item : apiMediaItems) if (item.localConfiguration != null)
+            for (MediaItem.SubtitleConfiguration subtitle : item.localConfiguration.subtitleConfigurations)
+                addTextSubtitleSource(sources, subtitle);
+        for (MediaItem.SubtitleConfiguration subtitle : apiSubs) addTextSubtitleSource(sources, subtitle);
+        if (mPrefs.subtitleUri != null) sources.add(mPrefs.subtitleUri.toString());
+        externalSubtitleSources = Collections.unmodifiableSet(sources);
+    }
+
+    private static void addTextSubtitleSource(java.util.Set<String> sources, MediaItem.SubtitleConfiguration subtitle) {
+        if (!MimeTypes.APPLICATION_PGS.equals(subtitle.mimeType)
+                && !MimeTypes.APPLICATION_VOBSUB.equals(subtitle.mimeType)) sources.add(subtitle.uri.toString());
+    }
     private androidx.media3.datasource.DataSource.Factory uncachedUpstream;
 
     /**
@@ -1102,7 +1125,7 @@ public class PlayerActivity extends Activity {
         @Override public void run() {
             if (playlistSession == null || player == null || !player.isPlaying()) return;
             capturePlaylistProgress();
-            playlistSession.report();
+            playlistSession.report(true);
             schedulePlaylistReport();
         }
     };
@@ -5352,7 +5375,9 @@ public class PlayerActivity extends Activity {
                 hideSkipButton();
                 hideSkipHeadsUp();
             } else if (isAutoSkip(upcoming)) {
-                hideSkipButton();
+                // Keep an existing announcement alive; hiding it resets its segment key and
+                // restarts the fade on every 250 ms poll.
+                if (skipPill == SkipPill.SKIP) hideSkipButton();
                 showSkipHeadsUp(upcoming);
             } else if (isBriefSkip(upcoming)) {
                 // No head start in brief mode: the offer belongs to the segment, and three seconds spent
@@ -5565,6 +5590,10 @@ public class PlayerActivity extends Activity {
             hideSkipPill(); // unusable in the PiP window; automatic skips still happen, just silently
             return;
         }
+        if (skipPill == mode && buttonSkip.getVisibility() == View.VISIBLE) {
+            // Polling updates the countdown, not the visibility animation or its deadline.
+            return;
+        }
         // Whatever timer the outgoing pill had is not the incoming one's. Without this a pill replaced
         // mid-countdown — back-to-back segments land the next offer inside the previous notice's three
         // seconds — inherited a hider that took the new pill away early. Callers that want a timer arm
@@ -5683,6 +5712,7 @@ public class PlayerActivity extends Activity {
 
     /** Takes the pill away whatever it is showing, cancelling its timer. */
     private void hideSkipPill() {
+        if (skipPill == SkipPill.NONE) return;
         if (pillCountdownAnimator != null) {
             pillCountdownAnimator.cancel();
             pillCountdownAnimator = null;
@@ -5834,6 +5864,7 @@ public class PlayerActivity extends Activity {
             // Controls came up mid-countdown. End the flash here and hand the pill over rather than letting
             // its timer run out under an open controller, which would blink the button out and back in.
             skipFlashEndMs = 0;
+            playerView.removeCallbacks(skipPillHider);
         }
         // Controls already up when the segment arrived: ride along with them and keep the segment's own
         // offer in hand. Counting down over an open controller would say nothing — the button is not about
@@ -5880,6 +5911,7 @@ public class PlayerActivity extends Activity {
             return;
         }
         if (controllerVisible) {
+            playerView.removeCallbacks(skipPillHider);
             showSkipPill(SkipPill.SKIP, getString(R.string.button_skip), true, false);
         } else if (skipPill == SkipPill.SKIP) {
             hideSkipButton();
@@ -12186,6 +12218,7 @@ public class PlayerActivity extends Activity {
         // config in pendingConfiguration when we read it. Both only ever cost one needless seek.
         private volatile boolean passthrough;
         private volatile boolean tunneling;
+        private final AudioSink underlyingSink;
         private final TunnelingStereoProcessor stereoProcessor;
         // How far the clock this sink publishes is shifted, in microseconds, one value per route. The
         // sink's position becomes the player's media clock, and the video renderer picks frames against
@@ -12210,6 +12243,7 @@ public class PlayerActivity extends Activity {
                                      int decodedSyncMs, int passthroughSyncMs,
                                      TunnelingStereoProcessor stereoProcessor) {
             super(sink);
+            this.underlyingSink = sink;
             this.deniedMimes = new CopyOnWriteArraySet<>(initiallyDenied);
             this.forceDecode = forceDecode;
             this.stereoProcessor = stereoProcessor;
@@ -12256,6 +12290,11 @@ public class PlayerActivity extends Activity {
         }
 
         boolean isTunneling() { return tunneling; }
+
+        @Override public void flush() {
+            if (tunneling && passthrough && TunnelingAudioFlush.flush(underlyingSink)) return;
+            super.flush();
+        }
 
         @Override
         public int getFormatSupport(Format format) {
@@ -13014,8 +13053,10 @@ public class PlayerActivity extends Activity {
         // decoder does not have and some refuse to be configured with (see Dv10AsAv1). Nothing below
         // here looks at the extractors by type, and the DV7 conversion above never sees a profile 10
         // track.
+        snapshotExternalSubtitleSources();
         mediaSourceFactory = new DefaultMediaSourceFactory(this, new Dv10AsAv1(seekableExtractorsFactory))
-                .setDataSourceFactory(dataSourceFactory)
+                .setDataSourceFactory(SubtitleTextDataSource.factory(dataSourceFactory,
+                        this::isExternalSubtitleSource))
                 // A share that refuses the password refuses it again, and the default policy spends
                 // three retries and about three and a half seconds finding that out before anything
                 // is said. Everything else keeps the default budget: a server hiccup is worth a
@@ -13270,6 +13311,7 @@ public class PlayerActivity extends Activity {
         player.addAnalyticsListener(playbackInfoListener);
         // The item set above made its transition before the listener was there to trace it.
         final Uri startUri = currentMediaUri();
+        trackSelectionMediaUri = startUri == null ? null : startUri.toString();
         if (startUri != null) {
             Utils.log("media=" + Utils.reportUri(startUri, mPrefs.maskReports));
         }
@@ -14096,6 +14138,16 @@ public class PlayerActivity extends Activity {
             // A retry's PLAYLIST_CHANGED must retain its guard; an actual next/reselected item may try again.
             final String audioMediaKey = mediaItem != null && mediaItem.localConfiguration != null
                     ? mediaItem.localConfiguration.uri.toString() : null;
+            if (trackSelectionMediaUri != null && !java.util.Objects.equals(trackSelectionMediaUri, audioMediaKey)
+                    && reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
+                // Track IDs and overrides belong to a file. Language/studio preferences and the
+                // nested playlist's guarded per-item choices will select the next file afresh.
+                mPrefs.audioTrackId = null;
+                mPrefs.subtitleTrackId = null;
+                if (trackSelector != null) trackSelector.setParameters(trackSelector.buildUponParameters()
+                        .clearOverridesOfType(C.TRACK_TYPE_AUDIO).clearOverridesOfType(C.TRACK_TYPE_TEXT));
+            }
+            trackSelectionMediaUri = audioMediaKey;
             if (tunnelingAudioRecovery.moveTo(audioMediaKey,
                     reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED)) {
                 if (trackSelector != null) trackSelector.setParameters(trackSelector.buildUponParameters()

@@ -376,9 +376,18 @@ final class PlaylistApi {
     private static Map<String, String> headers(Object raw) {
         Map<String, String> result = new LinkedHashMap<>();
         List<String> pairs = strings(raw);
-        if (pairs != null) for (int i = 0; i + 1 < pairs.size(); i += 2) {
-            String name = pairs.get(i), value = pairs.get(i + 1);
-            if (name != null && value != null) result.put(name.toLowerCase(java.util.Locale.ROOT), value);
+        if (pairs != null) for (int i = 0; i < pairs.size();) {
+            String name = pairs.get(i++), value;
+            if (name != null && name.indexOf(':') >= 0) {
+                int colon = name.indexOf(':');
+                value = name.substring(colon + 1).trim();
+                name = name.substring(0, colon).trim();
+            } else {
+                if (i >= pairs.size()) break;
+                value = pairs.get(i++);
+            }
+            if (name != null && value != null && !name.trim().isEmpty())
+                result.put(name.trim().toLowerCase(java.util.Locale.ROOT), value);
         }
         return result;
     }

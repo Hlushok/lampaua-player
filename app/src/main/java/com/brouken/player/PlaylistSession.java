@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
+import java.security.MessageDigest;
 
 /** Launch-scoped progress journal, deliberately separate from the player's resume database. */
 final class PlaylistSession {
@@ -36,6 +37,7 @@ final class PlaylistSession {
     long resumePendingMs;
     boolean resumePendingInitial;
     String uri;
+    private String lastReportDigest;
 
     PlaylistSession(Context context, PlaylistApi request, Intent launch) {
         this.context = context.getApplicationContext();
@@ -89,6 +91,7 @@ final class PlaylistSession {
     private void openVisit(int value) {
         Bundle visit = new Bundle();
         visit.putInt("index", value); visit.putLong("started_at", System.currentTimeMillis() / 1000);
+        visit.putLong("ended_at", visit.getLong("started_at"));
         putTime(visit, "position", Math.max(0, positionsMs[value]));
         putTime(visit, "duration", durationsMs[value]);
         history.add(visit);
@@ -99,6 +102,10 @@ final class PlaylistSession {
     private void updateVisit() {
         if (history.isEmpty() || visitIndex < 0) return;
         Bundle visit = history.get(history.size() - 1);
+        if (visit.getLong("position_ms", -1) != positionsMs[visitIndex]
+                || visit.getLong("duration_ms", -1) != durationsMs[visitIndex]) {
+            visit.putLong("ended_at", System.currentTimeMillis() / 1000);
+        }
         putTime(visit, "position", positionsMs[visitIndex]);
         putTime(visit, "duration", durationsMs[visitIndex]);
     }
@@ -137,7 +144,26 @@ final class PlaylistSession {
                 .putExtra("uri", (String) null).putExtra("end_by", "error").putExtra("error_message", message);
     }
 
-    void report() { persist(); send(context, request.callback, result(context.getPackageName())); }
+    void report() { report(false); }
+
+    void report(boolean interval) {
+        Intent snapshot = result(context.getPackageName());
+        if (interval && played && error == null && !complete) snapshot.putExtra("end_by", "interval");
+        String digest = reportDigest(snapshot);
+        if (request.callback != null && !java.util.Objects.equals(lastReportDigest, digest)
+                && send(context, request.callback, snapshot)) lastReportDigest = digest;
+        persist();
+    }
+
+    private static String reportDigest(Intent snapshot) {
+        Parcel parcel = Parcel.obtain();
+        try {
+            parcel.writeBundle(snapshot.getExtras());
+            return Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest(parcel.marshall()), Base64.NO_WRAP);
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new AssertionError(impossible);
+        } finally { parcel.recycle(); }
+    }
 
     void pendingResume(int itemIndex, long positionMs, boolean initial) {
         resumePendingIndex = itemIndex;
@@ -153,11 +179,11 @@ final class PlaylistSession {
         persist();
     }
 
-    static void send(Context context, PendingIntent callback, Intent result) {
-        if (callback == null) return;
+    static boolean send(Context context, PendingIntent callback, Intent result) {
+        if (callback == null) return false;
         // PendingIntent fills only missing fields; caller extras and identity remain authoritative.
-        try { callback.send(context, 0, result); }
-        catch (PendingIntent.CanceledException ignored) { Utils.log("playlist callback cancelled"); }
+        try { callback.send(context, 0, result); return true; }
+        catch (PendingIntent.CanceledException ignored) { Utils.log("playlist callback cancelled"); return false; }
     }
 
     PlaylistApi.Keys cached(String prefix) { return readKeys(choices[index].getBundle(prefix + "_keys")); }
@@ -193,7 +219,7 @@ final class PlaylistSession {
             }
             choice.putInt(prefix + "_language_ordinal", reportedOrdinal);
             choice.putInt(prefix + "_language_count", reportedCount);
-            choice.remove(prefix + "_index");
+            choice.putInt(prefix + "_index", track.index);
         } else {
             keys.off = true; keys.index = -1;
             choice.remove(prefix + "_language_ordinal"); choice.remove(prefix + "_language_count");
@@ -252,6 +278,7 @@ final class PlaylistSession {
     void persist() {
         Bundle state = new Bundle();
         state.putInt("index", index); state.putString("uri", uri); state.putString("error", error);
+        state.putString("lastReportDigest", lastReportDigest);
         state.putStringArray("sourceUris", sourceUris); state.putInt("qualityLines", qualityLines);
         state.putLong("positionMs", positionMs); state.putLong("durationMs", durationMs);
         // Keep second-based projections readable by older installed builds as well.
@@ -297,6 +324,7 @@ final class PlaylistSession {
             System.arraycopy(lengths, 0, durationsMs, 0, lengths.length);
             index = Math.max(0, Math.min(positionsMs.length - 1, state.getInt("index")));
             uri = state.getString("uri"); error = state.getString("error");
+            lastReportDigest = state.getString("lastReportDigest");
             String[] sources = state.getStringArray("sourceUris");
             if (sources != null && sources.length == sourceUris.length) System.arraycopy(sources, 0, sourceUris, 0, sources.length);
             qualityLines = state.getInt("qualityLines");
