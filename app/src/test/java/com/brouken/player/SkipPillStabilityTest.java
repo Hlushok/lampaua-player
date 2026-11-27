@@ -84,4 +84,21 @@ public class SkipPillStabilityTest {
             assertEquals("SKIP", ReflectionHelpers.getField(activity, "skipPill").toString());
         }
     }
+
+    @Test public void aSecondSkipGetsItsOwnUndoDeadlineWithoutAnOldTimerHidingIt() {
+        try (ActivityController<Screen> controller = screen()) {
+            Screen activity = controller.get(); prepare(activity, Prefs.SKIP_MODE_AUTO, 12_000);
+            activity.mPrefs.skipUndo = Prefs.SKIP_UNDO_ALL;
+            ReflectionHelpers.setField(activity, "skipUndoFromMs", 12_000L);
+            ReflectionHelpers.setField(activity, "skipUndoToMs", 20_000L);
+            ReflectionHelpers.callInstanceMethod(activity, "showSkipNotification",
+                    ReflectionHelpers.ClassParameter.from(boolean.class, true));
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(2, TimeUnit.SECONDS);
+            ReflectionHelpers.callInstanceMethod(activity, "showSkipNotification",
+                    ReflectionHelpers.ClassParameter.from(boolean.class, true));
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(2, TimeUnit.SECONDS);
+            assertEquals(View.VISIBLE, activity.buttonSkip.getVisibility());
+            assertEquals("UNDO", ReflectionHelpers.getField(activity, "skipPill").toString());
+        }
+    }
 }

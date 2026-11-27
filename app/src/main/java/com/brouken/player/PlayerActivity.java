@@ -5913,6 +5913,7 @@ public class PlayerActivity extends Activity {
         skipBriefFlashedUntilMs = segment.endMs();
         skipFlashEndMs = SystemClock.uptimeMillis() + SKIP_NOTICE_MS;
         pillRemaining = 1f;
+        playerView.removeCallbacks(skipPillHider);
         showSkipPill(SkipPill.SKIP, getString(R.string.button_skip), true, true);
         playerView.postDelayed(skipPillHider, SKIP_NOTICE_MS);
     }
@@ -6000,6 +6001,7 @@ public class PlayerActivity extends Activity {
         }
         skipNoticeHideAtMs = SystemClock.uptimeMillis() + SKIP_NOTICE_MS;
         pillRemaining = 1f;
+        playerView.removeCallbacks(skipPillHider);
         showSkipPill(SkipPill.UNDO, getString(R.string.notification_skipped_back), true, true);
         playerView.postDelayed(skipPillHider, SKIP_NOTICE_MS);
     }
