@@ -3364,7 +3364,9 @@ public class PlayerActivity extends Activity {
         restorePlayStateAllowed = false;
         // Nothing to arrange for Back any more: the shell started this activity and is still under it,
         // so finishing lands on the folder the file came from by itself.
-        super.onBackPressed();
+        // Always use our reporting exit. A platform/compat Back path can finish through
+        // another Activity overload and skip the result assembled by finish().
+        finish();
     }
 
     /**
