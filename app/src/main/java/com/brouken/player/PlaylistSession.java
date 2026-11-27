@@ -156,13 +156,33 @@ final class PlaylistSession {
     }
 
     private static String reportDigest(Intent snapshot) {
-        Parcel parcel = Parcel.obtain();
+        StringBuilder canonical = new StringBuilder();
+        appendReportValue(canonical, snapshot.getExtras());
         try {
-            parcel.writeBundle(snapshot.getExtras());
-            return Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest(parcel.marshall()), Base64.NO_WRAP);
+            return Base64.encodeToString(MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)), Base64.NO_WRAP);
         } catch (java.security.NoSuchAlgorithmException impossible) {
             throw new AssertionError(impossible);
-        } finally { parcel.recycle(); }
+        }
+    }
+
+    private static void appendReportValue(StringBuilder out, Object value) {
+        if (value == null) { out.append("null;"); return; }
+        if (value instanceof Bundle) {
+            out.append('{'); Bundle bundle = (Bundle) value;
+            for (String key : new java.util.TreeSet<>(bundle.keySet())) {
+                appendReportValue(out, key); appendReportValue(out, bundle.get(key));
+            }
+            out.append('}');
+        } else if (value.getClass().isArray()) {
+            out.append('[');
+            for (int i = 0; i < java.lang.reflect.Array.getLength(value); i++)
+                appendReportValue(out, java.lang.reflect.Array.get(value, i));
+            out.append(']');
+        } else {
+            String text = value.toString();
+            out.append(value.getClass().getName()).append(':').append(text.length()).append(':').append(text).append(';');
+        }
     }
 
     void pendingResume(int itemIndex, long positionMs, boolean initial) {

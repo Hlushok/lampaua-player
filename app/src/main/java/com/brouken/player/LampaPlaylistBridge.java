@@ -24,6 +24,7 @@ final class LampaPlaylistBridge {
     static final String EXTRA_CURRENT_URL = "lampaua.current_url";
     static final String EXTRA_PLAYBACK_RESULTS = "lampaua.playback_results";
     static final String EXTRA_SERIES_TITLE = "lampaua.series_title";
+    static final String EXTRA_LEGACY_RESULT = "com.lampaua.player.legacy_json_result";
 
     private LampaPlaylistBridge() {
     }
@@ -128,10 +129,53 @@ final class LampaPlaylistBridge {
                     intent.putExtra(PlayerActivity.API_TITLE, seriesTitle);
                 }
             }
+            Bundle playlist = new Bundle();
+            String title = seriesTitle != null ? seriesTitle : intent.getStringExtra(PlayerActivity.API_TITLE);
+            if (title != null) playlist.putString("title", title);
+            playlist.putInt("start_index", normalizedIndex);
+            playlist.putStringArray("headers", intent.getStringArrayExtra(PlayerActivity.API_HEADERS));
+            playlist.putBoolean("ask_resume", false);
+            Bundle[] nested = new Bundle[size];
+            for (int i = 0; i < size; i++) nested[i] = items.get(i).playlistItem();
+            // The old transport carries the selected position as a flat extra too.
+            if (!current.hasPosition && intent.hasExtra(PlayerActivity.API_POSITION)) {
+                Long position = PlaylistApi.millisNumber(intent.getExtras().get(PlayerActivity.API_POSITION));
+                if (position != null) nested[normalizedIndex].putLong("position_ms", Math.max(0, position));
+            }
+            playlist.putParcelableArray("items", nested);
+            intent.putExtra(PlaylistApi.EXTRA, playlist);
+            intent.putExtra(EXTRA_LEGACY_RESULT, true);
             return true;
         } catch (Exception ignored) {
             return false;
         }
+    }
+
+    /** Adapt the core's actual visit journal for installed LampaUA versions on the JSON contract. */
+    static Intent legacyResult(PlaylistSession session, Intent core) {
+        JSONArray results = new JSONArray();
+        java.util.LinkedHashSet<Integer> visited = new java.util.LinkedHashSet<>();
+        for (Bundle visit : session.history) {
+            int index = visit.getInt("index", -1);
+            if (index >= 0 && index < session.positionsMs.length) { visited.remove(index); visited.add(index); }
+        }
+        if (session.positionsMs[session.index] >= 0) { visited.remove(session.index); visited.add(session.index); }
+        String current = null;
+        for (int index : visited) {
+            if (session.positionsMs[index] < 0) continue;
+            String uri = session.request.items.get(index).currentSource().uri;
+            try {
+                results.put(new JSONObject().put("url", uri).put("index", index)
+                        .put("position", session.positionsMs[index])
+                        .put("duration", Math.max(0, session.durationsMs[index]))
+                        .put("ended", session.durationsMs[index] > 0
+                                && session.positionsMs[index] >= session.durationsMs[index]));
+                current = uri;
+            } catch (org.json.JSONException impossible) { throw new IllegalStateException(impossible); }
+        }
+        core.putExtra(EXTRA_PLAYBACK_RESULTS, results.toString());
+        if (current != null) core.putExtra(EXTRA_CURRENT_URL, current);
+        return core;
     }
 
     private static void putCurrentItemExtras(final Intent intent, final Item item) {
@@ -174,6 +218,7 @@ final class LampaPlaylistBridge {
         final String imdbId;
         final String tmdbId;
         final long positionMs;
+        boolean hasPosition;
         final String[] headers;
         final String[] qualityLabels;
         final String[] qualityUrls;
@@ -239,7 +284,7 @@ final class LampaPlaylistBridge {
                 }
             }
 
-            return new Item(url,
+            Item item = new Item(url,
                     firstText(json, "title", "name"),
                     firstText(json, "filename", "file_name"),
                     firstText(json, "thumbnail", "poster", "image"),
@@ -253,6 +298,36 @@ final class LampaPlaylistBridge {
                     qualityValues[0], qualityValues[1],
                     subtitleUris.toArray(new Uri[0]), subtitleNames.toArray(new String[0]),
                     subtitleLanguages.toArray(new String[0]));
+            item.hasPosition = json.has("position_ms") || json.has("position");
+            return item;
+        }
+
+        Bundle playlistItem() {
+            Bundle item = new Bundle();
+            item.putString("uri", url); item.putString("episode_title", title);
+            item.putString("thumbnail", thumbnail); item.putString("segments", segments);
+            item.putString("imdb_id", imdbId); item.putString("tmdb_id", tmdbId);
+            if (season > 0) item.putInt("season", season);
+            if (episode > 0) item.putInt("episode", episode);
+            if (hasPosition) item.putLong("position_ms", positionMs);
+            item.putStringArray("headers", headers);
+            if (qualityUrls.length > 0) {
+                Bundle[] values = new Bundle[qualityUrls.length];
+                for (int i = 0; i < values.length; i++) {
+                    values[i] = new Bundle(); values[i].putString("uri", qualityUrls[i]);
+                    values[i].putString("label", qualityLabels[i]);
+                }
+                item.putParcelableArray("qualities", values);
+            }
+            if (subtitleUris.length > 0) {
+                Bundle[] values = new Bundle[subtitleUris.length];
+                for (int i = 0; i < values.length; i++) {
+                    values[i] = new Bundle(); values[i].putString("uri", subtitleUris[i].toString());
+                    values[i].putString("label", subtitleNames[i]); values[i].putString("language", subtitleLanguages[i]);
+                }
+                item.putParcelableArray("subtitles", values);
+            }
+            return item;
         }
 
         Bundle subtitleBundle() {

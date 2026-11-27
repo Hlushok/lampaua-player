@@ -3380,7 +3380,10 @@ public class PlayerActivity extends Activity {
         if (playlistSession != null) {
             capturePlaylistProgress();
             playlistSession.complete = playbackFinished;
-            setResult(Activity.RESULT_OK, playlistSession.result(getPackageName()));
+            Intent result = playlistSession.result(getPackageName());
+            if (getIntent().getBooleanExtra(LampaPlaylistBridge.EXTRA_LEGACY_RESULT, false))
+                result = LampaPlaylistBridge.legacyResult(playlistSession, result);
+            setResult(Activity.RESULT_OK, result);
             if (!isChangingConfigurations()) playlistSession.report();
         } else if (rejectedPlaylistResult != null) {
             setResult(Activity.RESULT_OK, rejectedPlaylistResult);
@@ -3432,6 +3435,7 @@ public class PlayerActivity extends Activity {
     // activity, and its extras have to replace the previous ones instead of being ignored.
     void handleViewIntent(Intent intent) {
         cancelM3uImport();
+        LampaPlaylistBridge.normalize(intent);
         if (intent.hasExtra(PlaylistApi.EXTRA)) {
             openNestedPlaylist(intent);
             return;
@@ -3440,7 +3444,6 @@ public class PlayerActivity extends Activity {
             beginM3uImport(intent);
             return;
         }
-        LampaPlaylistBridge.normalize(intent);
         resetApiAccess();
         final Uri uri = intent.getData();
         final String type = intent.getType();
@@ -3513,7 +3516,8 @@ public class PlayerActivity extends Activity {
                 intentReturnResult = bundle.getBoolean(API_RETURN_RESULT);
 
                 if (bundle.containsKey(API_POSITION)) {
-                    mPrefs.updatePosition((long) bundle.getInt(API_POSITION));
+                    Long position = PlaylistApi.millisNumber(bundle.get(API_POSITION));
+                    if (position != null) mPrefs.updatePosition(Math.max(0, position));
                 }
             }
         }

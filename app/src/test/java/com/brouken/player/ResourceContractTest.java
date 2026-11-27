@@ -39,7 +39,7 @@ public class ResourceContractTest {
         assertTrue(strings.contains("name=\"about_github_url\" translatable=\"false\">https://github.com/Hlushok/lampaua-player"));
         assertFalse(strings.contains(">@levende</string>"));
         assertTrue(updater.contains("Hlushok/lampaua-player/releases"));
-        assertTrue(updater.contains("ua-player-update.apk"));
+        assertTrue(updater.contains("\"ua-player-\" + info.sha256.substring"));
     }
 
     @Test
