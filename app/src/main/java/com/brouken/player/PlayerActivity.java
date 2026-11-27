@@ -273,6 +273,17 @@ public class PlayerActivity extends Activity {
     private volatile java.util.Set<String> externalSubtitleSources = Collections.emptySet();
     private String trackSelectionMediaUri;
 
+    void resetTrackSelectionForItem(String uri, int reason) {
+        if (trackSelectionMediaUri != null && !java.util.Objects.equals(trackSelectionMediaUri, uri)
+                && reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
+            mPrefs.audioTrackId = null;
+            mPrefs.subtitleTrackId = null;
+            if (trackSelector != null) trackSelector.setParameters(trackSelector.buildUponParameters()
+                    .clearOverridesOfType(C.TRACK_TYPE_AUDIO).clearOverridesOfType(C.TRACK_TYPE_TEXT));
+        }
+        trackSelectionMediaUri = uri;
+    }
+
     private boolean isExternalSubtitleSource(Uri uri) {
         String path = uri == null ? null : uri.getPath();
         return uri != null && (externalSubtitleSources.contains(uri.toString())
@@ -14142,16 +14153,8 @@ public class PlayerActivity extends Activity {
             // A retry's PLAYLIST_CHANGED must retain its guard; an actual next/reselected item may try again.
             final String audioMediaKey = mediaItem != null && mediaItem.localConfiguration != null
                     ? mediaItem.localConfiguration.uri.toString() : null;
-            if (trackSelectionMediaUri != null && !java.util.Objects.equals(trackSelectionMediaUri, audioMediaKey)
-                    && reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
-                // Track IDs and overrides belong to a file. Language/studio preferences and the
-                // nested playlist's guarded per-item choices will select the next file afresh.
-                mPrefs.audioTrackId = null;
-                mPrefs.subtitleTrackId = null;
-                if (trackSelector != null) trackSelector.setParameters(trackSelector.buildUponParameters()
-                        .clearOverridesOfType(C.TRACK_TYPE_AUDIO).clearOverridesOfType(C.TRACK_TYPE_TEXT));
-            }
-            trackSelectionMediaUri = audioMediaKey;
+            // Track IDs and overrides belong to a file, unlike language/studio preferences.
+            resetTrackSelectionForItem(audioMediaKey, reason);
             if (tunnelingAudioRecovery.moveTo(audioMediaKey,
                     reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED)) {
                 if (trackSelector != null) trackSelector.setParameters(trackSelector.buildUponParameters()
